@@ -1,11 +1,12 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { supabase } from './supabaseClient';
 import {
   Home, Sparkles, Plus, BarChart3, Settings, TrendingUp, PiggyBank, HeartPulse,
   ShoppingBag, Utensils, Fuel, ArrowLeft, Download, Music, Megaphone, Car, Coffee,
-  Wallet, Landmark, Smartphone, HeartPulse as HealthIcon, GraduationCap, Gift, Briefcase, X, Check,
+  Wallet, Landmark, Smartphone, X, Check, Loader2,
 } from 'lucide-react';
 
-/* ---------- Mock data (đúng schema Accounts/Categories/Transactions/Funds/Goals) ---------- */
+/* ---------- Dữ liệu tĩnh còn giữ tạm cho Report/Goals (sẽ nối Supabase sau) ---------- */
 
 const pinnedItems = [
   { id: 1, name: 'Đầu tư', amount: '10.242.000đ', change: '+12%', icon: TrendingUp, color: 'from-emerald-400 to-emerald-600' },
@@ -13,30 +14,7 @@ const pinnedItems = [
   { id: 3, name: 'Khẩn cấp', amount: '3.500.000đ', icon: HeartPulse, color: 'from-red-400 to-red-600' },
 ];
 
-// Accounts (Tài khoản/Ví) — bảng Accounts trong schema
-const accounts = [
-  { id: 'a1', name: 'Tiền mặt', icon: Wallet },
-  { id: 'a2', name: 'Viettin', icon: Landmark },
-  { id: 'a3', name: 'Momo', icon: Smartphone },
-  { id: 'a4', name: 'BIDV', icon: Landmark },
-];
-
-// Categories (Danh mục) — bảng Categories trong schema, tách theo income/expense
-const expenseCategories = [
-  { id: 'c1', name: 'Mua sắm', icon: ShoppingBag, color: '#7c3aed' },
-  { id: 'c2', name: 'Sức khỏe', icon: HealthIcon, color: '#a78bfa' },
-  { id: 'c3', name: 'Ăn uống', icon: Utensils, color: '#c4b5fd' },
-  { id: 'c4', name: 'Xăng xe', icon: Fuel, color: '#ddd6fe' },
-  { id: 'c5', name: 'Học tập', icon: GraduationCap, color: '#ede9fe' },
-];
-
-const incomeCategories = [
-  { id: 'i1', name: 'Lương', icon: Briefcase, color: '#10b981' },
-  { id: 'i2', name: 'Thưởng', icon: Gift, color: '#34d399' },
-  { id: 'i3', name: 'Đầu tư', icon: TrendingUp, color: '#6ee7b7' },
-];
-
-const categories = [
+const categoryColors = [
   { name: 'Mua sắm', amount: 3320000, color: '#7c3aed' },
   { name: 'Sức khỏe', amount: 2300000, color: '#a78bfa' },
   { name: 'Đầu tư', amount: 2000000, color: '#c4b5fd' },
@@ -44,17 +22,10 @@ const categories = [
   { name: 'Từ thiện', amount: 1400000, color: '#ede9fe' },
 ];
 
-const initialTransactions = [
-  { id: 1, title: 'Ăn trưa với Mike', subtitle: 'Big Mac, gà rán', amount: 75000, icon: Utensils },
-  { id: 2, title: 'Đổ xăng', subtitle: 'Cây xăng gần nhà', amount: 50000, icon: Fuel },
-  { id: 3, title: 'Mua sắm online', subtitle: 'Shopee', amount: 320000, icon: ShoppingBag },
-];
-
 const reportTransactions = [
   { id: 1, title: 'Spotify Family Plan', subtitle: 'Gói nhạc hàng tháng', amount: 129000, icon: Music },
   { id: 2, title: 'Quảng cáo Instagram', subtitle: 'Chạy ads cửa hàng', amount: 620000, icon: Megaphone },
   { id: 3, title: 'Đổ xăng', subtitle: 'Grab Bike nạp xăng', amount: 80000, icon: Car },
-  { id: 4, title: 'Ăn trưa với Mike', subtitle: 'Big Mac, gà rán', amount: 75000, icon: Utensils },
 ];
 
 const goals = [
@@ -70,6 +41,16 @@ const budgetLimits = [
 
 const monthlyLimit = 5000000;
 const monthlySpent = 3420000;
+
+// Map icon emoji lưu trong Supabase -> icon component hiển thị
+const iconMap = {
+  '💵': Wallet, '🏦': Landmark, '📱': Smartphone,
+  '🍜': Utensils, '🛍️': ShoppingBag, '⛽': Fuel, '❤️': HeartPulse,
+  '💼': Coffee, '🎁': PiggyBank,
+};
+function getIcon(emoji) {
+  return iconMap[emoji] || ShoppingBag;
+}
 
 function formatMoney(n) {
   return Math.abs(n).toLocaleString('vi-VN') + 'đ';
@@ -98,7 +79,6 @@ function Gauge({ limit, spent }) {
         stroke={filled ? '#7c3aed' : '#ede9fe'} strokeWidth="4" strokeLinecap="round" />
     );
   }
-
   const labelAngle = (filledTicks / ticks) * 360 - 90;
   const labelRad = (labelAngle * Math.PI) / 180;
   const labelX = center + (radius + 24) * Math.cos(labelRad);
@@ -128,8 +108,6 @@ function ProgressBar({ pct, colorClass = 'bg-violet-600' }) {
   );
 }
 
-/* ---------- Thanh điều hướng dưới cùng ---------- */
-
 function BottomNav({ screen, setScreen }) {
   return (
     <div className="fixed bottom-4 left-1/2 -translate-x-1/2 w-[calc(100%-2.5rem)] max-w-sm bg-white rounded-full shadow-xl shadow-black/10 px-6 py-3 flex items-center justify-between z-10">
@@ -150,10 +128,10 @@ function BottomNav({ screen, setScreen }) {
   );
 }
 
-/* ---------- Màn Dashboard ---------- */
+/* ---------- Màn Dashboard (dữ liệu THẬT từ Supabase) ---------- */
 
-function Dashboard({ setScreen, transactions }) {
-  const total = categories.reduce((s, c) => s + c.amount, 0);
+function Dashboard({ setScreen, transactions, categories, loading }) {
+  const total = categoryColors.reduce((s, c) => s + c.amount, 0);
   let cumulative = 0;
   const radius = 60;
   const circumference = 2 * Math.PI * radius;
@@ -193,7 +171,7 @@ function Dashboard({ setScreen, transactions }) {
 
           <div className="flex items-center gap-6">
             <svg width="150" height="150" viewBox="0 0 150 150" className="-rotate-90 flex-shrink-0">
-              {categories.map((cat) => {
+              {categoryColors.map((cat) => {
                 const pct = cat.amount / total;
                 const dash = pct * circumference;
                 const offset = cumulative;
@@ -206,7 +184,7 @@ function Dashboard({ setScreen, transactions }) {
               })}
             </svg>
             <div className="flex flex-col gap-2 text-sm min-w-0">
-              {categories.map((cat) => (
+              {categoryColors.map((cat) => (
                 <div key={cat.name} className="flex items-center gap-2">
                   <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: cat.color }} />
                   <span className="text-gray-600">{cat.name}</span>
@@ -218,28 +196,37 @@ function Dashboard({ setScreen, transactions }) {
 
           <div className="flex items-center justify-between mt-8 mb-3">
             <h2 className="text-gray-900 font-semibold text-lg">Giao dịch</h2>
-            <button className="text-violet-600 text-sm font-medium">Xem tất cả</button>
+            <span className="text-gray-400 text-xs">Dữ liệu thật từ Supabase</span>
           </div>
 
-          <div className="flex flex-col divide-y divide-gray-100">
-            {transactions.map((tx) => {
-              const Icon = tx.icon;
-              return (
-                <div key={tx.id} className="flex items-center gap-3 py-3">
-                  <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${tx.type === 'income' ? 'bg-emerald-50' : 'bg-violet-50'}`}>
-                    <Icon size={18} className={tx.type === 'income' ? 'text-emerald-600' : 'text-violet-600'} />
+          {loading ? (
+            <div className="flex justify-center py-8">
+              <Loader2 size={24} className="animate-spin text-violet-400" />
+            </div>
+          ) : transactions.length === 0 ? (
+            <p className="text-gray-400 text-sm text-center py-8">Chưa có giao dịch nào. Bấm nút + để thêm.</p>
+          ) : (
+            <div className="flex flex-col divide-y divide-gray-100">
+              {transactions.map((tx) => {
+                const cat = categories.find((c) => c.id === tx.category_id);
+                const Icon = getIcon(cat?.icon);
+                return (
+                  <div key={tx.id} className="flex items-center gap-3 py-3">
+                    <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${tx.type === 'income' ? 'bg-emerald-50' : 'bg-violet-50'}`}>
+                      <Icon size={18} className={tx.type === 'income' ? 'text-emerald-600' : 'text-violet-600'} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-gray-900 font-medium text-sm">{cat?.name || 'Khác'}</p>
+                      <p className="text-gray-400 text-xs">{tx.note || '—'}</p>
+                    </div>
+                    <p className={`font-medium text-sm flex-shrink-0 ${tx.type === 'income' ? 'text-emerald-600' : 'text-gray-900'}`}>
+                      {tx.type === 'income' ? '+' : '-'}{formatMoney(tx.amount)}
+                    </p>
                   </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-gray-900 font-medium text-sm">{tx.title}</p>
-                    <p className="text-gray-400 text-xs">{tx.subtitle}</p>
-                  </div>
-                  <p className={`font-medium text-sm flex-shrink-0 ${tx.type === 'income' ? 'text-emerald-600' : 'text-gray-900'}`}>
-                    {tx.type === 'income' ? '+' : '-'}{formatMoney(tx.amount)}
-                  </p>
-                </div>
-              );
-            })}
-          </div>
+                );
+              })}
+            </div>
+          )}
         </div>
 
         <BottomNav screen="dashboard" setScreen={setScreen} />
@@ -278,7 +265,6 @@ function Report({ setScreen }) {
 
         <div className="mt-6 bg-white rounded-t-[2.5rem] min-h-[45vh] px-5 pt-6 pb-6">
           <h2 className="text-gray-900 font-semibold text-lg mb-3">Tài chính</h2>
-
           <div className="flex gap-2 overflow-x-auto pb-1">
             {periods.map((p) => (
               <button key={p} onClick={() => setPeriod(p)}
@@ -289,7 +275,6 @@ function Report({ setScreen }) {
               </button>
             ))}
           </div>
-
           <div className="flex flex-col divide-y divide-gray-100 mt-4">
             {reportTransactions.map((tx) => {
               const Icon = tx.icon;
@@ -335,7 +320,6 @@ function Goals({ setScreen }) {
               <Plus size={16} className="text-gray-600" />
             </button>
           </div>
-
           <div className="flex flex-col gap-5">
             {goals.map((goal) => {
               const Icon = goal.icon;
@@ -349,12 +333,8 @@ function Goals({ setScreen }) {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
                         <p className="text-gray-900 font-medium text-sm">{goal.name}</p>
-                        {goal.tag && (
-                          <span className="text-[11px] bg-violet-50 text-violet-600 px-2 py-0.5 rounded-full font-medium">{goal.tag}</span>
-                        )}
-                        {goal.change && (
-                          <span className="text-emerald-600 text-xs font-medium">{goal.change} ↗</span>
-                        )}
+                        {goal.tag && <span className="text-[11px] bg-violet-50 text-violet-600 px-2 py-0.5 rounded-full font-medium">{goal.tag}</span>}
+                        {goal.change && <span className="text-emerald-600 text-xs font-medium">{goal.change} ↗</span>}
                       </div>
                       <p className="text-gray-900 font-semibold text-sm">{formatMoney(goal.current)}</p>
                     </div>
@@ -375,7 +355,6 @@ function Goals({ setScreen }) {
               <Plus size={16} className="text-gray-600" />
             </button>
           </div>
-
           <div className="flex flex-col gap-5">
             {budgetLimits.map((b) => {
               const Icon = b.icon;
@@ -409,23 +388,28 @@ function Goals({ setScreen }) {
   );
 }
 
-/* ---------- Màn Thêm giao dịch ---------- */
+/* ---------- Màn Thêm giao dịch (ghi THẬT vào Supabase) ---------- */
 
-function AddTransaction({ setScreen, onAdd }) {
-  const [type, setType] = useState('expense'); // 'expense' | 'income'
+function AddTransaction({ setScreen, accounts, categories, onSaved }) {
+  const [type, setType] = useState('expense');
   const [amount, setAmount] = useState('');
   const [selectedCategory, setSelectedCategory] = useState(null);
-  const [selectedAccount, setSelectedAccount] = useState(accounts[0].id);
+  const [selectedAccount, setSelectedAccount] = useState(null);
   const [note, setNote] = useState('');
+  const [saving, setSaving] = useState(false);
 
-  const categoryList = type === 'expense' ? expenseCategories : incomeCategories;
+  useEffect(() => {
+    if (accounts.length > 0 && !selectedAccount) setSelectedAccount(accounts[0].id);
+  }, [accounts]);
+
+  const categoryList = categories.filter((c) => c.type === type);
 
   function handleAmountChange(e) {
     const raw = e.target.value.replace(/\D/g, '');
     setAmount(raw);
   }
 
-  function handleSave() {
+  async function handleSave() {
     if (!amount || Number(amount) === 0) {
       alert('Vui lòng nhập số tiền');
       return;
@@ -434,22 +418,26 @@ function AddTransaction({ setScreen, onAdd }) {
       alert('Vui lòng chọn danh mục');
       return;
     }
-    const cat = categoryList.find((c) => c.id === selectedCategory);
-    onAdd({
-      id: Date.now(),
-      title: cat.name,
-      subtitle: note || accounts.find((a) => a.id === selectedAccount)?.name,
-      amount: Number(amount),
-      icon: cat.icon,
+    setSaving(true);
+    const { error } = await supabase.from('transactions').insert({
+      account_id: selectedAccount,
+      category_id: selectedCategory,
       type,
+      amount: Number(amount),
+      note: note || null,
     });
+    setSaving(false);
+    if (error) {
+      alert('Lỗi khi lưu: ' + error.message);
+      return;
+    }
+    onSaved();
     setScreen('dashboard');
   }
 
   return (
     <div className="min-h-screen bg-white flex justify-center">
       <div className="w-full max-w-sm min-h-screen pb-10 relative">
-        {/* Header */}
         <div className="px-5 pt-8 flex items-center justify-between">
           <button onClick={() => setScreen('dashboard')} className="w-9 h-9 rounded-full bg-gray-100 flex items-center justify-center">
             <X size={18} className="text-gray-700" />
@@ -458,87 +446,62 @@ function AddTransaction({ setScreen, onAdd }) {
           <div className="w-9 h-9" />
         </div>
 
-        {/* Type toggle */}
         <div className="px-5 mt-6">
           <div className="flex bg-gray-100 rounded-full p-1">
-            <button
-              onClick={() => { setType('expense'); setSelectedCategory(null); }}
-              className={`flex-1 py-2 rounded-full text-sm font-medium transition ${
-                type === 'expense' ? 'bg-white text-gray-900 shadow' : 'text-gray-400'
-              }`}>
+            <button onClick={() => { setType('expense'); setSelectedCategory(null); }}
+              className={`flex-1 py-2 rounded-full text-sm font-medium transition ${type === 'expense' ? 'bg-white text-gray-900 shadow' : 'text-gray-400'}`}>
               Chi tiêu
             </button>
-            <button
-              onClick={() => { setType('income'); setSelectedCategory(null); }}
-              className={`flex-1 py-2 rounded-full text-sm font-medium transition ${
-                type === 'income' ? 'bg-white text-gray-900 shadow' : 'text-gray-400'
-              }`}>
+            <button onClick={() => { setType('income'); setSelectedCategory(null); }}
+              className={`flex-1 py-2 rounded-full text-sm font-medium transition ${type === 'income' ? 'bg-white text-gray-900 shadow' : 'text-gray-400'}`}>
               Thu nhập
             </button>
           </div>
         </div>
 
-        {/* Amount */}
         <div className="px-5 mt-8 text-center">
           <p className="text-gray-400 text-sm mb-1">Số tiền</p>
           <div className="flex items-center justify-center gap-1">
-            <input
-              type="text"
-              inputMode="numeric"
+            <input type="text" inputMode="numeric"
               value={amount ? Number(amount).toLocaleString('vi-VN') : ''}
-              onChange={handleAmountChange}
-              placeholder="0"
-              className={`text-4xl font-bold text-center bg-transparent outline-none w-full ${
-                type === 'income' ? 'text-emerald-600' : 'text-gray-900'
-              }`}
-            />
+              onChange={handleAmountChange} placeholder="0"
+              className={`text-4xl font-bold text-center bg-transparent outline-none w-full ${type === 'income' ? 'text-emerald-600' : 'text-gray-900'}`} />
             <span className="text-4xl font-bold text-gray-300">đ</span>
           </div>
         </div>
 
-        {/* Category */}
         <div className="px-5 mt-8">
           <p className="text-gray-900 font-semibold text-sm mb-3">Danh mục</p>
-          <div className="grid grid-cols-4 gap-3">
-            {categoryList.map((cat) => {
-              const Icon = cat.icon;
-              const active = selectedCategory === cat.id;
-              return (
-                <button
-                  key={cat.id}
-                  onClick={() => setSelectedCategory(cat.id)}
-                  className="flex flex-col items-center gap-1.5"
-                >
-                  <div
-                    className="w-12 h-12 rounded-2xl flex items-center justify-center transition"
-                    style={{
-                      background: active ? cat.color : '#f3f4f6',
-                    }}
-                  >
-                    <Icon size={20} className={active ? 'text-white' : 'text-gray-500'} />
-                  </div>
-                  <span className={`text-xs ${active ? 'text-gray-900 font-medium' : 'text-gray-400'}`}>{cat.name}</span>
-                </button>
-              );
-            })}
-          </div>
+          {categoryList.length === 0 ? (
+            <p className="text-gray-400 text-sm">Chưa có danh mục nào cho loại này.</p>
+          ) : (
+            <div className="grid grid-cols-4 gap-3">
+              {categoryList.map((cat) => {
+                const Icon = getIcon(cat.icon);
+                const active = selectedCategory === cat.id;
+                return (
+                  <button key={cat.id} onClick={() => setSelectedCategory(cat.id)} className="flex flex-col items-center gap-1.5">
+                    <div className="w-12 h-12 rounded-2xl flex items-center justify-center transition"
+                      style={{ background: active ? (cat.color || '#7c3aed') : '#f3f4f6' }}>
+                      <Icon size={20} className={active ? 'text-white' : 'text-gray-500'} />
+                    </div>
+                    <span className={`text-xs ${active ? 'text-gray-900 font-medium' : 'text-gray-400'}`}>{cat.name}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </div>
 
-        {/* Account */}
         <div className="px-5 mt-8">
           <p className="text-gray-900 font-semibold text-sm mb-3">Tài khoản</p>
           <div className="flex gap-2 overflow-x-auto pb-1">
             {accounts.map((acc) => {
-              const Icon = acc.icon;
+              const Icon = getIcon(acc.icon);
               const active = selectedAccount === acc.id;
               return (
-                <button
-                  key={acc.id}
-                  onClick={() => setSelectedAccount(acc.id)}
-                  className={`flex items-center gap-2 px-3 py-2 rounded-full flex-shrink-0 border transition ${
-                    active ? 'bg-gray-900 border-gray-900 text-white' : 'bg-white border-gray-200 text-gray-600'
-                  }`}
-                >
+                <button key={acc.id} onClick={() => setSelectedAccount(acc.id)}
+                  className={`flex items-center gap-2 px-3 py-2 rounded-full flex-shrink-0 border transition ${active ? 'bg-gray-900 border-gray-900 text-white' : 'bg-white border-gray-200 text-gray-600'}`}>
                   <Icon size={16} />
                   <span className="text-sm">{acc.name}</span>
                 </button>
@@ -547,26 +510,17 @@ function AddTransaction({ setScreen, onAdd }) {
           </div>
         </div>
 
-        {/* Note */}
         <div className="px-5 mt-8">
           <p className="text-gray-900 font-semibold text-sm mb-3">Ghi chú</p>
-          <input
-            type="text"
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-            placeholder="Thêm ghi chú (không bắt buộc)"
-            className="w-full bg-gray-100 rounded-2xl px-4 py-3 text-sm outline-none"
-          />
+          <input type="text" value={note} onChange={(e) => setNote(e.target.value)}
+            placeholder="Thêm ghi chú (không bắt buộc)" className="w-full bg-gray-100 rounded-2xl px-4 py-3 text-sm outline-none" />
         </div>
 
-        {/* Save button */}
         <div className="px-5 mt-10">
-          <button
-            onClick={handleSave}
-            className="w-full bg-gray-900 text-white rounded-2xl py-4 font-semibold flex items-center justify-center gap-2"
-          >
-            <Check size={18} />
-            Lưu giao dịch
+          <button onClick={handleSave} disabled={saving}
+            className="w-full bg-gray-900 text-white rounded-2xl py-4 font-semibold flex items-center justify-center gap-2 disabled:opacity-60">
+            {saving ? <Loader2 size={18} className="animate-spin" /> : <Check size={18} />}
+            {saving ? 'Đang lưu...' : 'Lưu giao dịch'}
           </button>
         </div>
       </div>
@@ -574,20 +528,35 @@ function AddTransaction({ setScreen, onAdd }) {
   );
 }
 
-/* ---------- App gốc: chuyển màn hình + giữ danh sách giao dịch ---------- */
+/* ---------- App gốc: tải dữ liệu thật từ Supabase ---------- */
 
 export default function App() {
   const [screen, setScreen] = useState('dashboard');
-  const [transactions, setTransactions] = useState(
-    initialTransactions.map((t) => ({ ...t, type: 'expense' }))
-  );
+  const [accounts, setAccounts] = useState([]);
+  const [categories, setCategories] = useState([]);
+  const [transactions, setTransactions] = useState([]);
+  const [loading, setLoading] = useState(true);
 
-  function handleAddTransaction(tx) {
-    setTransactions((prev) => [tx, ...prev]);
+  async function loadAll() {
+    setLoading(true);
+    const [{ data: accData }, { data: catData }, { data: txData }] = await Promise.all([
+      supabase.from('accounts').select('*').eq('is_active', true),
+      supabase.from('categories').select('*'),
+      supabase.from('transactions').select('*').order('created_at', { ascending: false }),
+    ]);
+    setAccounts(accData || []);
+    setCategories(catData || []);
+    setTransactions(txData || []);
+    setLoading(false);
   }
+
+  useEffect(() => {
+    loadAll();
+  }, []);
 
   if (screen === 'report') return <Report setScreen={setScreen} />;
   if (screen === 'goals') return <Goals setScreen={setScreen} />;
-  if (screen === 'add') return <AddTransaction setScreen={setScreen} onAdd={handleAddTransaction} />;
-  return <Dashboard setScreen={setScreen} transactions={transactions} />;
+  if (screen === 'add')
+    return <AddTransaction setScreen={setScreen} accounts={accounts} categories={categories} onSaved={loadAll} />;
+  return <Dashboard setScreen={setScreen} transactions={transactions} categories={categories} loading={loading} />;
 }
