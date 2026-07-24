@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import {
   Home, Sparkles, Plus, BarChart3, Settings, TrendingUp, PiggyBank, HeartPulse,
-  ShoppingBag, Utensils, Fuel, ArrowLeft, Download, Music, Megaphone, Car, Coffee, PlusCircle,
+  ShoppingBag, Utensils, Fuel, ArrowLeft, Download, Music, Megaphone, Car, Coffee,
+  Wallet, Landmark, Smartphone, HeartPulse as HealthIcon, GraduationCap, Gift, Briefcase, X, Check,
 } from 'lucide-react';
 
 /* ---------- Mock data (đúng schema Accounts/Categories/Transactions/Funds/Goals) ---------- */
@@ -12,6 +13,29 @@ const pinnedItems = [
   { id: 3, name: 'Khẩn cấp', amount: '3.500.000đ', icon: HeartPulse, color: 'from-red-400 to-red-600' },
 ];
 
+// Accounts (Tài khoản/Ví) — bảng Accounts trong schema
+const accounts = [
+  { id: 'a1', name: 'Tiền mặt', icon: Wallet },
+  { id: 'a2', name: 'Viettin', icon: Landmark },
+  { id: 'a3', name: 'Momo', icon: Smartphone },
+  { id: 'a4', name: 'BIDV', icon: Landmark },
+];
+
+// Categories (Danh mục) — bảng Categories trong schema, tách theo income/expense
+const expenseCategories = [
+  { id: 'c1', name: 'Mua sắm', icon: ShoppingBag, color: '#7c3aed' },
+  { id: 'c2', name: 'Sức khỏe', icon: HealthIcon, color: '#a78bfa' },
+  { id: 'c3', name: 'Ăn uống', icon: Utensils, color: '#c4b5fd' },
+  { id: 'c4', name: 'Xăng xe', icon: Fuel, color: '#ddd6fe' },
+  { id: 'c5', name: 'Học tập', icon: GraduationCap, color: '#ede9fe' },
+];
+
+const incomeCategories = [
+  { id: 'i1', name: 'Lương', icon: Briefcase, color: '#10b981' },
+  { id: 'i2', name: 'Thưởng', icon: Gift, color: '#34d399' },
+  { id: 'i3', name: 'Đầu tư', icon: TrendingUp, color: '#6ee7b7' },
+];
+
 const categories = [
   { name: 'Mua sắm', amount: 3320000, color: '#7c3aed' },
   { name: 'Sức khỏe', amount: 2300000, color: '#a78bfa' },
@@ -20,7 +44,7 @@ const categories = [
   { name: 'Từ thiện', amount: 1400000, color: '#ede9fe' },
 ];
 
-const transactions = [
+const initialTransactions = [
   { id: 1, title: 'Ăn trưa với Mike', subtitle: 'Big Mac, gà rán', amount: 75000, icon: Utensils },
   { id: 2, title: 'Đổ xăng', subtitle: 'Cây xăng gần nhà', amount: 50000, icon: Fuel },
   { id: 3, title: 'Mua sắm online', subtitle: 'Shopee', amount: 320000, icon: ShoppingBag },
@@ -33,14 +57,12 @@ const reportTransactions = [
   { id: 4, title: 'Ăn trưa với Mike', subtitle: 'Big Mac, gà rán', amount: 75000, icon: Utensils },
 ];
 
-// Goals (mục tiêu tài chính dài hạn — tương ứng bảng Goals trong schema)
 const goals = [
   { id: 1, name: 'Đầu tư', current: 10242000, target: 50000000, change: '+12%', icon: TrendingUp, color: 'from-emerald-400 to-emerald-600' },
   { id: 2, name: 'Quỹ khẩn cấp', current: 3520000, target: 5000000, icon: HeartPulse, color: 'from-red-400 to-red-600', tag: null },
   { id: 3, name: 'Quỹ cưới', current: 3520000, target: 12000000, icon: PiggyBank, color: 'from-pink-400 to-rose-500', tag: 'Tiết kiệm chung' },
 ];
 
-// Budgeting (hạn mức chi tiêu theo category — tương ứng field monthly_limit)
 const budgetLimits = [
   { id: 1, name: 'Cà phê hàng tháng', spent: 60000, limit: 100000, icon: Coffee },
   { id: 2, name: 'Xăng xe', spent: 130000, limit: 300000, icon: Fuel },
@@ -53,7 +75,7 @@ function formatMoney(n) {
   return Math.abs(n).toLocaleString('vi-VN') + 'đ';
 }
 
-/* ---------- Gauge (vòng chấm tròn kiểu đồng hồ đo) ---------- */
+/* ---------- Gauge ---------- */
 
 function Gauge({ limit, spent }) {
   const ticks = 48;
@@ -98,8 +120,6 @@ function Gauge({ limit, spent }) {
   );
 }
 
-/* ---------- Thanh tiến độ dùng chung (progress bar) ---------- */
-
 function ProgressBar({ pct, colorClass = 'bg-violet-600' }) {
   return (
     <div className="w-full h-1.5 bg-gray-100 rounded-full overflow-hidden">
@@ -119,7 +139,7 @@ function BottomNav({ screen, setScreen }) {
       <button onClick={() => setScreen('goals')}>
         <Sparkles size={20} className={screen === 'goals' ? 'text-gray-900' : 'text-gray-300'} />
       </button>
-      <button className="w-11 h-11 rounded-full bg-gray-900 flex items-center justify-center -mt-6 shadow-lg">
+      <button onClick={() => setScreen('add')} className="w-11 h-11 rounded-full bg-gray-900 flex items-center justify-center -mt-6 shadow-lg">
         <Plus size={20} className="text-white" />
       </button>
       <button onClick={() => setScreen('report')}>
@@ -132,7 +152,7 @@ function BottomNav({ screen, setScreen }) {
 
 /* ---------- Màn Dashboard ---------- */
 
-function Dashboard({ setScreen }) {
+function Dashboard({ setScreen, transactions }) {
   const total = categories.reduce((s, c) => s + c.amount, 0);
   let cumulative = 0;
   const radius = 60;
@@ -206,14 +226,16 @@ function Dashboard({ setScreen }) {
               const Icon = tx.icon;
               return (
                 <div key={tx.id} className="flex items-center gap-3 py-3">
-                  <div className="w-10 h-10 rounded-full bg-violet-50 flex items-center justify-center flex-shrink-0">
-                    <Icon size={18} className="text-violet-600" />
+                  <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${tx.type === 'income' ? 'bg-emerald-50' : 'bg-violet-50'}`}>
+                    <Icon size={18} className={tx.type === 'income' ? 'text-emerald-600' : 'text-violet-600'} />
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="text-gray-900 font-medium text-sm">{tx.title}</p>
                     <p className="text-gray-400 text-xs">{tx.subtitle}</p>
                   </div>
-                  <p className="text-gray-900 font-medium text-sm flex-shrink-0">-{formatMoney(tx.amount)}</p>
+                  <p className={`font-medium text-sm flex-shrink-0 ${tx.type === 'income' ? 'text-emerald-600' : 'text-gray-900'}`}>
+                    {tx.type === 'income' ? '+' : '-'}{formatMoney(tx.amount)}
+                  </p>
                 </div>
               );
             })}
@@ -307,7 +329,6 @@ function Goals({ setScreen }) {
         </div>
 
         <div className="mt-6 bg-white rounded-t-[2.5rem] min-h-[80vh] px-5 pt-6 pb-6">
-          {/* My Goals */}
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-gray-900 font-semibold text-lg">Mục tiêu của tôi</h2>
             <button className="w-7 h-7 rounded-full bg-gray-100 flex items-center justify-center">
@@ -348,7 +369,6 @@ function Goals({ setScreen }) {
             })}
           </div>
 
-          {/* Budgeting */}
           <div className="flex items-center justify-between mt-8 mb-3">
             <h2 className="text-gray-900 font-semibold text-lg">Ngân sách</h2>
             <button className="w-7 h-7 rounded-full bg-gray-100 flex items-center justify-center">
@@ -389,11 +409,185 @@ function Goals({ setScreen }) {
   );
 }
 
-/* ---------- App gốc: chuyển màn hình ---------- */
+/* ---------- Màn Thêm giao dịch ---------- */
+
+function AddTransaction({ setScreen, onAdd }) {
+  const [type, setType] = useState('expense'); // 'expense' | 'income'
+  const [amount, setAmount] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState(null);
+  const [selectedAccount, setSelectedAccount] = useState(accounts[0].id);
+  const [note, setNote] = useState('');
+
+  const categoryList = type === 'expense' ? expenseCategories : incomeCategories;
+
+  function handleAmountChange(e) {
+    const raw = e.target.value.replace(/\D/g, '');
+    setAmount(raw);
+  }
+
+  function handleSave() {
+    if (!amount || Number(amount) === 0) {
+      alert('Vui lòng nhập số tiền');
+      return;
+    }
+    if (!selectedCategory) {
+      alert('Vui lòng chọn danh mục');
+      return;
+    }
+    const cat = categoryList.find((c) => c.id === selectedCategory);
+    onAdd({
+      id: Date.now(),
+      title: cat.name,
+      subtitle: note || accounts.find((a) => a.id === selectedAccount)?.name,
+      amount: Number(amount),
+      icon: cat.icon,
+      type,
+    });
+    setScreen('dashboard');
+  }
+
+  return (
+    <div className="min-h-screen bg-white flex justify-center">
+      <div className="w-full max-w-sm min-h-screen pb-10 relative">
+        {/* Header */}
+        <div className="px-5 pt-8 flex items-center justify-between">
+          <button onClick={() => setScreen('dashboard')} className="w-9 h-9 rounded-full bg-gray-100 flex items-center justify-center">
+            <X size={18} className="text-gray-700" />
+          </button>
+          <h1 className="text-gray-900 text-lg font-semibold">Thêm giao dịch</h1>
+          <div className="w-9 h-9" />
+        </div>
+
+        {/* Type toggle */}
+        <div className="px-5 mt-6">
+          <div className="flex bg-gray-100 rounded-full p-1">
+            <button
+              onClick={() => { setType('expense'); setSelectedCategory(null); }}
+              className={`flex-1 py-2 rounded-full text-sm font-medium transition ${
+                type === 'expense' ? 'bg-white text-gray-900 shadow' : 'text-gray-400'
+              }`}>
+              Chi tiêu
+            </button>
+            <button
+              onClick={() => { setType('income'); setSelectedCategory(null); }}
+              className={`flex-1 py-2 rounded-full text-sm font-medium transition ${
+                type === 'income' ? 'bg-white text-gray-900 shadow' : 'text-gray-400'
+              }`}>
+              Thu nhập
+            </button>
+          </div>
+        </div>
+
+        {/* Amount */}
+        <div className="px-5 mt-8 text-center">
+          <p className="text-gray-400 text-sm mb-1">Số tiền</p>
+          <div className="flex items-center justify-center gap-1">
+            <input
+              type="text"
+              inputMode="numeric"
+              value={amount ? Number(amount).toLocaleString('vi-VN') : ''}
+              onChange={handleAmountChange}
+              placeholder="0"
+              className={`text-4xl font-bold text-center bg-transparent outline-none w-full ${
+                type === 'income' ? 'text-emerald-600' : 'text-gray-900'
+              }`}
+            />
+            <span className="text-4xl font-bold text-gray-300">đ</span>
+          </div>
+        </div>
+
+        {/* Category */}
+        <div className="px-5 mt-8">
+          <p className="text-gray-900 font-semibold text-sm mb-3">Danh mục</p>
+          <div className="grid grid-cols-4 gap-3">
+            {categoryList.map((cat) => {
+              const Icon = cat.icon;
+              const active = selectedCategory === cat.id;
+              return (
+                <button
+                  key={cat.id}
+                  onClick={() => setSelectedCategory(cat.id)}
+                  className="flex flex-col items-center gap-1.5"
+                >
+                  <div
+                    className="w-12 h-12 rounded-2xl flex items-center justify-center transition"
+                    style={{
+                      background: active ? cat.color : '#f3f4f6',
+                    }}
+                  >
+                    <Icon size={20} className={active ? 'text-white' : 'text-gray-500'} />
+                  </div>
+                  <span className={`text-xs ${active ? 'text-gray-900 font-medium' : 'text-gray-400'}`}>{cat.name}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Account */}
+        <div className="px-5 mt-8">
+          <p className="text-gray-900 font-semibold text-sm mb-3">Tài khoản</p>
+          <div className="flex gap-2 overflow-x-auto pb-1">
+            {accounts.map((acc) => {
+              const Icon = acc.icon;
+              const active = selectedAccount === acc.id;
+              return (
+                <button
+                  key={acc.id}
+                  onClick={() => setSelectedAccount(acc.id)}
+                  className={`flex items-center gap-2 px-3 py-2 rounded-full flex-shrink-0 border transition ${
+                    active ? 'bg-gray-900 border-gray-900 text-white' : 'bg-white border-gray-200 text-gray-600'
+                  }`}
+                >
+                  <Icon size={16} />
+                  <span className="text-sm">{acc.name}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Note */}
+        <div className="px-5 mt-8">
+          <p className="text-gray-900 font-semibold text-sm mb-3">Ghi chú</p>
+          <input
+            type="text"
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            placeholder="Thêm ghi chú (không bắt buộc)"
+            className="w-full bg-gray-100 rounded-2xl px-4 py-3 text-sm outline-none"
+          />
+        </div>
+
+        {/* Save button */}
+        <div className="px-5 mt-10">
+          <button
+            onClick={handleSave}
+            className="w-full bg-gray-900 text-white rounded-2xl py-4 font-semibold flex items-center justify-center gap-2"
+          >
+            <Check size={18} />
+            Lưu giao dịch
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ---------- App gốc: chuyển màn hình + giữ danh sách giao dịch ---------- */
 
 export default function App() {
   const [screen, setScreen] = useState('dashboard');
+  const [transactions, setTransactions] = useState(
+    initialTransactions.map((t) => ({ ...t, type: 'expense' }))
+  );
+
+  function handleAddTransaction(tx) {
+    setTransactions((prev) => [tx, ...prev]);
+  }
+
   if (screen === 'report') return <Report setScreen={setScreen} />;
   if (screen === 'goals') return <Goals setScreen={setScreen} />;
-  return <Dashboard setScreen={setScreen} />;
+  if (screen === 'add') return <AddTransaction setScreen={setScreen} onAdd={handleAddTransaction} />;
+  return <Dashboard setScreen={setScreen} transactions={transactions} />;
 }
