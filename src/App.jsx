@@ -1,10 +1,10 @@
 import { useState } from 'react';
 import {
   Home, Sparkles, Plus, BarChart3, Settings, TrendingUp, PiggyBank, HeartPulse,
-  ShoppingBag, Utensils, Fuel, ArrowLeft, Download, Music, Instagram, Car,
+  ShoppingBag, Utensils, Fuel, ArrowLeft, Download, Music, Megaphone, Car, Coffee, PlusCircle,
 } from 'lucide-react';
 
-/* ---------- Mock data (đúng schema Accounts/Categories/Transactions/Funds) ---------- */
+/* ---------- Mock data (đúng schema Accounts/Categories/Transactions/Funds/Goals) ---------- */
 
 const pinnedItems = [
   { id: 1, name: 'Đầu tư', amount: '10.242.000đ', change: '+12%', icon: TrendingUp, color: 'from-emerald-400 to-emerald-600' },
@@ -28,9 +28,22 @@ const transactions = [
 
 const reportTransactions = [
   { id: 1, title: 'Spotify Family Plan', subtitle: 'Gói nhạc hàng tháng', amount: 129000, icon: Music },
-  { id: 2, title: 'Quảng cáo Instagram', subtitle: 'Chạy ads cửa hàng', amount: 620000, icon: Instagram },
+  { id: 2, title: 'Quảng cáo Instagram', subtitle: 'Chạy ads cửa hàng', amount: 620000, icon: Megaphone },
   { id: 3, title: 'Đổ xăng', subtitle: 'Grab Bike nạp xăng', amount: 80000, icon: Car },
   { id: 4, title: 'Ăn trưa với Mike', subtitle: 'Big Mac, gà rán', amount: 75000, icon: Utensils },
+];
+
+// Goals (mục tiêu tài chính dài hạn — tương ứng bảng Goals trong schema)
+const goals = [
+  { id: 1, name: 'Đầu tư', current: 10242000, target: 50000000, change: '+12%', icon: TrendingUp, color: 'from-emerald-400 to-emerald-600' },
+  { id: 2, name: 'Quỹ khẩn cấp', current: 3520000, target: 5000000, icon: HeartPulse, color: 'from-red-400 to-red-600', tag: null },
+  { id: 3, name: 'Quỹ cưới', current: 3520000, target: 12000000, icon: PiggyBank, color: 'from-pink-400 to-rose-500', tag: 'Tiết kiệm chung' },
+];
+
+// Budgeting (hạn mức chi tiêu theo category — tương ứng field monthly_limit)
+const budgetLimits = [
+  { id: 1, name: 'Cà phê hàng tháng', spent: 60000, limit: 100000, icon: Coffee },
+  { id: 2, name: 'Xăng xe', spent: 130000, limit: 300000, icon: Fuel },
 ];
 
 const monthlyLimit = 5000000;
@@ -85,6 +98,16 @@ function Gauge({ limit, spent }) {
   );
 }
 
+/* ---------- Thanh tiến độ dùng chung (progress bar) ---------- */
+
+function ProgressBar({ pct, colorClass = 'bg-violet-600' }) {
+  return (
+    <div className="w-full h-1.5 bg-gray-100 rounded-full overflow-hidden">
+      <div className={`h-full ${colorClass} rounded-full`} style={{ width: `${Math.min(pct, 100)}%` }} />
+    </div>
+  );
+}
+
 /* ---------- Thanh điều hướng dưới cùng ---------- */
 
 function BottomNav({ screen, setScreen }) {
@@ -93,7 +116,9 @@ function BottomNav({ screen, setScreen }) {
       <button onClick={() => setScreen('dashboard')}>
         <Home size={20} className={screen === 'dashboard' ? 'text-gray-900' : 'text-gray-300'} />
       </button>
-      <Sparkles size={20} className="text-gray-300" />
+      <button onClick={() => setScreen('goals')}>
+        <Sparkles size={20} className={screen === 'goals' ? 'text-gray-900' : 'text-gray-300'} />
+      </button>
       <button className="w-11 h-11 rounded-full bg-gray-900 flex items-center justify-center -mt-6 shadow-lg">
         <Plus size={20} className="text-white" />
       </button>
@@ -268,9 +293,107 @@ function Report({ setScreen }) {
   );
 }
 
+/* ---------- Màn Goals & Budget ---------- */
+
+function Goals({ setScreen }) {
+  return (
+    <div className="min-h-screen bg-gradient-to-b from-violet-400 via-fuchsia-200 to-orange-100 flex justify-center">
+      <div className="w-full max-w-sm min-h-screen pb-28 relative">
+        <div className="px-5 pt-8 flex items-center gap-3">
+          <button onClick={() => setScreen('dashboard')} className="w-9 h-9 rounded-full bg-white/30 backdrop-blur flex items-center justify-center">
+            <ArrowLeft size={18} className="text-white" />
+          </button>
+          <h1 className="text-white text-lg font-semibold">Mục tiêu &amp; Ngân sách</h1>
+        </div>
+
+        <div className="mt-6 bg-white rounded-t-[2.5rem] min-h-[80vh] px-5 pt-6 pb-6">
+          {/* My Goals */}
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-gray-900 font-semibold text-lg">Mục tiêu của tôi</h2>
+            <button className="w-7 h-7 rounded-full bg-gray-100 flex items-center justify-center">
+              <Plus size={16} className="text-gray-600" />
+            </button>
+          </div>
+
+          <div className="flex flex-col gap-5">
+            {goals.map((goal) => {
+              const Icon = goal.icon;
+              const pct = (goal.current / goal.target) * 100;
+              return (
+                <div key={goal.id}>
+                  <div className="flex items-center gap-3 mb-2">
+                    <div className={`w-9 h-9 rounded-xl bg-gradient-to-br ${goal.color} flex items-center justify-center flex-shrink-0`}>
+                      <Icon size={18} className="text-white" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <p className="text-gray-900 font-medium text-sm">{goal.name}</p>
+                        {goal.tag && (
+                          <span className="text-[11px] bg-violet-50 text-violet-600 px-2 py-0.5 rounded-full font-medium">{goal.tag}</span>
+                        )}
+                        {goal.change && (
+                          <span className="text-emerald-600 text-xs font-medium">{goal.change} ↗</span>
+                        )}
+                      </div>
+                      <p className="text-gray-900 font-semibold text-sm">{formatMoney(goal.current)}</p>
+                    </div>
+                  </div>
+                  <ProgressBar pct={pct} />
+                  <div className="flex justify-between mt-1 text-xs text-gray-400">
+                    <span>{formatMoney(goal.current)}</span>
+                    <span>{formatMoney(goal.target)}</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Budgeting */}
+          <div className="flex items-center justify-between mt-8 mb-3">
+            <h2 className="text-gray-900 font-semibold text-lg">Ngân sách</h2>
+            <button className="w-7 h-7 rounded-full bg-gray-100 flex items-center justify-center">
+              <Plus size={16} className="text-gray-600" />
+            </button>
+          </div>
+
+          <div className="flex flex-col gap-5">
+            {budgetLimits.map((b) => {
+              const Icon = b.icon;
+              const pct = (b.spent / b.limit) * 100;
+              const remaining = b.limit - b.spent;
+              return (
+                <div key={b.id}>
+                  <div className="flex items-center gap-3 mb-2">
+                    <div className="w-9 h-9 rounded-xl bg-gray-100 flex items-center justify-center flex-shrink-0">
+                      <Icon size={18} className="text-gray-600" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-gray-900 font-medium text-sm">{b.name}</p>
+                      <p className="text-gray-900 font-semibold text-sm">{formatMoney(b.limit)}</p>
+                    </div>
+                  </div>
+                  <ProgressBar pct={pct} colorClass="bg-orange-300" />
+                  <div className="flex justify-between mt-1 text-xs text-gray-400">
+                    <span>Còn lại khoảng {formatMoney(remaining)}</span>
+                    <span>{formatMoney(b.limit)}</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        <BottomNav screen="goals" setScreen={setScreen} />
+      </div>
+    </div>
+  );
+}
+
 /* ---------- App gốc: chuyển màn hình ---------- */
 
 export default function App() {
   const [screen, setScreen] = useState('dashboard');
-  return screen === 'dashboard' ? <Dashboard setScreen={setScreen} /> : <Report setScreen={setScreen} />;
+  if (screen === 'report') return <Report setScreen={setScreen} />;
+  if (screen === 'goals') return <Goals setScreen={setScreen} />;
+  return <Dashboard setScreen={setScreen} />;
 }
