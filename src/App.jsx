@@ -20,7 +20,9 @@ function nowForInput() {
 /* ---------- Màn Đăng nhập / Đăng ký ---------- */
 
 function AuthScreen() {
-  const [mode, setMode] = useState('login');
+  const [mode, setMode] = useState('signup'); // 'signup' | 'login'
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -29,79 +31,88 @@ function AuthScreen() {
 
   async function handleSubmit() {
     if (!email || !password) { setMessage('Nhập đủ email và mật khẩu'); setIsError(true); return; }
+    if (mode === 'signup' && !firstName) { setMessage('Nhập tên của bạn'); setIsError(true); return; }
     setLoading(true);
     setMessage('');
     if (mode === 'login') {
       const { error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) { setMessage(error.message); setIsError(true); }
     } else {
-      const { error } = await supabase.auth.signUp({ email, password });
+      const full_name = `${firstName} ${lastName}`.trim();
+      const { error } = await supabase.auth.signUp({ email, password, options: { data: { full_name, first_name: firstName } } });
       if (error) { setMessage(error.message); setIsError(true); }
-      else { setMessage('Tạo tài khoản thành công! Giờ bấm Đăng nhập.'); setIsError(false); }
+      else { setMessage('Tạo tài khoản thành công! Giờ bấm Đăng nhập.'); setIsError(false); setMode('login'); }
     }
     setLoading(false);
   }
 
   return (
-    <div className="min-h-screen relative overflow-hidden flex items-center justify-center px-6 bg-gradient-to-br from-violet-500 via-fuchsia-400 to-orange-200">
-      {/* Khối tròn mờ tạo chiều sâu cho hiệu ứng kính */}
-      <div className="absolute -top-24 -left-16 w-72 h-72 rounded-full bg-fuchsia-300/40 blur-3xl" />
-      <div className="absolute top-1/3 -right-20 w-80 h-80 rounded-full bg-violet-400/40 blur-3xl" />
-      <div className="absolute -bottom-28 left-1/4 w-72 h-72 rounded-full bg-orange-200/50 blur-3xl" />
+    <div className="min-h-screen relative overflow-hidden flex items-center justify-center px-6 bg-gradient-to-b from-gray-950 via-gray-950 to-violet-600">
+      {/* Vệt sáng mờ phía dưới, đặc trưng phong cách kính tối */}
+      <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-[600px] h-[400px] rounded-full bg-violet-500/50 blur-[100px]" />
+      <div className="absolute top-10 right-10 w-64 h-64 rounded-full bg-fuchsia-500/20 blur-3xl" />
 
-      {/* Thẻ kính (glassmorphism) */}
-      <div className="relative w-full max-w-sm rounded-[2rem] bg-white/15 backdrop-blur-2xl border border-white/30 shadow-2xl shadow-black/10 p-7">
-        <div className="w-14 h-14 rounded-2xl bg-white/25 backdrop-blur border border-white/40 flex items-center justify-center mb-5">
-          <Wallet size={24} className="text-white" strokeWidth={1.8} />
+      <div className="relative w-full max-w-sm rounded-[1.75rem] bg-white/[0.06] backdrop-blur-2xl border border-white/10 shadow-2xl shadow-black/40 p-6">
+        {/* Tab chuyển đổi */}
+        <div className="flex bg-white/5 border border-white/10 rounded-full p-1 mb-6">
+          <button
+            onClick={() => { setMode('signup'); setMessage(''); }}
+            className={`flex-1 py-2 rounded-full text-sm font-medium transition ${mode === 'signup' ? 'bg-white text-gray-900' : 'text-white/60'}`}>
+            Đăng ký
+          </button>
+          <button
+            onClick={() => { setMode('login'); setMessage(''); }}
+            className={`flex-1 py-2 rounded-full text-sm font-medium transition ${mode === 'login' ? 'bg-white text-gray-900' : 'text-white/60'}`}>
+            Đăng nhập
+          </button>
         </div>
 
-        <h1 className="text-2xl font-semibold text-white mb-1">
-          {mode === 'login' ? 'Chào mừng trở lại' : 'Tạo tài khoản mới'}
+        <h1 className="text-xl font-semibold text-white mb-5">
+          {mode === 'signup' ? 'Tạo tài khoản' : 'Chào mừng trở lại'}
         </h1>
-        <p className="text-white/70 text-sm mb-7">Quản lý tài chính cá nhân của bạn</p>
 
-        <div className="flex flex-col gap-3 mb-2">
-          <div className="flex items-center gap-3 bg-white/15 backdrop-blur border border-white/25 rounded-2xl px-4 py-3.5 focus-within:border-white/50 transition">
-            <Mail size={17} className="text-white/70 flex-shrink-0" />
-            <input
-              type="email" value={email} onChange={(e) => setEmail(e.target.value)}
-              placeholder="Email" autoCapitalize="none"
-              className="bg-transparent outline-none text-sm flex-1 text-white placeholder:text-white/50"
-            />
-          </div>
-          <div className="flex items-center gap-3 bg-white/15 backdrop-blur border border-white/25 rounded-2xl px-4 py-3.5 focus-within:border-white/50 transition">
-            <Lock size={17} className="text-white/70 flex-shrink-0" />
-            <input
-              type="password" value={password} onChange={(e) => setPassword(e.target.value)}
-              placeholder="Mật khẩu (tối thiểu 6 ký tự)"
-              className="bg-transparent outline-none text-sm flex-1 text-white placeholder:text-white/50"
-            />
-          </div>
+        <div className="flex flex-col gap-3">
+          {mode === 'signup' && (
+            <div className="flex gap-3">
+              <input
+                value={firstName} onChange={(e) => setFirstName(e.target.value)}
+                placeholder="Tên" className="w-1/2 bg-white/5 border border-white/10 rounded-2xl px-4 py-3.5 text-sm text-white placeholder:text-white/40 outline-none focus:border-white/30 transition"
+              />
+              <input
+                value={lastName} onChange={(e) => setLastName(e.target.value)}
+                placeholder="Họ" className="w-1/2 bg-white/5 border border-white/10 rounded-2xl px-4 py-3.5 text-sm text-white placeholder:text-white/40 outline-none focus:border-white/30 transition"
+              />
+            </div>
+          )}
+          <input
+            type="email" value={email} onChange={(e) => setEmail(e.target.value)}
+            placeholder="Nhập email của bạn" autoCapitalize="none"
+            className="bg-white/5 border border-white/10 rounded-2xl px-4 py-3.5 text-sm text-white placeholder:text-white/40 outline-none focus:border-white/30 transition"
+          />
+          <input
+            type="password" value={password} onChange={(e) => setPassword(e.target.value)}
+            placeholder="Mật khẩu (tối thiểu 6 ký tự)"
+            className="bg-white/5 border border-white/10 rounded-2xl px-4 py-3.5 text-sm text-white placeholder:text-white/40 outline-none focus:border-white/30 transition"
+          />
         </div>
 
         {message && (
-          <p className={`text-sm text-center mt-4 ${isError ? 'text-red-100 bg-red-500/20 border border-red-200/30' : 'text-emerald-50 bg-emerald-500/20 border border-emerald-200/30'} rounded-xl py-2 px-3`}>
+          <p className={`text-sm text-center mt-4 rounded-xl py-2 px-3 border ${isError ? 'text-red-100 bg-red-500/10 border-red-400/20' : 'text-emerald-100 bg-emerald-500/10 border-emerald-400/20'}`}>
             {message}
           </p>
         )}
 
         <button
           onClick={handleSubmit} disabled={loading}
-          className="w-full bg-white text-gray-900 rounded-2xl py-3.5 font-semibold flex items-center justify-center gap-2 disabled:opacity-60 mt-6 shadow-lg shadow-black/10 hover:bg-white/90 transition"
+          className="w-full bg-gradient-to-r from-violet-600 to-fuchsia-500 text-white rounded-2xl py-3.5 font-semibold flex items-center justify-center gap-2 disabled:opacity-60 mt-5 shadow-lg shadow-violet-900/30"
         >
           {loading ? <Loader2 size={18} className="animate-spin" /> : null}
-          {mode === 'login' ? 'Đăng nhập' : 'Tạo tài khoản'}
+          {mode === 'signup' ? 'Tạo tài khoản' : 'Đăng nhập'}
         </button>
 
-        <button
-          onClick={() => { setMode(mode === 'login' ? 'signup' : 'login'); setMessage(''); }}
-          className="w-full text-center text-sm text-white/70 mt-5 hover:text-white transition"
-        >
-          {mode === 'login' ? 'Chưa có tài khoản? ' : 'Đã có tài khoản? '}
-          <span className="text-white font-medium underline underline-offset-2">
-            {mode === 'login' ? 'Tạo mới' : 'Đăng nhập'}
-          </span>
-        </button>
+        <p className="text-center text-xs text-white/40 mt-5">
+          Dữ liệu tài chính của bạn được mã hóa và chỉ bạn có thể xem.
+        </p>
       </div>
     </div>
   );
@@ -159,7 +170,7 @@ function BottomNav({ screen, setScreen }) {
 
 /* ---------- Dashboard ---------- */
 
-function Dashboard({ setScreen, transactions, categories, loading }) {
+function Dashboard({ setScreen, transactions, categories, loading, displayName }) {
   const fundCategories = categories.filter((c) => c.is_fund);
   function fundTotal(catId) { return transactions.filter((t) => t.category_id === catId).reduce((s, t) => s + Number(t.amount), 0); }
   const expenseCats = categories.filter((c) => c.type === 'expense' && !c.is_fund);
@@ -173,7 +184,7 @@ function Dashboard({ setScreen, transactions, categories, loading }) {
     <div className="min-h-screen bg-gradient-to-b from-violet-400 via-fuchsia-300 to-orange-100 flex justify-center">
       <div className="w-full max-w-sm min-h-screen pb-28 relative">
         <div className="px-5 pt-8 flex items-center justify-between">
-          <div><p className="text-white/80 text-sm">Chào bạn!</p><h1 className="text-white text-2xl font-semibold">Khang</h1></div>
+          <div><p className="text-white/80 text-sm">Chào bạn!</p><h1 className="text-white text-2xl font-semibold">{displayName || 'Bạn'}</h1></div>
           <button onClick={() => setScreen('accounts')} className="w-11 h-11 rounded-full bg-white/30 backdrop-blur flex items-center justify-center text-white border border-white/40"><Wallet size={18} /></button>
         </div>
         <div className="mt-6 px-5 flex gap-3 overflow-x-auto pb-2">
@@ -592,8 +603,47 @@ function AccountSection({ accounts, reload }) {
   );
 }
 
-function Settings({ setScreen, categories, accounts, reload }) {
-  const [section, setSection] = useState('categories'); // 'categories' | 'accounts'
+function ProfileSection({ user, onUpdated }) {
+  const [firstName, setFirstName] = useState(user?.user_metadata?.first_name || '');
+  const [lastName, setLastName] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState('');
+
+  useEffect(() => {
+    const full = user?.user_metadata?.full_name || '';
+    const first = user?.user_metadata?.first_name || '';
+    setFirstName(first);
+    setLastName(full.replace(first, '').trim());
+  }, [user]);
+
+  async function handleSave() {
+    setSaving(true);
+    setMessage('');
+    const full_name = `${firstName} ${lastName}`.trim();
+    const { error } = await supabase.auth.updateUser({ data: { full_name, first_name: firstName } });
+    setSaving(false);
+    if (error) { setMessage('Lỗi: ' + error.message); return; }
+    setMessage('Đã lưu!');
+    onUpdated();
+  }
+
+  return (
+    <div>
+      <p className="text-gray-400 text-sm mb-4">{user?.email}</p>
+      <div className="flex gap-3 mb-3">
+        <input value={firstName} onChange={(e) => setFirstName(e.target.value)} placeholder="Tên" className="w-1/2 bg-gray-100 rounded-xl px-4 py-3 text-sm outline-none" />
+        <input value={lastName} onChange={(e) => setLastName(e.target.value)} placeholder="Họ" className="w-1/2 bg-gray-100 rounded-xl px-4 py-3 text-sm outline-none" />
+      </div>
+      {message && <p className="text-sm text-violet-600 mb-3">{message}</p>}
+      <button onClick={handleSave} disabled={saving} className="w-full bg-gray-900 text-white rounded-xl py-3 font-semibold flex items-center justify-center gap-2 disabled:opacity-60">
+        {saving ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />} Lưu thay đổi
+      </button>
+    </div>
+  );
+}
+
+function Settings({ setScreen, categories, accounts, reload, user, onProfileUpdated }) {
+  const [section, setSection] = useState('profile'); // 'profile' | 'categories' | 'accounts'
 
   async function handleLogout() {
     await supabase.auth.signOut();
@@ -611,12 +661,15 @@ function Settings({ setScreen, categories, accounts, reload }) {
         </div>
 
         <div className="px-5 mt-4 flex gap-2">
+          <button onClick={() => setSection('profile')} className={`flex-1 py-2 rounded-full text-sm font-medium ${section === 'profile' ? 'bg-white text-gray-900' : 'bg-white/30 text-white'}`}>Hồ sơ</button>
           <button onClick={() => setSection('categories')} className={`flex-1 py-2 rounded-full text-sm font-medium ${section === 'categories' ? 'bg-white text-gray-900' : 'bg-white/30 text-white'}`}>Danh mục</button>
           <button onClick={() => setSection('accounts')} className={`flex-1 py-2 rounded-full text-sm font-medium ${section === 'accounts' ? 'bg-white text-gray-900' : 'bg-white/30 text-white'}`}>Tài khoản</button>
         </div>
 
         <div className="mt-4 bg-white rounded-t-[2.5rem] min-h-[76vh] px-5 pt-6 pb-6">
-          {section === 'categories' ? <CategorySection categories={categories} reload={reload} /> : <AccountSection accounts={accounts} reload={reload} />}
+          {section === 'profile' && <ProfileSection user={user} onUpdated={onProfileUpdated} />}
+          {section === 'categories' && <CategorySection categories={categories} reload={reload} />}
+          {section === 'accounts' && <AccountSection accounts={accounts} reload={reload} />}
         </div>
         <BottomNav screen="settings" setScreen={setScreen} />
       </div>
@@ -626,7 +679,7 @@ function Settings({ setScreen, categories, accounts, reload }) {
 
 /* ---------- App gốc: gác cổng bằng đăng nhập ---------- */
 
-function MainApp() {
+function MainApp({ user }) {
   const [screen, setScreen] = useState('dashboard');
   const [accounts, setAccounts] = useState([]);
   const [categories, setCategories] = useState([]);
@@ -634,6 +687,14 @@ function MainApp() {
   const [goals, setGoals] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadingGoals, setLoadingGoals] = useState(true);
+  const [currentUser, setCurrentUser] = useState(user);
+
+  const displayName = currentUser?.user_metadata?.first_name || currentUser?.user_metadata?.full_name || currentUser?.email?.split('@')[0];
+
+  async function refreshUser() {
+    const { data } = await supabase.auth.getUser();
+    setCurrentUser(data.user);
+  }
 
   async function loadAll() {
     setLoading(true); setLoadingGoals(true);
@@ -653,12 +714,12 @@ function MainApp() {
   if (screen === 'goals') return <Goals setScreen={setScreen} goals={goals} loadingGoals={loadingGoals} reload={loadAll} />;
   if (screen === 'add') return <AddTransaction setScreen={setScreen} accounts={accounts} categories={categories} onSaved={loadAll} />;
   if (screen === 'accounts') return <Accounts setScreen={setScreen} accounts={accounts} transactions={transactions} />;
-  if (screen === 'settings') return <Settings setScreen={setScreen} categories={categories} accounts={accounts} reload={loadAll} />;
-  return <Dashboard setScreen={setScreen} transactions={transactions} categories={categories} loading={loading} />;
+  if (screen === 'settings') return <Settings setScreen={setScreen} categories={categories} accounts={accounts} reload={loadAll} user={currentUser} onProfileUpdated={refreshUser} />;
+  return <Dashboard setScreen={setScreen} transactions={transactions} categories={categories} loading={loading} displayName={displayName} />;
 }
 
 export default function App() {
-  const [session, setSession] = useState(undefined); // undefined = đang kiểm tra, null = chưa đăng nhập, object = đã đăng nhập
+  const [session, setSession] = useState(undefined);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session));
@@ -670,5 +731,5 @@ export default function App() {
     return <div className="min-h-screen flex items-center justify-center"><Loader2 size={28} className="animate-spin text-violet-400" /></div>;
   }
   if (!session) return <AuthScreen />;
-  return <MainApp />;
+  return <MainApp user={session.user} />;
 }
