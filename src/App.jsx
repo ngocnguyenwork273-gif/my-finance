@@ -418,7 +418,7 @@ function Accounts({ setScreen, accounts, transactions }) {
 
 /* ---------- Cài đặt ---------- */
 
-function Settings({ setScreen, categories, reload }) {
+function CategorySection({ categories, reload }) {
   const [tab, setTab] = useState('expense');
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState({ name: '', icon: '', monthly_limit: '', is_fund: false });
@@ -444,11 +444,119 @@ function Settings({ setScreen, categories, reload }) {
     reload();
   }
 
+  const list = categories.filter((c) => c.type === tab);
+
+  return (
+    <>
+      <div className="flex bg-gray-100 rounded-full p-1 mb-4">
+        <button onClick={() => setTab('expense')} className={`flex-1 py-2 rounded-full text-sm font-medium ${tab === 'expense' ? 'bg-white text-gray-900 shadow' : 'text-gray-400'}`}>Chi tiêu</button>
+        <button onClick={() => setTab('income')} className={`flex-1 py-2 rounded-full text-sm font-medium ${tab === 'income' ? 'bg-white text-gray-900 shadow' : 'text-gray-400'}`}>Thu nhập</button>
+      </div>
+      <button onClick={startNew} className="w-full border-2 border-dashed border-gray-200 rounded-2xl py-3 text-sm text-gray-500 font-medium mb-4 flex items-center justify-center gap-2"><Plus size={16} /> Thêm danh mục mới</button>
+      <div className="flex flex-col gap-2">
+        {list.map((cat) => (
+          <div key={cat.id} className="flex items-center gap-3 bg-gray-50 rounded-2xl p-3">
+            <EmojiCircle emoji={cat.icon} size={36} bg="#ede9fe" />
+            <div className="flex-1 min-w-0">
+              <p className="text-gray-900 font-medium text-sm">{cat.name} {cat.is_fund && <span className="text-[10px] bg-violet-100 text-violet-600 px-1.5 py-0.5 rounded-full ml-1">Quỹ</span>}</p>
+              {cat.monthly_limit && <p className="text-gray-400 text-xs">Hạn mức: {formatMoney(cat.monthly_limit)}</p>}
+            </div>
+            <button onClick={() => startEdit(cat)} className="w-8 h-8 rounded-full bg-white flex items-center justify-center"><Pencil size={14} className="text-gray-500" /></button>
+            <button onClick={() => handleDelete(cat.id)} className="w-8 h-8 rounded-full bg-white flex items-center justify-center"><Trash2 size={14} className="text-red-400" /></button>
+          </div>
+        ))}
+      </div>
+
+      {editing && (
+        <div className="fixed inset-0 bg-black/40 flex items-end z-20" onClick={() => setEditing(null)}>
+          <div className="bg-white w-full rounded-t-3xl p-5 max-w-sm mx-auto" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4"><h3 className="font-semibold text-gray-900">{editing === 'new' ? 'Danh mục mới' : 'Sửa danh mục'}</h3><button onClick={() => setEditing(null)}><X size={18} className="text-gray-500" /></button></div>
+            <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Tên danh mục" className="w-full bg-gray-100 rounded-xl px-4 py-3 text-sm outline-none mb-3" />
+            <input value={form.icon} onChange={(e) => setForm({ ...form, icon: e.target.value })} placeholder="Emoji (vd: 🍜)" className="w-full bg-gray-100 rounded-xl px-4 py-3 text-sm outline-none mb-3" />
+            <input value={form.monthly_limit} onChange={(e) => setForm({ ...form, monthly_limit: e.target.value.replace(/\D/g, '') })} inputMode="numeric" placeholder="Hạn mức tối đa mỗi lần nhập (không bắt buộc)" className="w-full bg-gray-100 rounded-xl px-4 py-3 text-sm outline-none mb-3" />
+            <label className="flex items-center gap-2 mb-4 text-sm text-gray-600"><input type="checkbox" checked={form.is_fund} onChange={(e) => setForm({ ...form, is_fund: e.target.checked })} /> Đây là 1 "quỹ" — hiện thẻ tổng tiền ở Trang chủ</label>
+            <button onClick={handleSave} disabled={saving} className="w-full bg-gray-900 text-white rounded-xl py-3 font-semibold flex items-center justify-center gap-2 disabled:opacity-60">{saving ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />} Lưu</button>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+const ACCOUNT_TYPES = [
+  { value: 'cash', label: 'Tiền mặt' },
+  { value: 'bank', label: 'Ngân hàng' },
+  { value: 'ewallet', label: 'Ví điện tử' },
+  { value: 'gold', label: 'Vàng' },
+  { value: 'other', label: 'Khác' },
+];
+
+function AccountSection({ accounts, reload }) {
+  const [editing, setEditing] = useState(null);
+  const [form, setForm] = useState({ name: '', icon: '', type: 'cash', initial_balance: '' });
+  const [saving, setSaving] = useState(false);
+
+  function startNew() { setForm({ name: '', icon: '', type: 'cash', initial_balance: '' }); setEditing('new'); }
+  function startEdit(acc) { setForm({ name: acc.name, icon: acc.icon || '', type: acc.type || 'cash', initial_balance: acc.initial_balance || '' }); setEditing(acc.id); }
+
+  async function handleSave() {
+    if (!form.name) { alert('Nhập tên tài khoản'); return; }
+    setSaving(true);
+    const payload = { name: form.name, icon: form.icon || '💰', type: form.type, initial_balance: form.initial_balance ? Number(form.initial_balance) : 0, is_active: true };
+    const { error } = editing === 'new' ? await supabase.from('accounts').insert(payload) : await supabase.from('accounts').update(payload).eq('id', editing);
+    setSaving(false);
+    if (error) { alert('Lỗi: ' + error.message); return; }
+    setEditing(null); reload();
+  }
+
+  async function handleDelete(id) {
+    if (!confirm('Xóa tài khoản này? Các giao dịch cũ vẫn giữ nguyên số tiền.')) return;
+    const { error } = await supabase.from('accounts').delete().eq('id', id);
+    if (error) { alert('Lỗi: ' + error.message); return; }
+    reload();
+  }
+
+  return (
+    <>
+      <button onClick={startNew} className="w-full border-2 border-dashed border-gray-200 rounded-2xl py-3 text-sm text-gray-500 font-medium mb-4 flex items-center justify-center gap-2"><Plus size={16} /> Thêm tài khoản mới</button>
+      <div className="flex flex-col gap-2">
+        {accounts.map((acc) => (
+          <div key={acc.id} className="flex items-center gap-3 bg-gray-50 rounded-2xl p-3">
+            <EmojiCircle emoji={acc.icon} size={36} bg="#ede9fe" />
+            <div className="flex-1 min-w-0">
+              <p className="text-gray-900 font-medium text-sm">{acc.name}</p>
+              <p className="text-gray-400 text-xs">Số dư ban đầu: {formatMoney(acc.initial_balance || 0)}</p>
+            </div>
+            <button onClick={() => startEdit(acc)} className="w-8 h-8 rounded-full bg-white flex items-center justify-center"><Pencil size={14} className="text-gray-500" /></button>
+            <button onClick={() => handleDelete(acc.id)} className="w-8 h-8 rounded-full bg-white flex items-center justify-center"><Trash2 size={14} className="text-red-400" /></button>
+          </div>
+        ))}
+      </div>
+
+      {editing && (
+        <div className="fixed inset-0 bg-black/40 flex items-end z-20" onClick={() => setEditing(null)}>
+          <div className="bg-white w-full rounded-t-3xl p-5 max-w-sm mx-auto" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4"><h3 className="font-semibold text-gray-900">{editing === 'new' ? 'Tài khoản mới' : 'Sửa tài khoản'}</h3><button onClick={() => setEditing(null)}><X size={18} className="text-gray-500" /></button></div>
+            <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Tên tài khoản (vd: Vietinbank)" className="w-full bg-gray-100 rounded-xl px-4 py-3 text-sm outline-none mb-3" />
+            <input value={form.icon} onChange={(e) => setForm({ ...form, icon: e.target.value })} placeholder="Emoji (vd: 🏦)" className="w-full bg-gray-100 rounded-xl px-4 py-3 text-sm outline-none mb-3" />
+            <select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })} className="w-full bg-gray-100 rounded-xl px-4 py-3 text-sm outline-none mb-3">
+              {ACCOUNT_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+            </select>
+            <input value={form.initial_balance} onChange={(e) => setForm({ ...form, initial_balance: e.target.value.replace(/\D/g, '') })} inputMode="numeric" placeholder="Số dư ban đầu" className="w-full bg-gray-100 rounded-xl px-4 py-3 text-sm outline-none mb-4" />
+            <button onClick={handleSave} disabled={saving} className="w-full bg-gray-900 text-white rounded-xl py-3 font-semibold flex items-center justify-center gap-2 disabled:opacity-60">{saving ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />} Lưu</button>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+function Settings({ setScreen, categories, accounts, reload }) {
+  const [section, setSection] = useState('categories'); // 'categories' | 'accounts'
+
   async function handleLogout() {
     await supabase.auth.signOut();
   }
-
-  const list = categories.filter((c) => c.type === tab);
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-violet-400 via-fuchsia-200 to-orange-100 flex justify-center">
@@ -461,39 +569,14 @@ function Settings({ setScreen, categories, reload }) {
           <button onClick={handleLogout} className="w-9 h-9 rounded-full bg-white/30 backdrop-blur flex items-center justify-center"><LogOut size={16} className="text-white" /></button>
         </div>
 
-        <div className="mt-6 bg-white rounded-t-[2.5rem] min-h-[80vh] px-5 pt-6 pb-6">
-          <div className="flex bg-gray-100 rounded-full p-1 mb-4">
-            <button onClick={() => setTab('expense')} className={`flex-1 py-2 rounded-full text-sm font-medium ${tab === 'expense' ? 'bg-white text-gray-900 shadow' : 'text-gray-400'}`}>Chi tiêu</button>
-            <button onClick={() => setTab('income')} className={`flex-1 py-2 rounded-full text-sm font-medium ${tab === 'income' ? 'bg-white text-gray-900 shadow' : 'text-gray-400'}`}>Thu nhập</button>
-          </div>
-          <button onClick={startNew} className="w-full border-2 border-dashed border-gray-200 rounded-2xl py-3 text-sm text-gray-500 font-medium mb-4 flex items-center justify-center gap-2"><Plus size={16} /> Thêm danh mục mới</button>
-          <div className="flex flex-col gap-2">
-            {list.map((cat) => (
-              <div key={cat.id} className="flex items-center gap-3 bg-gray-50 rounded-2xl p-3">
-                <EmojiCircle emoji={cat.icon} size={36} bg="#ede9fe" />
-                <div className="flex-1 min-w-0">
-                  <p className="text-gray-900 font-medium text-sm">{cat.name} {cat.is_fund && <span className="text-[10px] bg-violet-100 text-violet-600 px-1.5 py-0.5 rounded-full ml-1">Quỹ</span>}</p>
-                  {cat.monthly_limit && <p className="text-gray-400 text-xs">Hạn mức: {formatMoney(cat.monthly_limit)}</p>}
-                </div>
-                <button onClick={() => startEdit(cat)} className="w-8 h-8 rounded-full bg-white flex items-center justify-center"><Pencil size={14} className="text-gray-500" /></button>
-                <button onClick={() => handleDelete(cat.id)} className="w-8 h-8 rounded-full bg-white flex items-center justify-center"><Trash2 size={14} className="text-red-400" /></button>
-              </div>
-            ))}
-          </div>
+        <div className="px-5 mt-4 flex gap-2">
+          <button onClick={() => setSection('categories')} className={`flex-1 py-2 rounded-full text-sm font-medium ${section === 'categories' ? 'bg-white text-gray-900' : 'bg-white/30 text-white'}`}>Danh mục</button>
+          <button onClick={() => setSection('accounts')} className={`flex-1 py-2 rounded-full text-sm font-medium ${section === 'accounts' ? 'bg-white text-gray-900' : 'bg-white/30 text-white'}`}>Tài khoản</button>
         </div>
 
-        {editing && (
-          <div className="fixed inset-0 bg-black/40 flex items-end z-20" onClick={() => setEditing(null)}>
-            <div className="bg-white w-full rounded-t-3xl p-5 max-w-sm mx-auto" onClick={(e) => e.stopPropagation()}>
-              <div className="flex items-center justify-between mb-4"><h3 className="font-semibold text-gray-900">{editing === 'new' ? 'Danh mục mới' : 'Sửa danh mục'}</h3><button onClick={() => setEditing(null)}><X size={18} className="text-gray-500" /></button></div>
-              <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Tên danh mục" className="w-full bg-gray-100 rounded-xl px-4 py-3 text-sm outline-none mb-3" />
-              <input value={form.icon} onChange={(e) => setForm({ ...form, icon: e.target.value })} placeholder="Emoji (vd: 🍜)" className="w-full bg-gray-100 rounded-xl px-4 py-3 text-sm outline-none mb-3" />
-              <input value={form.monthly_limit} onChange={(e) => setForm({ ...form, monthly_limit: e.target.value.replace(/\D/g, '') })} inputMode="numeric" placeholder="Hạn mức tối đa mỗi lần nhập (không bắt buộc)" className="w-full bg-gray-100 rounded-xl px-4 py-3 text-sm outline-none mb-3" />
-              <label className="flex items-center gap-2 mb-4 text-sm text-gray-600"><input type="checkbox" checked={form.is_fund} onChange={(e) => setForm({ ...form, is_fund: e.target.checked })} /> Đây là 1 "quỹ" — hiện thẻ tổng tiền ở Trang chủ</label>
-              <button onClick={handleSave} disabled={saving} className="w-full bg-gray-900 text-white rounded-xl py-3 font-semibold flex items-center justify-center gap-2 disabled:opacity-60">{saving ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />} Lưu</button>
-            </div>
-          </div>
-        )}
+        <div className="mt-4 bg-white rounded-t-[2.5rem] min-h-[76vh] px-5 pt-6 pb-6">
+          {section === 'categories' ? <CategorySection categories={categories} reload={reload} /> : <AccountSection accounts={accounts} reload={reload} />}
+        </div>
         <BottomNav screen="settings" setScreen={setScreen} />
       </div>
     </div>
@@ -529,7 +612,7 @@ function MainApp() {
   if (screen === 'goals') return <Goals setScreen={setScreen} goals={goals} loadingGoals={loadingGoals} reload={loadAll} />;
   if (screen === 'add') return <AddTransaction setScreen={setScreen} accounts={accounts} categories={categories} onSaved={loadAll} />;
   if (screen === 'accounts') return <Accounts setScreen={setScreen} accounts={accounts} transactions={transactions} />;
-  if (screen === 'settings') return <Settings setScreen={setScreen} categories={categories} reload={loadAll} />;
+  if (screen === 'settings') return <Settings setScreen={setScreen} categories={categories} accounts={accounts} reload={loadAll} />;
   return <Dashboard setScreen={setScreen} transactions={transactions} categories={categories} loading={loading} />;
 }
 
