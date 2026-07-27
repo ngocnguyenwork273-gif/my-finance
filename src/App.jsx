@@ -25,41 +25,82 @@ function AuthScreen() {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
+  const [isError, setIsError] = useState(false);
 
   async function handleSubmit() {
-    if (!email || !password) { setMessage('Nhập đủ email và mật khẩu'); return; }
+    if (!email || !password) { setMessage('Nhập đủ email và mật khẩu'); setIsError(true); return; }
     setLoading(true);
     setMessage('');
     if (mode === 'login') {
       const { error } = await supabase.auth.signInWithPassword({ email, password });
-      if (error) setMessage('Lỗi: ' + error.message);
+      if (error) { setMessage(error.message); setIsError(true); }
     } else {
       const { error } = await supabase.auth.signUp({ email, password });
-      if (error) setMessage('Lỗi: ' + error.message);
-      else setMessage('Tạo tài khoản thành công! Giờ bấm Đăng nhập.');
+      if (error) { setMessage(error.message); setIsError(true); }
+      else { setMessage('Tạo tài khoản thành công! Giờ bấm Đăng nhập.'); setIsError(false); }
     }
     setLoading(false);
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-violet-400 via-fuchsia-300 to-orange-100 flex items-center justify-center px-6">
-      <div className="w-full max-w-sm bg-white rounded-3xl p-6 shadow-xl">
-        <h1 className="text-xl font-semibold text-gray-900 mb-1">{mode === 'login' ? 'Đăng nhập' : 'Tạo tài khoản'}</h1>
-        <p className="text-gray-400 text-sm mb-6">Quản lý tài chính cá nhân của bạn</p>
-        <div className="flex items-center gap-2 bg-gray-100 rounded-2xl px-4 py-3 mb-3">
-          <Mail size={16} className="text-gray-400" />
-          <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email" className="bg-transparent outline-none text-sm flex-1" />
+    <div className="min-h-screen relative overflow-hidden flex items-center justify-center px-6 bg-gradient-to-br from-violet-500 via-fuchsia-400 to-orange-200">
+      {/* Khối tròn mờ tạo chiều sâu cho hiệu ứng kính */}
+      <div className="absolute -top-24 -left-16 w-72 h-72 rounded-full bg-fuchsia-300/40 blur-3xl" />
+      <div className="absolute top-1/3 -right-20 w-80 h-80 rounded-full bg-violet-400/40 blur-3xl" />
+      <div className="absolute -bottom-28 left-1/4 w-72 h-72 rounded-full bg-orange-200/50 blur-3xl" />
+
+      {/* Thẻ kính (glassmorphism) */}
+      <div className="relative w-full max-w-sm rounded-[2rem] bg-white/15 backdrop-blur-2xl border border-white/30 shadow-2xl shadow-black/10 p-7">
+        <div className="w-14 h-14 rounded-2xl bg-white/25 backdrop-blur border border-white/40 flex items-center justify-center mb-5">
+          <Wallet size={24} className="text-white" strokeWidth={1.8} />
         </div>
-        <div className="flex items-center gap-2 bg-gray-100 rounded-2xl px-4 py-3 mb-4">
-          <Lock size={16} className="text-gray-400" />
-          <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Mật khẩu (tối thiểu 6 ký tự)" className="bg-transparent outline-none text-sm flex-1" />
+
+        <h1 className="text-2xl font-semibold text-white mb-1">
+          {mode === 'login' ? 'Chào mừng trở lại' : 'Tạo tài khoản mới'}
+        </h1>
+        <p className="text-white/70 text-sm mb-7">Quản lý tài chính cá nhân của bạn</p>
+
+        <div className="flex flex-col gap-3 mb-2">
+          <div className="flex items-center gap-3 bg-white/15 backdrop-blur border border-white/25 rounded-2xl px-4 py-3.5 focus-within:border-white/50 transition">
+            <Mail size={17} className="text-white/70 flex-shrink-0" />
+            <input
+              type="email" value={email} onChange={(e) => setEmail(e.target.value)}
+              placeholder="Email" autoCapitalize="none"
+              className="bg-transparent outline-none text-sm flex-1 text-white placeholder:text-white/50"
+            />
+          </div>
+          <div className="flex items-center gap-3 bg-white/15 backdrop-blur border border-white/25 rounded-2xl px-4 py-3.5 focus-within:border-white/50 transition">
+            <Lock size={17} className="text-white/70 flex-shrink-0" />
+            <input
+              type="password" value={password} onChange={(e) => setPassword(e.target.value)}
+              placeholder="Mật khẩu (tối thiểu 6 ký tự)"
+              className="bg-transparent outline-none text-sm flex-1 text-white placeholder:text-white/50"
+            />
+          </div>
         </div>
-        {message && <p className="text-sm text-center mb-4 text-violet-600">{message}</p>}
-        <button onClick={handleSubmit} disabled={loading} className="w-full bg-gray-900 text-white rounded-2xl py-3 font-semibold flex items-center justify-center gap-2 disabled:opacity-60">
-          {loading ? <Loader2 size={18} className="animate-spin" /> : null}{mode === 'login' ? 'Đăng nhập' : 'Tạo tài khoản'}
+
+        {message && (
+          <p className={`text-sm text-center mt-4 ${isError ? 'text-red-100 bg-red-500/20 border border-red-200/30' : 'text-emerald-50 bg-emerald-500/20 border border-emerald-200/30'} rounded-xl py-2 px-3`}>
+            {message}
+          </p>
+        )}
+
+        <button
+          onClick={handleSubmit} disabled={loading}
+          className="w-full bg-white text-gray-900 rounded-2xl py-3.5 font-semibold flex items-center justify-center gap-2 disabled:opacity-60 mt-6 shadow-lg shadow-black/10 hover:bg-white/90 transition"
+        >
+          {loading ? <Loader2 size={18} className="animate-spin" /> : null}
+          {mode === 'login' ? 'Đăng nhập' : 'Tạo tài khoản'}
         </button>
-        <button onClick={() => { setMode(mode === 'login' ? 'signup' : 'login'); setMessage(''); }} className="w-full text-center text-sm text-gray-500 mt-4">
-          {mode === 'login' ? 'Chưa có tài khoản? Tạo mới' : 'Đã có tài khoản? Đăng nhập'}
+
+        <button
+          onClick={() => { setMode(mode === 'login' ? 'signup' : 'login'); setMessage(''); }}
+          className="w-full text-center text-sm text-white/70 mt-5 hover:text-white transition"
+        >
+          {mode === 'login' ? 'Chưa có tài khoản? ' : 'Đã có tài khoản? '}
+          <span className="text-white font-medium underline underline-offset-2">
+            {mode === 'login' ? 'Tạo mới' : 'Đăng nhập'}
+          </span>
         </button>
       </div>
     </div>
