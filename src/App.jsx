@@ -156,21 +156,54 @@ function EmojiCircle({ emoji, size = 36, active = false, activeColor = '#7c3aed'
   return <div className="rounded-xl flex items-center justify-center flex-shrink-0" style={{ width: size, height: size, background: active ? activeColor : bg, fontSize: size * 0.5 }}>{emoji || '❔'}</div>;
 }
 
-function BottomNav({ screen, setScreen }) {
+const NAV_ITEMS = [
+  { key: 'dashboard', icon: Home, label: 'Trang chủ' },
+  { key: 'goals', icon: Sparkles, label: 'Mục tiêu' },
+  { key: 'report', icon: BarChart3, label: 'Báo cáo' },
+  { key: 'settings', icon: SettingsIcon, label: 'Cài đặt' },
+];
+
+function BottomNav({ screen, setScreen, onAddClick }) {
   return (
-    <div className="fixed bottom-4 left-1/2 -translate-x-1/2 w-[calc(100%-2.5rem)] max-w-sm bg-white rounded-full shadow-xl shadow-black/10 px-6 py-3 flex items-center justify-between z-10">
-      <button onClick={() => setScreen('dashboard')}><Home size={20} className={screen === 'dashboard' ? 'text-gray-900' : 'text-gray-300'} /></button>
-      <button onClick={() => setScreen('goals')}><Sparkles size={20} className={screen === 'goals' ? 'text-gray-900' : 'text-gray-300'} /></button>
-      <button onClick={() => setScreen('add')} className="w-11 h-11 rounded-full bg-gray-900 flex items-center justify-center -mt-6 shadow-lg"><Plus size={20} className="text-white" /></button>
-      <button onClick={() => setScreen('report')}><BarChart3 size={20} className={screen === 'report' ? 'text-gray-900' : 'text-gray-300'} /></button>
-      <button onClick={() => setScreen('settings')}><SettingsIcon size={20} className={screen === 'settings' ? 'text-gray-900' : 'text-gray-300'} /></button>
-    </div>
+    <>
+      {/* Thanh dưới cùng — chỉ hiện trên điện thoại */}
+      <div className="fixed bottom-4 left-1/2 -translate-x-1/2 w-[calc(100%-2.5rem)] max-w-sm bg-white rounded-full shadow-xl shadow-black/10 px-6 py-3 flex items-center justify-between z-10 md:hidden">
+        <button onClick={() => setScreen('dashboard')}><Home size={20} className={screen === 'dashboard' ? 'text-gray-900' : 'text-gray-300'} /></button>
+        <button onClick={() => setScreen('goals')}><Sparkles size={20} className={screen === 'goals' ? 'text-gray-900' : 'text-gray-300'} /></button>
+        <button onClick={onAddClick} className="w-11 h-11 rounded-full bg-gray-900 flex items-center justify-center -mt-6 shadow-lg"><Plus size={20} className="text-white" /></button>
+        <button onClick={() => setScreen('report')}><BarChart3 size={20} className={screen === 'report' ? 'text-gray-900' : 'text-gray-300'} /></button>
+        <button onClick={() => setScreen('settings')}><SettingsIcon size={20} className={screen === 'settings' ? 'text-gray-900' : 'text-gray-300'} /></button>
+      </div>
+
+      {/* Sidebar đầy đủ — chỉ hiện trên tablet/PC (từ md trở lên) */}
+      <div className="hidden md:flex flex-col fixed left-0 top-0 h-screen w-56 bg-white border-r border-gray-100 px-4 py-6 z-10">
+        <div className="flex items-center gap-2 px-2 mb-8">
+          <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center flex-shrink-0">
+            <Wallet size={17} className="text-white" />
+          </div>
+          <span className="font-semibold text-gray-900">MyFinance</span>
+        </div>
+
+        <button onClick={onAddClick} className="w-full bg-gray-900 text-white rounded-2xl py-3 font-medium flex items-center justify-center gap-2 mb-6 shadow-sm">
+          <Plus size={18} /> Thêm giao dịch
+        </button>
+
+        <div className="flex flex-col gap-1">
+          {NAV_ITEMS.map(({ key, icon: Icon, label }) => (
+            <button key={key} onClick={() => setScreen(key)}
+              className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition ${screen === key ? 'bg-violet-50 text-violet-700' : 'text-gray-500 hover:bg-gray-50'}`}>
+              <Icon size={18} />{label}
+            </button>
+          ))}
+        </div>
+      </div>
+    </>
   );
 }
 
 /* ---------- Dashboard ---------- */
 
-function Dashboard({ setScreen, transactions, categories, loading, displayName }) {
+function Dashboard({ setScreen, transactions, categories, loading, displayName, onAddClick }) {
   const fundCategories = categories.filter((c) => c.is_fund);
   function fundTotal(catId) { return transactions.filter((t) => t.category_id === catId).reduce((s, t) => s + Number(t.amount), 0); }
   const expenseCats = categories.filter((c) => c.type === 'expense' && !c.is_fund);
@@ -181,62 +214,66 @@ function Dashboard({ setScreen, transactions, categories, loading, displayName }
   const palette = ['#7c3aed', '#a78bfa', '#c4b5fd', '#ddd6fe', '#ede9fe', '#f5f3ff'];
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-violet-400 via-fuchsia-300 to-orange-100 flex justify-center">
-      <div className="w-full max-w-sm min-h-screen pb-28 relative">
+    <div className="min-h-screen bg-gradient-to-b from-violet-400 via-fuchsia-300 to-orange-100 flex justify-center md:pl-64">
+      <div className="w-full max-w-sm md:max-w-2xl lg:max-w-3xl min-h-screen pb-28 md:pb-10 md:pt-4 relative">
         <div className="px-5 pt-8 flex items-center justify-between">
           <div><p className="text-white/80 text-sm">Chào bạn!</p><h1 className="text-white text-2xl font-semibold">{displayName || 'Bạn'}</h1></div>
           <button onClick={() => setScreen('accounts')} className="w-11 h-11 rounded-full bg-white/30 backdrop-blur flex items-center justify-center text-white border border-white/40"><Wallet size={18} /></button>
         </div>
-        <div className="mt-6 px-5 flex gap-3 overflow-x-auto pb-2">
-          {fundCategories.length === 0 ? <p className="text-white/70 text-sm">Đánh dấu danh mục là "Quỹ" trong Cài đặt để hiện ở đây.</p>
+        <div className="mt-6 px-5 flex gap-3 overflow-x-auto pb-2 md:grid md:grid-cols-3 md:overflow-visible">
+          {fundCategories.length === 0 ? <p className="text-white/70 text-sm md:col-span-3">Đánh dấu danh mục là "Quỹ" trong Cài đặt để hiện ở đây.</p>
             : fundCategories.map((f) => (
-              <div key={f.id} className="min-w-[150px] bg-white/90 backdrop-blur rounded-3xl p-4 shadow-lg shadow-black/5 flex-shrink-0">
+              <div key={f.id} className="min-w-[150px] md:min-w-0 bg-white/90 backdrop-blur rounded-3xl p-4 shadow-lg shadow-black/5 flex-shrink-0">
                 <EmojiCircle emoji={f.icon} size={36} active activeColor="#7c3aed" />
                 <p className="text-gray-500 text-xs mt-3">{f.name}</p>
                 <p className="text-gray-900 font-semibold text-base">{formatMoney(fundTotal(f.id))}</p>
               </div>
             ))}
         </div>
-        <div className="mt-6 bg-white rounded-t-[2.5rem] min-h-[60vh] px-5 pt-6 pb-6">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-gray-900 font-semibold text-lg">Ngân sách tháng này</h2>
-            <button onClick={() => setScreen('report')} className="text-violet-600 text-sm font-medium">Xem chi tiết</button>
-          </div>
-          {spentByCat.length === 0 ? <p className="text-gray-400 text-sm text-center py-6">Chưa có chi tiêu nào tháng này.</p> : (
-            <div className="flex items-center gap-6">
-              <svg width="150" height="150" viewBox="0 0 150 150" className="-rotate-90 flex-shrink-0">
-                {spentByCat.map((cat, i) => {
-                  const pct = cat.amount / total; const dash = pct * circumference; const offset = cumulative; cumulative += dash;
-                  return <circle key={cat.id} cx="75" cy="75" r={radius} fill="none" stroke={palette[i % palette.length]} strokeWidth="14" strokeDasharray={`${dash} ${circumference - dash}`} strokeDashoffset={-offset} strokeLinecap="round" />;
-                })}
-              </svg>
-              <div className="flex flex-col gap-2 text-sm min-w-0">
-                {spentByCat.map((cat, i) => (
-                  <div key={cat.id} className="flex items-center gap-2">
-                    <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: palette[i % palette.length] }} />
-                    <span className="text-gray-600">{cat.name}</span><span className="text-gray-900 font-medium ml-auto">{formatMoney(cat.amount)}</span>
-                  </div>
-                ))}
-              </div>
+        <div className="mt-6 bg-white rounded-t-[2.5rem] md:rounded-3xl min-h-[60vh] px-5 pt-6 pb-6 md:grid md:grid-cols-5 md:gap-8">
+          <div className="md:col-span-2 md:order-2">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-gray-900 font-semibold text-lg">Ngân sách tháng này</h2>
+              <button onClick={() => setScreen('report')} className="text-violet-600 text-sm font-medium">Xem chi tiết</button>
             </div>
-          )}
-          <div className="flex items-center justify-between mt-8 mb-3"><h2 className="text-gray-900 font-semibold text-lg">Giao dịch</h2></div>
-          {loading ? <div className="flex justify-center py-8"><Loader2 size={24} className="animate-spin text-violet-400" /></div>
-            : transactions.length === 0 ? <p className="text-gray-400 text-sm text-center py-8">Chưa có giao dịch nào. Bấm nút + để thêm.</p>
-            : <div className="flex flex-col divide-y divide-gray-100">
-                {transactions.slice(0, 20).map((tx) => {
-                  const cat = categories.find((c) => c.id === tx.category_id);
-                  return (
-                    <div key={tx.id} className="flex items-center gap-3 py-3">
-                      <EmojiCircle emoji={cat?.icon} size={40} bg={tx.type === 'income' ? '#ecfdf5' : '#f5f3ff'} />
-                      <div className="flex-1 min-w-0"><p className="text-gray-900 font-medium text-sm">{cat?.name || 'Khác'}</p><p className="text-gray-400 text-xs">{tx.note || new Date(tx.date || tx.created_at).toLocaleString('vi-VN')}</p></div>
-                      <p className={`font-medium text-sm flex-shrink-0 ${tx.type === 'income' ? 'text-emerald-600' : 'text-gray-900'}`}>{tx.type === 'income' ? '+' : '-'}{formatMoney(tx.amount)}</p>
+            {spentByCat.length === 0 ? <p className="text-gray-400 text-sm text-center py-6">Chưa có chi tiêu nào tháng này.</p> : (
+              <div className="flex items-center gap-6 md:flex-col md:items-start md:gap-4">
+                <svg width="150" height="150" viewBox="0 0 150 150" className="-rotate-90 flex-shrink-0">
+                  {spentByCat.map((cat, i) => {
+                    const pct = cat.amount / total; const dash = pct * circumference; const offset = cumulative; cumulative += dash;
+                    return <circle key={cat.id} cx="75" cy="75" r={radius} fill="none" stroke={palette[i % palette.length]} strokeWidth="14" strokeDasharray={`${dash} ${circumference - dash}`} strokeDashoffset={-offset} strokeLinecap="round" />;
+                  })}
+                </svg>
+                <div className="flex flex-col gap-2 text-sm min-w-0 w-full">
+                  {spentByCat.map((cat, i) => (
+                    <div key={cat.id} className="flex items-center gap-2">
+                      <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: palette[i % palette.length] }} />
+                      <span className="text-gray-600">{cat.name}</span><span className="text-gray-900 font-medium ml-auto">{formatMoney(cat.amount)}</span>
                     </div>
-                  );
-                })}
-              </div>}
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+          <div className="md:col-span-3 md:order-1 md:border-r md:border-gray-100 md:pr-8">
+            <div className="flex items-center justify-between mt-8 md:mt-0 mb-3"><h2 className="text-gray-900 font-semibold text-lg">Giao dịch</h2></div>
+            {loading ? <div className="flex justify-center py-8"><Loader2 size={24} className="animate-spin text-violet-400" /></div>
+              : transactions.length === 0 ? <p className="text-gray-400 text-sm text-center py-8">Chưa có giao dịch nào. Bấm nút + để thêm.</p>
+              : <div className="flex flex-col divide-y divide-gray-100">
+                  {transactions.slice(0, 20).map((tx) => {
+                    const cat = categories.find((c) => c.id === tx.category_id);
+                    return (
+                      <div key={tx.id} className="flex items-center gap-3 py-3">
+                        <EmojiCircle emoji={cat?.icon} size={40} bg={tx.type === 'income' ? '#ecfdf5' : '#f5f3ff'} />
+                        <div className="flex-1 min-w-0"><p className="text-gray-900 font-medium text-sm">{cat?.name || 'Khác'}</p><p className="text-gray-400 text-xs">{tx.note || new Date(tx.date || tx.created_at).toLocaleString('vi-VN')}</p></div>
+                        <p className={`font-medium text-sm flex-shrink-0 ${tx.type === 'income' ? 'text-emerald-600' : 'text-gray-900'}`}>{tx.type === 'income' ? '+' : '-'}{formatMoney(tx.amount)}</p>
+                      </div>
+                    );
+                  })}
+                </div>}
+          </div>
         </div>
-        <BottomNav screen="dashboard" setScreen={setScreen} />
+        <BottomNav screen="dashboard" setScreen={setScreen} onAddClick={onAddClick} />
       </div>
     </div>
   );
@@ -244,13 +281,13 @@ function Dashboard({ setScreen, transactions, categories, loading, displayName }
 
 /* ---------- Report ---------- */
 
-function Report({ setScreen }) {
+function Report({ setScreen, onAddClick }) {
   const [period, setPeriod] = useState('Monthly');
   const periods = ['Weekly', 'Monthly', 'Quarterly', 'Yearly'];
   const periodLabels = { Weekly: 'Tuần', Monthly: 'Tháng', Quarterly: 'Quý', Yearly: 'Năm' };
   return (
-    <div className="min-h-screen bg-gradient-to-b from-violet-400 via-fuchsia-200 to-orange-100 flex justify-center">
-      <div className="w-full max-w-sm min-h-screen pb-28 relative">
+    <div className="min-h-screen bg-gradient-to-b from-violet-400 via-fuchsia-200 to-orange-100 flex justify-center md:pl-64">
+      <div className="w-full max-w-sm md:max-w-2xl lg:max-w-3xl min-h-screen pb-28 md:pb-10 md:pt-4 relative">
         <div className="px-5 pt-8 flex items-center justify-between">
           <button onClick={() => setScreen('dashboard')} className="w-9 h-9 rounded-full bg-white/30 backdrop-blur flex items-center justify-center"><ArrowLeft size={18} className="text-white" /></button>
           <h1 className="text-white text-lg font-semibold">Báo cáo tài chính</h1>
@@ -268,7 +305,7 @@ function Report({ setScreen }) {
           <div className="flex gap-2 overflow-x-auto pb-1">{periods.map((p) => <button key={p} onClick={() => setPeriod(p)} className={`px-4 py-1.5 rounded-full text-sm flex-shrink-0 ${period === p ? 'bg-gray-900 text-white font-medium' : 'bg-gray-100 text-gray-500'}`}>{periodLabels[p]}</button>)}</div>
           <p className="text-gray-400 text-sm text-center py-8">Phần này sẽ nối dữ liệu thật ở bước tiếp theo.</p>
         </div>
-        <BottomNav screen="report" setScreen={setScreen} />
+        <BottomNav screen="report" setScreen={setScreen} onAddClick={onAddClick} />
       </div>
     </div>
   );
@@ -300,11 +337,11 @@ function AddGoalForm({ onClose, onSaved }) {
   );
 }
 
-function Goals({ setScreen, goals, loadingGoals, reload }) {
+function Goals({ setScreen, goals, loadingGoals, reload, onAddClick }) {
   const [showAddGoal, setShowAddGoal] = useState(false);
   return (
-    <div className="min-h-screen bg-gradient-to-b from-violet-400 via-fuchsia-200 to-orange-100 flex justify-center">
-      <div className="w-full max-w-sm min-h-screen pb-28 relative">
+    <div className="min-h-screen bg-gradient-to-b from-violet-400 via-fuchsia-200 to-orange-100 flex justify-center md:pl-64">
+      <div className="w-full max-w-sm md:max-w-2xl lg:max-w-3xl min-h-screen pb-28 md:pb-10 md:pt-4 relative">
         <div className="px-5 pt-8 flex items-center gap-3">
           <button onClick={() => setScreen('dashboard')} className="w-9 h-9 rounded-full bg-white/30 backdrop-blur flex items-center justify-center"><ArrowLeft size={18} className="text-white" /></button>
           <h1 className="text-white text-lg font-semibold">Mục tiêu</h1>
@@ -333,7 +370,7 @@ function Goals({ setScreen, goals, loadingGoals, reload }) {
               </div>}
         </div>
         {showAddGoal && <AddGoalForm onClose={() => setShowAddGoal(false)} onSaved={reload} />}
-        <BottomNav screen="goals" setScreen={setScreen} />
+        <BottomNav screen="goals" setScreen={setScreen} onAddClick={onAddClick} />
       </div>
     </div>
   );
@@ -341,7 +378,7 @@ function Goals({ setScreen, goals, loadingGoals, reload }) {
 
 /* ---------- Thêm giao dịch ---------- */
 
-function AddTransaction({ setScreen, accounts, categories, onSaved }) {
+function AddTransaction({ onClose, accounts, categories, onSaved }) {
   const [type, setType] = useState('expense');
   const [amount, setAmount] = useState('');
   const [selectedCategory, setSelectedCategory] = useState(null);
@@ -368,14 +405,14 @@ function AddTransaction({ setScreen, accounts, categories, onSaved }) {
     });
     setSaving(false);
     if (error) { alert('Lỗi khi lưu: ' + error.message); return; }
-    onSaved(); setScreen('dashboard');
+    onSaved(); onClose();
   }
 
   return (
-    <div className="min-h-screen bg-white flex justify-center">
-      <div className="w-full max-w-sm min-h-screen pb-10 relative">
-        <div className="px-5 pt-8 flex items-center justify-between">
-          <button onClick={() => setScreen('dashboard')} className="w-9 h-9 rounded-full bg-gray-100 flex items-center justify-center"><X size={18} className="text-gray-700" /></button>
+    <div className="fixed inset-0 bg-black/0 md:bg-black/40 z-30 md:flex md:items-center md:justify-center md:p-6" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="bg-white w-full h-full md:h-auto md:max-h-[88vh] md:max-w-lg md:rounded-3xl md:overflow-y-auto overflow-y-auto relative">
+        <div className="px-5 pt-8 md:pt-6 flex items-center justify-between sticky top-0 bg-white z-10">
+          <button onClick={onClose} className="w-9 h-9 rounded-full bg-gray-100 flex items-center justify-center"><X size={18} className="text-gray-700" /></button>
           <h1 className="text-gray-900 text-lg font-semibold">Thêm giao dịch</h1>
           <div className="w-9 h-9" />
         </div>
@@ -396,7 +433,7 @@ function AddTransaction({ setScreen, accounts, categories, onSaved }) {
         <div className="px-5 mt-8">
           <p className="text-gray-900 font-semibold text-sm mb-3">Danh mục</p>
           {categoryList.length === 0 ? <p className="text-gray-400 text-sm">Chưa có danh mục. Vào Cài đặt để thêm.</p> : (
-            <div className="grid grid-cols-4 gap-3">
+            <div className="grid grid-cols-4 sm:grid-cols-5 gap-3">
               {categoryList.map((cat) => {
                 const active = selectedCategory === cat.id;
                 const willExceed = cat.monthly_limit && Number(amount) > Number(cat.monthly_limit);
@@ -427,7 +464,7 @@ function AddTransaction({ setScreen, accounts, categories, onSaved }) {
           <p className="text-gray-900 font-semibold text-sm mb-3">Ghi chú</p>
           <input type="text" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Không bắt buộc" className="w-full bg-gray-100 rounded-2xl px-4 py-3 text-sm outline-none" />
         </div>
-        <div className="px-5 mt-10">
+        <div className="px-5 mt-10 pb-10">
           <button onClick={handleSave} disabled={saving} className="w-full bg-gray-900 text-white rounded-2xl py-4 font-semibold flex items-center justify-center gap-2 disabled:opacity-60">{saving ? <Loader2 size={18} className="animate-spin" /> : <Check size={18} />}{saving ? 'Đang lưu...' : 'Lưu giao dịch'}</button>
         </div>
       </div>
@@ -437,15 +474,15 @@ function AddTransaction({ setScreen, accounts, categories, onSaved }) {
 
 /* ---------- Tiền trong tài khoản ---------- */
 
-function Accounts({ setScreen, accounts, transactions }) {
+function Accounts({ setScreen, accounts, transactions, onAddClick }) {
   function balanceOf(acc) {
     const delta = transactions.filter((t) => t.account_id === acc.id).reduce((s, t) => s + (t.type === 'income' ? Number(t.amount) : -Number(t.amount)), 0);
     return Number(acc.initial_balance || 0) + delta;
   }
   const totalBalance = accounts.reduce((s, a) => s + balanceOf(a), 0);
   return (
-    <div className="min-h-screen bg-gradient-to-b from-violet-400 via-fuchsia-200 to-orange-100 flex justify-center">
-      <div className="w-full max-w-sm min-h-screen pb-28 relative">
+    <div className="min-h-screen bg-gradient-to-b from-violet-400 via-fuchsia-200 to-orange-100 flex justify-center md:pl-64">
+      <div className="w-full max-w-sm md:max-w-2xl lg:max-w-3xl min-h-screen pb-28 md:pb-10 md:pt-4 relative">
         <div className="px-5 pt-8 flex items-center gap-3">
           <button onClick={() => setScreen('dashboard')} className="w-9 h-9 rounded-full bg-white/30 backdrop-blur flex items-center justify-center"><ArrowLeft size={18} className="text-white" /></button>
           <h1 className="text-white text-lg font-semibold">Tiền trong tài khoản</h1>
@@ -462,7 +499,7 @@ function Accounts({ setScreen, accounts, transactions }) {
             ))}
           </div>
         </div>
-        <BottomNav screen="accounts" setScreen={setScreen} />
+        <BottomNav screen="accounts" setScreen={setScreen} onAddClick={onAddClick} />
       </div>
     </div>
   );
@@ -642,7 +679,7 @@ function ProfileSection({ user, onUpdated }) {
   );
 }
 
-function Settings({ setScreen, categories, accounts, reload, user, onProfileUpdated }) {
+function Settings({ setScreen, categories, accounts, reload, user, onProfileUpdated, onAddClick }) {
   const [section, setSection] = useState('profile'); // 'profile' | 'categories' | 'accounts'
 
   async function handleLogout() {
@@ -650,8 +687,8 @@ function Settings({ setScreen, categories, accounts, reload, user, onProfileUpda
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-violet-400 via-fuchsia-200 to-orange-100 flex justify-center">
-      <div className="w-full max-w-sm min-h-screen pb-28 relative">
+    <div className="min-h-screen bg-gradient-to-b from-violet-400 via-fuchsia-200 to-orange-100 flex justify-center md:pl-64">
+      <div className="w-full max-w-sm md:max-w-2xl lg:max-w-3xl min-h-screen pb-28 md:pb-10 md:pt-4 relative">
         <div className="px-5 pt-8 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <button onClick={() => setScreen('dashboard')} className="w-9 h-9 rounded-full bg-white/30 backdrop-blur flex items-center justify-center"><ArrowLeft size={18} className="text-white" /></button>
@@ -671,7 +708,7 @@ function Settings({ setScreen, categories, accounts, reload, user, onProfileUpda
           {section === 'categories' && <CategorySection categories={categories} reload={reload} />}
           {section === 'accounts' && <AccountSection accounts={accounts} reload={reload} />}
         </div>
-        <BottomNav screen="settings" setScreen={setScreen} />
+        <BottomNav screen="settings" setScreen={setScreen} onAddClick={onAddClick} />
       </div>
     </div>
   );
@@ -710,12 +747,13 @@ function MainApp({ user }) {
 
   useEffect(() => { loadAll(); }, []);
 
-  if (screen === 'report') return <Report setScreen={setScreen} />;
-  if (screen === 'goals') return <Goals setScreen={setScreen} goals={goals} loadingGoals={loadingGoals} reload={loadAll} />;
-  if (screen === 'add') return <AddTransaction setScreen={setScreen} accounts={accounts} categories={categories} onSaved={loadAll} />;
-  if (screen === 'accounts') return <Accounts setScreen={setScreen} accounts={accounts} transactions={transactions} />;
-  if (screen === 'settings') return <Settings setScreen={setScreen} categories={categories} accounts={accounts} reload={loadAll} user={currentUser} onProfileUpdated={refreshUser} />;
-  return <Dashboard setScreen={setScreen} transactions={transactions} categories={categories} loading={loading} displayName={displayName} />;
+  const [showAdd, setShowAdd] = useState(false);
+
+  if (screen === 'report') return <><Report setScreen={setScreen} onAddClick={() => setShowAdd(true)} />{showAdd && <AddTransaction onClose={() => setShowAdd(false)} accounts={accounts} categories={categories} onSaved={loadAll} />}</>;
+  if (screen === 'goals') return <><Goals setScreen={setScreen} goals={goals} loadingGoals={loadingGoals} reload={loadAll} onAddClick={() => setShowAdd(true)} />{showAdd && <AddTransaction onClose={() => setShowAdd(false)} accounts={accounts} categories={categories} onSaved={loadAll} />}</>;
+  if (screen === 'accounts') return <><Accounts setScreen={setScreen} accounts={accounts} transactions={transactions} onAddClick={() => setShowAdd(true)} />{showAdd && <AddTransaction onClose={() => setShowAdd(false)} accounts={accounts} categories={categories} onSaved={loadAll} />}</>;
+  if (screen === 'settings') return <><Settings setScreen={setScreen} categories={categories} accounts={accounts} reload={loadAll} user={currentUser} onProfileUpdated={refreshUser} onAddClick={() => setShowAdd(true)} />{showAdd && <AddTransaction onClose={() => setShowAdd(false)} accounts={accounts} categories={categories} onSaved={loadAll} />}</>;
+  return <><Dashboard setScreen={setScreen} transactions={transactions} categories={categories} loading={loading} displayName={displayName} onAddClick={() => setShowAdd(true)} />{showAdd && <AddTransaction onClose={() => setShowAdd(false)} accounts={accounts} categories={categories} onSaved={loadAll} />}</>;
 }
 
 export default function App() {
