@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
 import { supabase } from './supabaseClient';
 import {
-  Home, Sparkles, Plus, BarChart3, Settings as SettingsIcon, TrendingUp, PiggyBank, HeartPulse,
-  ArrowLeft, Download, X, Check, Loader2, Target, Wallet, Trash2, Pencil, LogOut, Mail, Lock,
+  Home, Sparkles, Plus, BarChart3, Settings as SettingsIcon, TrendingUp, TrendingDown, PiggyBank, HeartPulse,
+  ArrowLeft, Download, X, Check, Loader2, Target, Wallet, Trash2, Pencil, LogOut, Mail, Lock, Search, Bell, Sun, Moon,
 } from 'lucide-react';
 
 const monthlyLimit = 5000000;
@@ -163,7 +163,7 @@ const NAV_ITEMS = [
   { key: 'settings', icon: SettingsIcon, label: 'Cài đặt' },
 ];
 
-function BottomNav({ screen, setScreen, onAddClick }) {
+function BottomNav({ screen, setScreen, onAddClick, displayName, theme, toggleTheme }) {
   return (
     <>
       {/* Thanh dưới cùng — chỉ hiện trên điện thoại */}
@@ -175,26 +175,41 @@ function BottomNav({ screen, setScreen, onAddClick }) {
         <button onClick={() => setScreen('settings')}><SettingsIcon size={20} className={screen === 'settings' ? 'text-gray-900' : 'text-gray-300'} /></button>
       </div>
 
-      {/* Sidebar đầy đủ — chỉ hiện trên tablet/PC (từ md trở lên) */}
-      <div className="hidden md:flex flex-col fixed left-0 top-0 h-screen w-56 bg-white border-r border-gray-100 px-4 py-6 z-10">
-        <div className="flex items-center gap-2 px-2 mb-8">
+      {/* Thanh nav ngang trên cùng — chỉ hiện trên tablet/PC (từ md trở lên) */}
+      <div className="hidden md:flex fixed top-0 inset-x-0 h-20 bg-white dark:bg-gray-950 border-b border-gray-100 dark:border-gray-800 items-center px-8 z-20 transition-colors">
+        <div className="flex items-center gap-2 mr-10">
           <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center flex-shrink-0">
             <Wallet size={17} className="text-white" />
           </div>
-          <span className="font-semibold text-gray-900">MyFinance</span>
+          <span className="font-semibold text-gray-900 dark:text-white">MyFinance</span>
         </div>
 
-        <button onClick={onAddClick} className="w-full bg-gray-900 text-white rounded-2xl py-3 font-medium flex items-center justify-center gap-2 mb-6 shadow-sm">
-          <Plus size={18} /> Thêm giao dịch
-        </button>
+        {/* Nút chuyển Sáng/Tối */}
+        <div className="flex items-center gap-1 bg-gray-50 dark:bg-gray-900 rounded-full p-1 mr-4">
+          <button onClick={() => theme !== 'light' && toggleTheme()} className={`w-8 h-8 rounded-full flex items-center justify-center transition ${theme === 'light' ? 'bg-white shadow text-gray-900' : 'text-gray-400'}`}>
+            <Sun size={15} />
+          </button>
+          <button onClick={() => theme !== 'dark' && toggleTheme()} className={`w-8 h-8 rounded-full flex items-center justify-center transition ${theme === 'dark' ? 'bg-gray-800 shadow text-white' : 'text-gray-400'}`}>
+            <Moon size={15} />
+          </button>
+        </div>
 
-        <div className="flex flex-col gap-1">
+        <div className="flex items-center gap-1 bg-gray-50 dark:bg-gray-900 rounded-full p-1">
           {NAV_ITEMS.map(({ key, icon: Icon, label }) => (
             <button key={key} onClick={() => setScreen(key)}
-              className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition ${screen === key ? 'bg-violet-50 text-violet-700' : 'text-gray-500 hover:bg-gray-50'}`}>
-              <Icon size={18} />{label}
+              className={`flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium transition ${screen === key ? 'bg-white dark:bg-gray-800 shadow text-gray-900 dark:text-white' : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-200'}`}>
+              <Icon size={16} />{label}
             </button>
           ))}
+        </div>
+
+        <div className="ml-auto flex items-center gap-3">
+          <button onClick={onAddClick} className="bg-gray-900 dark:bg-violet-600 text-white rounded-full px-4 py-2.5 text-sm font-medium flex items-center gap-2">
+            <Plus size={16} /> Thêm giao dịch
+          </button>
+          <div className="w-9 h-9 rounded-full bg-violet-50 dark:bg-violet-500/20 flex items-center justify-center text-violet-600 dark:text-violet-300 font-semibold text-sm">
+            {(displayName || 'B')[0].toUpperCase()}
+          </div>
         </div>
       </div>
     </>
@@ -203,7 +218,8 @@ function BottomNav({ screen, setScreen, onAddClick }) {
 
 /* ---------- Dashboard ---------- */
 
-function Dashboard({ setScreen, transactions, categories, loading, displayName, onAddClick }) {
+function Dashboard({ setScreen, transactions, categories, accounts, loading, displayName, onAddClick, theme, toggleTheme }) {
+  const [search, setSearch] = useState('');
   const fundCategories = categories.filter((c) => c.is_fund);
   function fundTotal(catId) { return transactions.filter((t) => t.category_id === catId).reduce((s, t) => s + Number(t.amount), 0); }
   const expenseCats = categories.filter((c) => c.type === 'expense' && !c.is_fund);
@@ -213,67 +229,253 @@ function Dashboard({ setScreen, transactions, categories, loading, displayName, 
   let cumulative = 0;
   const palette = ['#7c3aed', '#a78bfa', '#c4b5fd', '#ddd6fe', '#ede9fe', '#f5f3ff'];
 
+  // ----- Dữ liệu tính thêm cho bố cục desktop -----
+  const now = new Date();
+  const thisMonthTx = transactions.filter((t) => { const d = new Date(t.created_at); return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear(); });
+  const incomeThisMonth = thisMonthTx.filter((t) => t.type === 'income').reduce((s, t) => s + Number(t.amount), 0);
+  const expenseThisMonth = thisMonthTx.filter((t) => t.type === 'expense').reduce((s, t) => s + Number(t.amount), 0);
+
+  const monthLabels = [];
+  const monthTotals = [];
+  for (let i = 5; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const sum = transactions.filter((t) => { const td = new Date(t.created_at); return t.type === 'expense' && td.getMonth() === d.getMonth() && td.getFullYear() === d.getFullYear(); }).reduce((s, t) => s + Number(t.amount), 0);
+    monthLabels.push(`Th${d.getMonth() + 1}`);
+    monthTotals.push(sum);
+  }
+  const maxMonthTotal = Math.max(...monthTotals, 1);
+  const monthShades = ['#ede9fe', '#ddd6fe', '#c4b5fd', '#a78bfa', '#8b5cf6', '#7c3aed'];
+
+  const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+  const dailySpend = Array.from({ length: daysInMonth }, (_, i) => {
+    const day = i + 1;
+    return thisMonthTx.filter((t) => t.type === 'expense' && new Date(t.created_at).getDate() === day).reduce((s, t) => s + Number(t.amount), 0);
+  });
+  const maxDaily = Math.max(...dailySpend, 1);
+
+  const filteredTx = transactions.filter((t) => {
+    if (!search) return true;
+    const cat = categories.find((c) => c.id === t.category_id);
+    return (cat?.name || '').toLowerCase().includes(search.toLowerCase()) || (t.note || '').toLowerCase().includes(search.toLowerCase());
+  });
+
   return (
-    <div className="min-h-screen bg-gradient-to-b from-violet-400 via-fuchsia-300 to-orange-100 flex justify-center md:pl-64">
-      <div className="w-full max-w-sm md:max-w-2xl lg:max-w-3xl min-h-screen pb-28 md:pb-10 md:pt-4 relative">
+    <div className="min-h-screen bg-gradient-to-b from-violet-400 via-fuchsia-300 to-orange-100 md:bg-gray-50 dark:md:bg-gray-950 flex justify-center md:pt-20 transition-colors">
+      {/* ============ BẢN ĐIỆN THOẠI (giữ nguyên) ============ */}
+      <div className="w-full max-w-sm md:hidden min-h-screen pb-28 relative">
         <div className="px-5 pt-8 flex items-center justify-between">
           <div><p className="text-white/80 text-sm">Chào bạn!</p><h1 className="text-white text-2xl font-semibold">{displayName || 'Bạn'}</h1></div>
           <button onClick={() => setScreen('accounts')} className="w-11 h-11 rounded-full bg-white/30 backdrop-blur flex items-center justify-center text-white border border-white/40"><Wallet size={18} /></button>
         </div>
-        <div className="mt-6 px-5 flex gap-3 overflow-x-auto pb-2 md:grid md:grid-cols-3 md:overflow-visible">
-          {fundCategories.length === 0 ? <p className="text-white/70 text-sm md:col-span-3">Đánh dấu danh mục là "Quỹ" trong Cài đặt để hiện ở đây.</p>
+        <div className="mt-6 px-5 flex gap-3 overflow-x-auto pb-2">
+          {fundCategories.length === 0 ? <p className="text-white/70 text-sm">Đánh dấu danh mục là "Quỹ" trong Cài đặt để hiện ở đây.</p>
             : fundCategories.map((f) => (
-              <div key={f.id} className="min-w-[150px] md:min-w-0 bg-white/90 backdrop-blur rounded-3xl p-4 shadow-lg shadow-black/5 flex-shrink-0">
+              <div key={f.id} className="min-w-[150px] bg-white/90 backdrop-blur rounded-3xl p-4 shadow-lg shadow-black/5 flex-shrink-0">
                 <EmojiCircle emoji={f.icon} size={36} active activeColor="#7c3aed" />
                 <p className="text-gray-500 text-xs mt-3">{f.name}</p>
                 <p className="text-gray-900 font-semibold text-base">{formatMoney(fundTotal(f.id))}</p>
               </div>
             ))}
         </div>
-        <div className="mt-6 bg-white rounded-t-[2.5rem] md:rounded-3xl min-h-[60vh] px-5 pt-6 pb-6 md:grid md:grid-cols-5 md:gap-8">
-          <div className="md:col-span-2 md:order-2">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-gray-900 font-semibold text-lg">Ngân sách tháng này</h2>
-              <button onClick={() => setScreen('report')} className="text-violet-600 text-sm font-medium">Xem chi tiết</button>
+        <div className="mt-6 bg-white rounded-t-[2.5rem] min-h-[60vh] px-5 pt-6 pb-6">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-gray-900 font-semibold text-lg">Ngân sách tháng này</h2>
+            <button onClick={() => setScreen('report')} className="text-violet-600 text-sm font-medium">Xem chi tiết</button>
+          </div>
+          {spentByCat.length === 0 ? <p className="text-gray-400 text-sm text-center py-6">Chưa có chi tiêu nào tháng này.</p> : (
+            <div className="flex items-center gap-6">
+              <svg width="150" height="150" viewBox="0 0 150 150" className="-rotate-90 flex-shrink-0">
+                {spentByCat.map((cat, i) => {
+                  const pct = cat.amount / total; const dash = pct * circumference; const offset = cumulative; cumulative += dash;
+                  return <circle key={cat.id} cx="75" cy="75" r={radius} fill="none" stroke={palette[i % palette.length]} strokeWidth="14" strokeDasharray={`${dash} ${circumference - dash}`} strokeDashoffset={-offset} strokeLinecap="round" />;
+                })}
+              </svg>
+              <div className="flex flex-col gap-2 text-sm min-w-0">
+                {spentByCat.map((cat, i) => (
+                  <div key={cat.id} className="flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: palette[i % palette.length] }} />
+                    <span className="text-gray-600">{cat.name}</span><span className="text-gray-900 font-medium ml-auto">{formatMoney(cat.amount)}</span>
+                  </div>
+                ))}
+              </div>
             </div>
-            {spentByCat.length === 0 ? <p className="text-gray-400 text-sm text-center py-6">Chưa có chi tiêu nào tháng này.</p> : (
-              <div className="flex items-center gap-6 md:flex-col md:items-start md:gap-4">
-                <svg width="150" height="150" viewBox="0 0 150 150" className="-rotate-90 flex-shrink-0">
-                  {spentByCat.map((cat, i) => {
-                    const pct = cat.amount / total; const dash = pct * circumference; const offset = cumulative; cumulative += dash;
-                    return <circle key={cat.id} cx="75" cy="75" r={radius} fill="none" stroke={palette[i % palette.length]} strokeWidth="14" strokeDasharray={`${dash} ${circumference - dash}`} strokeDashoffset={-offset} strokeLinecap="round" />;
-                  })}
+          )}
+          <div className="flex items-center justify-between mt-8 mb-3"><h2 className="text-gray-900 font-semibold text-lg">Giao dịch</h2></div>
+          {loading ? <div className="flex justify-center py-8"><Loader2 size={24} className="animate-spin text-violet-400" /></div>
+            : transactions.length === 0 ? <p className="text-gray-400 text-sm text-center py-8">Chưa có giao dịch nào. Bấm nút + để thêm.</p>
+            : <div className="flex flex-col divide-y divide-gray-100">
+                {transactions.slice(0, 20).map((tx) => {
+                  const cat = categories.find((c) => c.id === tx.category_id);
+                  return (
+                    <div key={tx.id} className="flex items-center gap-3 py-3">
+                      <EmojiCircle emoji={cat?.icon} size={40} bg={tx.type === 'income' ? '#ecfdf5' : '#f5f3ff'} />
+                      <div className="flex-1 min-w-0"><p className="text-gray-900 font-medium text-sm">{cat?.name || 'Khác'}</p><p className="text-gray-400 text-xs">{tx.note || new Date(tx.date || tx.created_at).toLocaleString('vi-VN')}</p></div>
+                      <p className={`font-medium text-sm flex-shrink-0 ${tx.type === 'income' ? 'text-emerald-600' : 'text-gray-900'}`}>{tx.type === 'income' ? '+' : '-'}{formatMoney(tx.amount)}</p>
+                    </div>
+                  );
+                })}
+              </div>}
+        </div>
+        <BottomNav screen="dashboard" setScreen={setScreen} onAddClick={onAddClick} displayName={displayName} theme={theme} toggleTheme={toggleTheme} />
+      </div>
+
+      {/* ============ BẢN DESKTOP/TABLET (bố cục kiểu dashboard) ============ */}
+      <div className="hidden md:block w-full max-w-[1400px] px-8 py-8">
+        <div className="grid grid-cols-3 gap-6">
+          {/* Cột trái + giữa (2/3) */}
+          <div className="col-span-2 flex flex-col gap-6">
+            {/* Thẻ số liệu lớn */}
+            <div className="bg-white dark:bg-gray-900 rounded-3xl p-6 shadow-sm shadow-black/5 dark:border dark:border-gray-800 transition-colors">
+              <div className="flex items-center gap-10">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-3xl font-bold text-gray-900 dark:text-white">{formatMoney(incomeThisMonth)}</span>
+                    <span className="text-xs font-semibold bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 px-2 py-1 rounded-full">Thu</span>
+                  </div>
+                  <p className="text-gray-400 dark:text-gray-500 text-sm mt-1">Thu nhập tháng này</p>
+                </div>
+                <div className="w-px h-12 bg-gray-100 dark:bg-gray-800" />
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-3xl font-bold text-gray-900 dark:text-white">{formatMoney(expenseThisMonth)}</span>
+                    <span className="text-xs font-semibold bg-red-50 dark:bg-red-500/10 text-red-500 dark:text-red-400 px-2 py-1 rounded-full">Chi</span>
+                  </div>
+                  <p className="text-gray-400 dark:text-gray-500 text-sm mt-1">Chi tiêu tháng này</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 mt-6">
+                {monthLabels.map((label, i) => (
+                  <div key={i} className="flex-1">
+                    <div className="h-2 rounded-full" style={{ background: monthShades[Math.min(Math.floor((monthTotals[i] / maxMonthTotal) * (monthShades.length - 1)), monthShades.length - 1)] }} />
+                    <p className="text-[11px] text-gray-400 mt-1 text-center">{label}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Xu hướng chi tiêu theo ngày */}
+            <div className="bg-white dark:bg-gray-900 rounded-3xl p-6 shadow-sm shadow-black/5 dark:border dark:border-gray-800 transition-colors">
+              <h3 className="text-gray-900 dark:text-white font-semibold mb-4">Xu hướng chi tiêu theo ngày</h3>
+              {dailySpend.every((v) => v === 0) ? <p className="text-gray-400 dark:text-gray-500 text-sm text-center py-10">Chưa có dữ liệu tháng này.</p> : (
+                <svg viewBox="0 0 620 160" className="w-full h-40">
+                  <polyline
+                    fill="none" stroke="#7c3aed" strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round"
+                    points={dailySpend.map((v, i) => `${(i / (daysInMonth - 1)) * 600 + 10},${150 - (v / maxDaily) * 130}`).join(' ')}
+                  />
+                  {dailySpend.map((v, i) => v === maxDaily && v > 0 ? (
+                    <g key={i}>
+                      <circle cx={(i / (daysInMonth - 1)) * 600 + 10} cy={150 - (v / maxDaily) * 130} r="4" fill="#7c3aed" />
+                    </g>
+                  ) : null)}
                 </svg>
-                <div className="flex flex-col gap-2 text-sm min-w-0 w-full">
-                  {spentByCat.map((cat, i) => (
-                    <div key={cat.id} className="flex items-center gap-2">
-                      <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: palette[i % palette.length] }} />
-                      <span className="text-gray-600">{cat.name}</span><span className="text-gray-900 font-medium ml-auto">{formatMoney(cat.amount)}</span>
+              )}
+            </div>
+
+            {/* Bảng giao dịch gần đây */}
+            <div className="bg-white dark:bg-gray-900 rounded-3xl p-6 shadow-sm shadow-black/5 dark:border dark:border-gray-800 transition-colors">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-gray-900 dark:text-white font-semibold text-lg">Giao dịch gần đây</h3>
+                <div className="flex items-center gap-2 bg-gray-50 dark:bg-gray-800 rounded-full px-3 py-2 w-56">
+                  <Search size={15} className="text-gray-400" />
+                  <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Tìm kiếm" className="bg-transparent outline-none text-sm flex-1" />
+                </div>
+              </div>
+              {loading ? <div className="flex justify-center py-8"><Loader2 size={24} className="animate-spin text-violet-400" /></div>
+                : filteredTx.length === 0 ? <p className="text-gray-400 dark:text-gray-500 text-sm text-center py-8">Không có giao dịch nào.</p>
+                : (
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="text-left text-gray-400 border-b border-gray-100 dark:border-gray-800">
+                        <th className="pb-3 font-medium">Danh mục</th>
+                        <th className="pb-3 font-medium">Tài khoản</th>
+                        <th className="pb-3 font-medium">Ngày</th>
+                        <th className="pb-3 font-medium text-right">Số tiền</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredTx.slice(0, 10).map((tx) => {
+                        const cat = categories.find((c) => c.id === tx.category_id);
+                        const acc = accounts.find((a) => a.id === tx.account_id);
+                        return (
+                          <tr key={tx.id} className="border-b border-gray-50 dark:border-gray-800 last:border-0">
+                            <td className="py-3">
+                              <div className="flex items-center gap-2">
+                                <EmojiCircle emoji={cat?.icon} size={32} bg={tx.type === 'income' ? '#ecfdf5' : '#f5f3ff'} />
+                                <span className="text-gray-900 dark:text-white font-medium">{cat?.name || 'Khác'}</span>
+                              </div>
+                            </td>
+                            <td className="py-3 text-gray-500 dark:text-gray-400">{acc?.name || '—'}</td>
+                            <td className="py-3 text-gray-500 dark:text-gray-400">{new Date(tx.date || tx.created_at).toLocaleDateString('vi-VN')}</td>
+                            <td className={`py-3 text-right font-medium ${tx.type === 'income' ? 'text-emerald-600' : 'text-gray-900'}`}>{tx.type === 'income' ? '+' : '-'}{formatMoney(tx.amount)}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                )}
+            </div>
+          </div>
+
+          {/* Cột phải (1/3) */}
+          <div className="flex flex-col gap-6">
+            {/* Bản đồ nhiệt chi tiêu theo ngày */}
+            <div className="bg-white dark:bg-gray-900 rounded-3xl p-6 shadow-sm shadow-black/5 dark:border dark:border-gray-800 transition-colors">
+              <h3 className="text-gray-900 dark:text-white font-semibold mb-4">Nhiệt độ chi tiêu tháng này</h3>
+              <div className="grid grid-cols-7 gap-1.5">
+                {dailySpend.map((v, i) => {
+                  const intensity = v / maxDaily;
+                  const cellClass = v === 0 ? 'bg-gray-100 dark:bg-gray-800'
+                    : intensity > 0.7 ? 'bg-violet-600 dark:bg-violet-400'
+                    : intensity > 0.4 ? 'bg-violet-400 dark:bg-violet-500/70'
+                    : 'bg-violet-200 dark:bg-violet-500/30';
+                  return <div key={i} className={`aspect-square rounded ${cellClass}`} title={`Ngày ${i + 1}: ${formatMoney(v)}`} />;
+                })}
+              </div>
+            </div>
+
+            {/* Ngân sách theo danh mục */}
+            <div className="bg-white dark:bg-gray-900 rounded-3xl p-6 shadow-sm shadow-black/5 dark:border dark:border-gray-800 transition-colors">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-gray-900 dark:text-white font-semibold">Ngân sách theo danh mục</h3>
+                <button onClick={() => setScreen('report')} className="text-violet-600 text-xs font-medium">Chi tiết</button>
+              </div>
+              {spentByCat.length === 0 ? <p className="text-gray-400 dark:text-gray-500 text-sm text-center py-6">Chưa có chi tiêu nào.</p> : (
+                <div className="flex flex-col items-center">
+                  <svg width="150" height="150" viewBox="0 0 150 150" className="-rotate-90 flex-shrink-0 mb-4">
+                    {spentByCat.map((cat, i) => {
+                      const pct = cat.amount / total; const dash = pct * circumference; const offset = cumulative; cumulative += dash;
+                      return <circle key={cat.id} cx="75" cy="75" r={radius} fill="none" stroke={palette[i % palette.length]} strokeWidth="14" strokeDasharray={`${dash} ${circumference - dash}`} strokeDashoffset={-offset} strokeLinecap="round" />;
+                    })}
+                  </svg>
+                  <div className="flex flex-col gap-2 text-sm w-full">
+                    {spentByCat.map((cat, i) => (
+                      <div key={cat.id} className="flex items-center gap-2">
+                        <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: palette[i % palette.length] }} />
+                        <span className="text-gray-600 dark:text-gray-300">{cat.name}</span><span className="text-gray-900 dark:text-white font-medium ml-auto">{formatMoney(cat.amount)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Quỹ / thẻ ghim */}
+            <div className="bg-white dark:bg-gray-900 rounded-3xl p-6 shadow-sm shadow-black/5 dark:border dark:border-gray-800 transition-colors">
+              <h3 className="text-gray-900 dark:text-white font-semibold mb-4">Quỹ của bạn</h3>
+              {fundCategories.length === 0 ? <p className="text-gray-400 dark:text-gray-500 text-sm">Đánh dấu danh mục là "Quỹ" trong Cài đặt để hiện ở đây.</p> : (
+                <div className="flex flex-col gap-3">
+                  {fundCategories.map((f) => (
+                    <div key={f.id} className="flex items-center gap-3">
+                      <EmojiCircle emoji={f.icon} size={36} active activeColor="#7c3aed" />
+                      <div className="flex-1 min-w-0"><p className="text-gray-900 text-sm font-medium">{f.name}</p></div>
+                      <p className="text-gray-900 dark:text-white font-semibold text-sm">{formatMoney(fundTotal(f.id))}</p>
                     </div>
                   ))}
                 </div>
-              </div>
-            )}
-          </div>
-          <div className="md:col-span-3 md:order-1 md:border-r md:border-gray-100 md:pr-8">
-            <div className="flex items-center justify-between mt-8 md:mt-0 mb-3"><h2 className="text-gray-900 font-semibold text-lg">Giao dịch</h2></div>
-            {loading ? <div className="flex justify-center py-8"><Loader2 size={24} className="animate-spin text-violet-400" /></div>
-              : transactions.length === 0 ? <p className="text-gray-400 text-sm text-center py-8">Chưa có giao dịch nào. Bấm nút + để thêm.</p>
-              : <div className="flex flex-col divide-y divide-gray-100">
-                  {transactions.slice(0, 20).map((tx) => {
-                    const cat = categories.find((c) => c.id === tx.category_id);
-                    return (
-                      <div key={tx.id} className="flex items-center gap-3 py-3">
-                        <EmojiCircle emoji={cat?.icon} size={40} bg={tx.type === 'income' ? '#ecfdf5' : '#f5f3ff'} />
-                        <div className="flex-1 min-w-0"><p className="text-gray-900 font-medium text-sm">{cat?.name || 'Khác'}</p><p className="text-gray-400 text-xs">{tx.note || new Date(tx.date || tx.created_at).toLocaleString('vi-VN')}</p></div>
-                        <p className={`font-medium text-sm flex-shrink-0 ${tx.type === 'income' ? 'text-emerald-600' : 'text-gray-900'}`}>{tx.type === 'income' ? '+' : '-'}{formatMoney(tx.amount)}</p>
-                      </div>
-                    );
-                  })}
-                </div>}
+              )}
+            </div>
           </div>
         </div>
-        <BottomNav screen="dashboard" setScreen={setScreen} onAddClick={onAddClick} />
       </div>
     </div>
   );
@@ -281,12 +483,12 @@ function Dashboard({ setScreen, transactions, categories, loading, displayName, 
 
 /* ---------- Report ---------- */
 
-function Report({ setScreen, onAddClick }) {
+function Report({ setScreen, onAddClick, displayName, theme, toggleTheme }) {
   const [period, setPeriod] = useState('Monthly');
   const periods = ['Weekly', 'Monthly', 'Quarterly', 'Yearly'];
   const periodLabels = { Weekly: 'Tuần', Monthly: 'Tháng', Quarterly: 'Quý', Yearly: 'Năm' };
   return (
-    <div className="min-h-screen bg-gradient-to-b from-violet-400 via-fuchsia-200 to-orange-100 flex justify-center md:pl-64">
+    <div className="min-h-screen bg-gradient-to-b from-violet-400 via-fuchsia-200 to-orange-100 flex justify-center md:pt-20">
       <div className="w-full max-w-sm md:max-w-2xl lg:max-w-3xl min-h-screen pb-28 md:pb-10 md:pt-4 relative">
         <div className="px-5 pt-8 flex items-center justify-between">
           <button onClick={() => setScreen('dashboard')} className="w-9 h-9 rounded-full bg-white/30 backdrop-blur flex items-center justify-center"><ArrowLeft size={18} className="text-white" /></button>
@@ -305,7 +507,7 @@ function Report({ setScreen, onAddClick }) {
           <div className="flex gap-2 overflow-x-auto pb-1">{periods.map((p) => <button key={p} onClick={() => setPeriod(p)} className={`px-4 py-1.5 rounded-full text-sm flex-shrink-0 ${period === p ? 'bg-gray-900 text-white font-medium' : 'bg-gray-100 text-gray-500'}`}>{periodLabels[p]}</button>)}</div>
           <p className="text-gray-400 text-sm text-center py-8">Phần này sẽ nối dữ liệu thật ở bước tiếp theo.</p>
         </div>
-        <BottomNav screen="report" setScreen={setScreen} onAddClick={onAddClick} />
+        <BottomNav screen="report" setScreen={setScreen} onAddClick={onAddClick} displayName={displayName} theme={theme} toggleTheme={toggleTheme} />
       </div>
     </div>
   );
@@ -337,10 +539,10 @@ function AddGoalForm({ onClose, onSaved }) {
   );
 }
 
-function Goals({ setScreen, goals, loadingGoals, reload, onAddClick }) {
+function Goals({ setScreen, goals, loadingGoals, reload, onAddClick, displayName, theme, toggleTheme }) {
   const [showAddGoal, setShowAddGoal] = useState(false);
   return (
-    <div className="min-h-screen bg-gradient-to-b from-violet-400 via-fuchsia-200 to-orange-100 flex justify-center md:pl-64">
+    <div className="min-h-screen bg-gradient-to-b from-violet-400 via-fuchsia-200 to-orange-100 flex justify-center md:pt-20">
       <div className="w-full max-w-sm md:max-w-2xl lg:max-w-3xl min-h-screen pb-28 md:pb-10 md:pt-4 relative">
         <div className="px-5 pt-8 flex items-center gap-3">
           <button onClick={() => setScreen('dashboard')} className="w-9 h-9 rounded-full bg-white/30 backdrop-blur flex items-center justify-center"><ArrowLeft size={18} className="text-white" /></button>
@@ -370,7 +572,7 @@ function Goals({ setScreen, goals, loadingGoals, reload, onAddClick }) {
               </div>}
         </div>
         {showAddGoal && <AddGoalForm onClose={() => setShowAddGoal(false)} onSaved={reload} />}
-        <BottomNav screen="goals" setScreen={setScreen} onAddClick={onAddClick} />
+        <BottomNav screen="goals" setScreen={setScreen} onAddClick={onAddClick} displayName={displayName} theme={theme} toggleTheme={toggleTheme} />
       </div>
     </div>
   );
@@ -474,14 +676,14 @@ function AddTransaction({ onClose, accounts, categories, onSaved }) {
 
 /* ---------- Tiền trong tài khoản ---------- */
 
-function Accounts({ setScreen, accounts, transactions, onAddClick }) {
+function Accounts({ setScreen, accounts, transactions, onAddClick, displayName, theme, toggleTheme }) {
   function balanceOf(acc) {
     const delta = transactions.filter((t) => t.account_id === acc.id).reduce((s, t) => s + (t.type === 'income' ? Number(t.amount) : -Number(t.amount)), 0);
     return Number(acc.initial_balance || 0) + delta;
   }
   const totalBalance = accounts.reduce((s, a) => s + balanceOf(a), 0);
   return (
-    <div className="min-h-screen bg-gradient-to-b from-violet-400 via-fuchsia-200 to-orange-100 flex justify-center md:pl-64">
+    <div className="min-h-screen bg-gradient-to-b from-violet-400 via-fuchsia-200 to-orange-100 flex justify-center md:pt-20">
       <div className="w-full max-w-sm md:max-w-2xl lg:max-w-3xl min-h-screen pb-28 md:pb-10 md:pt-4 relative">
         <div className="px-5 pt-8 flex items-center gap-3">
           <button onClick={() => setScreen('dashboard')} className="w-9 h-9 rounded-full bg-white/30 backdrop-blur flex items-center justify-center"><ArrowLeft size={18} className="text-white" /></button>
@@ -499,7 +701,7 @@ function Accounts({ setScreen, accounts, transactions, onAddClick }) {
             ))}
           </div>
         </div>
-        <BottomNav screen="accounts" setScreen={setScreen} onAddClick={onAddClick} />
+        <BottomNav screen="accounts" setScreen={setScreen} onAddClick={onAddClick} displayName={displayName} theme={theme} toggleTheme={toggleTheme} />
       </div>
     </div>
   );
@@ -679,7 +881,8 @@ function ProfileSection({ user, onUpdated }) {
   );
 }
 
-function Settings({ setScreen, categories, accounts, reload, user, onProfileUpdated, onAddClick }) {
+function Settings({ setScreen, categories, accounts, reload, user, onProfileUpdated, onAddClick, theme, toggleTheme }) {
+  const displayName = user?.user_metadata?.first_name || user?.user_metadata?.full_name;
   const [section, setSection] = useState('profile'); // 'profile' | 'categories' | 'accounts'
 
   async function handleLogout() {
@@ -687,7 +890,7 @@ function Settings({ setScreen, categories, accounts, reload, user, onProfileUpda
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-violet-400 via-fuchsia-200 to-orange-100 flex justify-center md:pl-64">
+    <div className="min-h-screen bg-gradient-to-b from-violet-400 via-fuchsia-200 to-orange-100 flex justify-center md:pt-20">
       <div className="w-full max-w-sm md:max-w-2xl lg:max-w-3xl min-h-screen pb-28 md:pb-10 md:pt-4 relative">
         <div className="px-5 pt-8 flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -708,7 +911,7 @@ function Settings({ setScreen, categories, accounts, reload, user, onProfileUpda
           {section === 'categories' && <CategorySection categories={categories} reload={reload} />}
           {section === 'accounts' && <AccountSection accounts={accounts} reload={reload} />}
         </div>
-        <BottomNav screen="settings" setScreen={setScreen} onAddClick={onAddClick} />
+        <BottomNav screen="settings" setScreen={setScreen} onAddClick={onAddClick} displayName={displayName} theme={theme} toggleTheme={toggleTheme} />
       </div>
     </div>
   );
@@ -716,7 +919,7 @@ function Settings({ setScreen, categories, accounts, reload, user, onProfileUpda
 
 /* ---------- App gốc: gác cổng bằng đăng nhập ---------- */
 
-function MainApp({ user }) {
+function MainApp({ user, theme, toggleTheme }) {
   const [screen, setScreen] = useState('dashboard');
   const [accounts, setAccounts] = useState([]);
   const [categories, setCategories] = useState([]);
@@ -749,15 +952,16 @@ function MainApp({ user }) {
 
   const [showAdd, setShowAdd] = useState(false);
 
-  if (screen === 'report') return <><Report setScreen={setScreen} onAddClick={() => setShowAdd(true)} />{showAdd && <AddTransaction onClose={() => setShowAdd(false)} accounts={accounts} categories={categories} onSaved={loadAll} />}</>;
-  if (screen === 'goals') return <><Goals setScreen={setScreen} goals={goals} loadingGoals={loadingGoals} reload={loadAll} onAddClick={() => setShowAdd(true)} />{showAdd && <AddTransaction onClose={() => setShowAdd(false)} accounts={accounts} categories={categories} onSaved={loadAll} />}</>;
-  if (screen === 'accounts') return <><Accounts setScreen={setScreen} accounts={accounts} transactions={transactions} onAddClick={() => setShowAdd(true)} />{showAdd && <AddTransaction onClose={() => setShowAdd(false)} accounts={accounts} categories={categories} onSaved={loadAll} />}</>;
-  if (screen === 'settings') return <><Settings setScreen={setScreen} categories={categories} accounts={accounts} reload={loadAll} user={currentUser} onProfileUpdated={refreshUser} onAddClick={() => setShowAdd(true)} />{showAdd && <AddTransaction onClose={() => setShowAdd(false)} accounts={accounts} categories={categories} onSaved={loadAll} />}</>;
-  return <><Dashboard setScreen={setScreen} transactions={transactions} categories={categories} loading={loading} displayName={displayName} onAddClick={() => setShowAdd(true)} />{showAdd && <AddTransaction onClose={() => setShowAdd(false)} accounts={accounts} categories={categories} onSaved={loadAll} />}</>;
+  if (screen === 'report') return <><Report setScreen={setScreen} onAddClick={() => setShowAdd(true)} displayName={displayName} theme={theme} toggleTheme={toggleTheme} />{showAdd && <AddTransaction onClose={() => setShowAdd(false)} accounts={accounts} categories={categories} onSaved={loadAll} />}</>;
+  if (screen === 'goals') return <><Goals setScreen={setScreen} goals={goals} loadingGoals={loadingGoals} reload={loadAll} onAddClick={() => setShowAdd(true)} displayName={displayName} theme={theme} toggleTheme={toggleTheme} />{showAdd && <AddTransaction onClose={() => setShowAdd(false)} accounts={accounts} categories={categories} onSaved={loadAll} />}</>;
+  if (screen === 'accounts') return <><Accounts setScreen={setScreen} accounts={accounts} transactions={transactions} onAddClick={() => setShowAdd(true)} displayName={displayName} theme={theme} toggleTheme={toggleTheme} />{showAdd && <AddTransaction onClose={() => setShowAdd(false)} accounts={accounts} categories={categories} onSaved={loadAll} />}</>;
+  if (screen === 'settings') return <><Settings setScreen={setScreen} categories={categories} accounts={accounts} reload={loadAll} user={currentUser} onProfileUpdated={refreshUser} onAddClick={() => setShowAdd(true)} theme={theme} toggleTheme={toggleTheme} />{showAdd && <AddTransaction onClose={() => setShowAdd(false)} accounts={accounts} categories={categories} onSaved={loadAll} />}</>;
+  return <><Dashboard setScreen={setScreen} transactions={transactions} categories={categories} accounts={accounts} loading={loading} displayName={displayName} onAddClick={() => setShowAdd(true)} theme={theme} toggleTheme={toggleTheme} />{showAdd && <AddTransaction onClose={() => setShowAdd(false)} accounts={accounts} categories={categories} onSaved={loadAll} />}</>;
 }
 
 export default function App() {
   const [session, setSession] = useState(undefined);
+  const [theme, setTheme] = useState(() => (typeof window !== 'undefined' && localStorage.getItem('theme')) || 'light');
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session));
@@ -765,9 +969,16 @@ export default function App() {
     return () => listener.subscription.unsubscribe();
   }, []);
 
+  useEffect(() => {
+    document.documentElement.classList.toggle('dark', theme === 'dark');
+    localStorage.setItem('theme', theme);
+  }, [theme]);
+
+  function toggleTheme() { setTheme((t) => (t === 'dark' ? 'light' : 'dark')); }
+
   if (session === undefined) {
     return <div className="min-h-screen flex items-center justify-center"><Loader2 size={28} className="animate-spin text-violet-400" /></div>;
   }
   if (!session) return <AuthScreen />;
-  return <MainApp user={session.user} />;
+  return <MainApp user={session.user} theme={theme} toggleTheme={toggleTheme} />;
 }
