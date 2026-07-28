@@ -17,6 +17,25 @@ function nowForInput() {
   return d.toISOString().slice(0, 16);
 }
 
+// Số dư quỹ = tổng đã Nạp - tổng đã Chi (rút) cho đúng danh mục đó
+function fundBalance(categoryId, transactions) {
+  return transactions
+    .filter((t) => t.category_id === categoryId)
+    .reduce((s, t) => {
+      if (t.type === 'allocation') return s + Number(t.amount);
+      if (t.type === 'expense') return s - Number(t.amount);
+      return s;
+    }, 0);
+}
+
+// Số dư tài khoản = số dư ban đầu + Thu nhập - Chi tiêu (Nạp quỹ không tính, vì tiền chưa thật sự rời khỏi ví)
+function accountBalance(acc, transactions) {
+  const delta = transactions
+    .filter((t) => t.account_id === acc.id && (t.type === 'income' || t.type === 'expense'))
+    .reduce((s, t) => s + (t.type === 'income' ? Number(t.amount) : -Number(t.amount)), 0);
+  return Number(acc.initial_balance || 0) + delta;
+}
+
 /* ---------- Màn Đăng nhập / Đăng ký ---------- */
 
 function AuthScreen() {
@@ -218,16 +237,20 @@ function BottomNav({ screen, setScreen, onAddClick, displayName, theme, toggleTh
 
 /* ---------- Dashboard ---------- */
 
-function Dashboard({ setScreen, transactions, categories, accounts, loading, displayName, onAddClick, theme, toggleTheme }) {
+function Dashboard({ setScreen, transactions, categories, accounts, loading, displayName, onAddClick, theme, toggleTheme, onOpenFund }) {
   const [search, setSearch] = useState('');
   const fundCategories = categories.filter((c) => c.is_fund);
-  function fundTotal(catId) { return transactions.filter((t) => t.category_id === catId).reduce((s, t) => s + Number(t.amount), 0); }
-  const expenseCats = categories.filter((c) => c.type === 'expense' && !c.is_fund);
+  const expenseCats = categories.filter((c) => c.type === 'expense');
   const spentByCat = expenseCats.map((c) => ({ ...c, amount: transactions.filter((t) => t.category_id === c.id && t.type === 'expense').reduce((s, t) => s + Number(t.amount), 0) })).filter((c) => c.amount > 0);
   const total = spentByCat.reduce((s, c) => s + c.amount, 0) || 1;
   const radius = 60, circumference = 2 * Math.PI * radius;
   let cumulative = 0;
   const palette = ['#7c3aed', '#a78bfa', '#c4b5fd', '#ddd6fe', '#ede9fe', '#f5f3ff'];
+
+  // Tổng tài sản = tổng số dư mọi quỹ (mọi danh mục chi tiêu) + tổng số dư mọi tài khoản
+  const totalFunds = expenseCats.reduce((s, c) => s + fundBalance(c.id, transactions), 0);
+  const totalAccounts = accounts.reduce((s, a) => s + accountBalance(a, transactions), 0);
+  const totalAssets = totalFunds + totalAccounts;
 
   // ----- Dữ liệu tính thêm cho bố cục desktop -----
   const now = new Date();
@@ -267,14 +290,18 @@ function Dashboard({ setScreen, transactions, categories, accounts, loading, dis
           <div><p className="text-white/80 text-sm">Chào bạn!</p><h1 className="text-white text-2xl font-semibold">{displayName || 'Bạn'}</h1></div>
           <button onClick={() => setScreen('accounts')} className="w-11 h-11 rounded-full bg-white/30 backdrop-blur flex items-center justify-center text-white border border-white/40"><Wallet size={18} /></button>
         </div>
+        <div className="px-5 mt-4">
+          <p className="text-white/70 text-xs">Tổng tài sản</p>
+          <p className="text-white text-3xl font-bold">{formatMoney(totalAssets)}</p>
+        </div>
         <div className="mt-6 px-5 flex gap-3 overflow-x-auto pb-2">
           {fundCategories.length === 0 ? <p className="text-white/70 text-sm">Đánh dấu danh mục là "Quỹ" trong Cài đặt để hiện ở đây.</p>
             : fundCategories.map((f) => (
-              <div key={f.id} className="min-w-[150px] bg-white/90 backdrop-blur rounded-3xl p-4 shadow-lg shadow-black/5 flex-shrink-0">
+              <button key={f.id} onClick={() => onOpenFund(f.id)} className="min-w-[150px] text-left bg-white/90 backdrop-blur rounded-3xl p-4 shadow-lg shadow-black/5 flex-shrink-0">
                 <EmojiCircle emoji={f.icon} size={36} active activeColor="#7c3aed" />
                 <p className="text-gray-500 text-xs mt-3">{f.name}</p>
-                <p className="text-gray-900 font-semibold text-base">{formatMoney(fundTotal(f.id))}</p>
-              </div>
+                <p className="text-gray-900 font-semibold text-base">{formatMoney(fundBalance(f.id, transactions))}</p>
+              </button>
             ))}
         </div>
         <div className="mt-6 bg-white rounded-t-[2.5rem] min-h-[60vh] px-5 pt-6 pb-6">
@@ -325,7 +352,15 @@ function Dashboard({ setScreen, transactions, categories, accounts, loading, dis
           <div className="col-span-2 flex flex-col gap-6">
             {/* Thẻ số liệu lớn */}
             <div className="bg-white dark:bg-gray-900 rounded-3xl p-6 shadow-sm shadow-black/5 dark:border dark:border-gray-800 transition-colors">
-              <div className="flex items-center gap-10">
+              <div className="flex items-center gap-10 flex-wrap">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-3xl font-bold text-gray-900 dark:text-white">{formatMoney(totalAssets)}</span>
+                    <span className="text-xs font-semibold bg-violet-50 dark:bg-violet-500/10 text-violet-600 dark:text-violet-400 px-2 py-1 rounded-full">Tài sản</span>
+                  </div>
+                  <p className="text-gray-400 dark:text-gray-500 text-sm mt-1">Tổng tài sản</p>
+                </div>
+                <div className="w-px h-12 bg-gray-100 dark:bg-gray-800" />
                 <div>
                   <div className="flex items-center gap-2">
                     <span className="text-3xl font-bold text-gray-900 dark:text-white">{formatMoney(incomeThisMonth)}</span>
@@ -464,11 +499,11 @@ function Dashboard({ setScreen, transactions, categories, accounts, loading, dis
               {fundCategories.length === 0 ? <p className="text-gray-400 dark:text-gray-500 text-sm">Đánh dấu danh mục là "Quỹ" trong Cài đặt để hiện ở đây.</p> : (
                 <div className="flex flex-col gap-3">
                   {fundCategories.map((f) => (
-                    <div key={f.id} className="flex items-center gap-3">
+                    <button key={f.id} onClick={() => onOpenFund(f.id)} className="flex items-center gap-3 text-left hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl p-1.5 -m-1.5 transition">
                       <EmojiCircle emoji={f.icon} size={36} active activeColor="#7c3aed" />
-                      <div className="flex-1 min-w-0"><p className="text-gray-900 text-sm font-medium">{f.name}</p></div>
-                      <p className="text-gray-900 dark:text-white font-semibold text-sm">{formatMoney(fundTotal(f.id))}</p>
-                    </div>
+                      <div className="flex-1 min-w-0"><p className="text-gray-900 dark:text-white text-sm font-medium">{f.name}</p></div>
+                      <p className="text-gray-900 dark:text-white font-semibold text-sm">{formatMoney(fundBalance(f.id, transactions))}</p>
+                    </button>
                   ))}
                 </div>
               )}
@@ -483,6 +518,77 @@ function Dashboard({ setScreen, transactions, categories, accounts, loading, dis
 }
 
 /* ---------- Report ---------- */
+
+/* ---------- Chi tiết quỹ ---------- */
+
+function FundDetail({ category, transactions, onBack }) {
+  const history = transactions
+    .filter((t) => t.category_id === category.id && (t.type === 'allocation' || t.type === 'expense'))
+    .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+  const balance = fundBalance(category.id, transactions);
+  const totalIn = history.filter((t) => t.type === 'allocation').reduce((s, t) => s + Number(t.amount), 0);
+  const totalOut = history.filter((t) => t.type === 'expense').reduce((s, t) => s + Number(t.amount), 0);
+  const rate = Number(category.interest_rate || 0);
+  const estimatedProfit = balance > 0 ? balance * (rate / 100) : 0;
+
+  return (
+    <div className="min-h-screen bg-gradient-to-b from-violet-400 via-fuchsia-200 to-orange-100 flex justify-center md:pt-20">
+      <div className="w-full max-w-sm md:max-w-2xl min-h-screen pb-28 md:pb-10 relative">
+        <div className="px-5 pt-8 flex items-center gap-3">
+          <button onClick={onBack} className="w-9 h-9 rounded-full bg-white/30 backdrop-blur flex items-center justify-center"><ArrowLeft size={18} className="text-white" /></button>
+          <div className="flex items-center gap-2">
+            <EmojiCircle emoji={category.icon} size={28} active activeColor="#ffffff33" bg="rgba(255,255,255,0.3)" />
+            <h1 className="text-white text-lg font-semibold">{category.name}</h1>
+          </div>
+        </div>
+
+        <div className="px-5 mt-4 text-center">
+          <p className="text-white/70 text-sm">Số dư hiện tại</p>
+          <p className="text-white text-4xl font-bold">{formatMoney(balance)}</p>
+          {rate > 0 && (
+            <p className="text-white/80 text-sm mt-2">
+              Lãi suất {rate}%/năm — ước tính lợi nhuận <span className="font-semibold">{formatMoney(estimatedProfit)}</span>/năm
+            </p>
+          )}
+        </div>
+
+        <div className="mt-6 bg-white rounded-t-[2.5rem] min-h-[65vh] px-5 pt-6 pb-6">
+          <div className="grid grid-cols-2 gap-3 mb-6">
+            <div className="bg-emerald-50 rounded-2xl p-4">
+              <p className="text-emerald-600 text-xs font-medium mb-1">Tổng đã nạp</p>
+              <p className="text-emerald-700 font-semibold">{formatMoney(totalIn)}</p>
+            </div>
+            <div className="bg-red-50 rounded-2xl p-4">
+              <p className="text-red-500 text-xs font-medium mb-1">Tổng đã rút</p>
+              <p className="text-red-600 font-semibold">{formatMoney(totalOut)}</p>
+            </div>
+          </div>
+
+          <h2 className="text-gray-900 font-semibold text-lg mb-3">Lịch sử</h2>
+          {history.length === 0 ? <p className="text-gray-400 text-sm text-center py-8">Chưa có giao dịch nào trong quỹ này.</p> : (
+            <div className="flex flex-col divide-y divide-gray-100">
+              {history.map((tx) => (
+                <div key={tx.id} className="flex items-center gap-3 py-3">
+                  <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${tx.type === 'allocation' ? 'bg-emerald-50' : 'bg-red-50'}`}>
+                    {tx.type === 'allocation' ? <TrendingUp size={16} className="text-emerald-600" /> : <TrendingDown size={16} className="text-red-500" />}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-gray-900 font-medium text-sm">{tx.type === 'allocation' ? 'Nạp quỹ' : 'Rút quỹ (chi tiêu)'}</p>
+                    <p className="text-gray-400 text-xs">{tx.note || new Date(tx.date || tx.created_at).toLocaleString('vi-VN')}</p>
+                  </div>
+                  <p className={`font-medium text-sm flex-shrink-0 ${tx.type === 'allocation' ? 'text-emerald-600' : 'text-red-500'}`}>{tx.type === 'allocation' ? '+' : '-'}{formatMoney(tx.amount)}</p>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ---------- Financial Report ---------- */
 
 function Report({ setScreen, onAddClick, displayName, theme, toggleTheme }) {
   const [period, setPeriod] = useState('Monthly');
@@ -582,7 +688,7 @@ function Goals({ setScreen, goals, loadingGoals, reload, onAddClick, displayName
 /* ---------- Thêm giao dịch ---------- */
 
 function AddTransaction({ onClose, accounts, categories, onSaved }) {
-  const [type, setType] = useState('expense');
+  const [type, setType] = useState('expense'); // 'income' | 'allocation' | 'expense'
   const [amount, setAmount] = useState('');
   const [selectedCategory, setSelectedCategory] = useState(null);
   const [selectedAccount, setSelectedAccount] = useState(null);
@@ -592,9 +698,12 @@ function AddTransaction({ onClose, accounts, categories, onSaved }) {
 
   useEffect(() => { if (accounts.length > 0 && !selectedAccount) setSelectedAccount(accounts[0].id); }, [accounts]);
 
-  const categoryList = categories.filter((c) => c.type === type);
+  // Nạp quỹ dùng chung danh mục "chi tiêu" (vì mọi danh mục chi tiêu đều là 1 quỹ)
+  const categoryType = type === 'income' ? 'income' : 'expense';
+  const categoryList = categories.filter((c) => c.type === categoryType);
   const activeCat = categories.find((c) => c.id === selectedCategory);
-  const overLimit = activeCat?.monthly_limit && Number(amount) > Number(activeCat.monthly_limit);
+  const overLimit = type === 'expense' && activeCat?.monthly_limit && Number(amount) > Number(activeCat.monthly_limit);
+  const needsAccount = type !== 'allocation';
 
   function handleAmountChange(e) { setAmount(e.target.value.replace(/\D/g, '')); }
 
@@ -603,7 +712,7 @@ function AddTransaction({ onClose, accounts, categories, onSaved }) {
     if (!selectedCategory) { alert('Vui lòng chọn danh mục'); return; }
     setSaving(true);
     const { error } = await supabase.from('transactions').insert({
-      account_id: selectedAccount, category_id: selectedCategory, type, amount: Number(amount),
+      account_id: needsAccount ? selectedAccount : null, category_id: selectedCategory, type, amount: Number(amount),
       note: note || null, date: dateTime.slice(0, 10), created_at: new Date(dateTime).toISOString(),
     });
     setSaving(false);
@@ -621,25 +730,27 @@ function AddTransaction({ onClose, accounts, categories, onSaved }) {
         </div>
         <div className="px-5 mt-6">
           <div className="flex bg-gray-100 rounded-full p-1">
-            <button onClick={() => { setType('expense'); setSelectedCategory(null); }} className={`flex-1 py-2 rounded-full text-sm font-medium transition ${type === 'expense' ? 'bg-white text-gray-900 shadow' : 'text-gray-400'}`}>Chi tiêu</button>
-            <button onClick={() => { setType('income'); setSelectedCategory(null); }} className={`flex-1 py-2 rounded-full text-sm font-medium transition ${type === 'income' ? 'bg-white text-gray-900 shadow' : 'text-gray-400'}`}>Thu nhập</button>
+            <button onClick={() => { setType('income'); setSelectedCategory(null); }} className={`flex-1 py-2 rounded-full text-xs sm:text-sm font-medium transition ${type === 'income' ? 'bg-white text-gray-900 shadow' : 'text-gray-400'}`}>Thu nhập</button>
+            <button onClick={() => { setType('allocation'); setSelectedCategory(null); }} className={`flex-1 py-2 rounded-full text-xs sm:text-sm font-medium transition ${type === 'allocation' ? 'bg-white text-gray-900 shadow' : 'text-gray-400'}`}>Nạp quỹ</button>
+            <button onClick={() => { setType('expense'); setSelectedCategory(null); }} className={`flex-1 py-2 rounded-full text-xs sm:text-sm font-medium transition ${type === 'expense' ? 'bg-white text-gray-900 shadow' : 'text-gray-400'}`}>Chi tiêu</button>
           </div>
+          {type === 'allocation' && <p className="text-gray-400 text-xs mt-2 text-center">Chuyển 1 phần thu nhập vào quỹ để dành, chưa tính là tiền rời khỏi tài khoản.</p>}
         </div>
         <div className="px-5 mt-8 text-center">
           <p className="text-gray-400 text-sm mb-1">Số tiền</p>
           <div className="flex items-center justify-center gap-1">
-            <input type="text" inputMode="numeric" value={amount ? Number(amount).toLocaleString('en-US') : ''} onChange={handleAmountChange} placeholder="0" className={`text-4xl font-bold text-center bg-transparent outline-none w-full ${overLimit ? 'text-red-500' : type === 'income' ? 'text-emerald-600' : 'text-gray-900'}`} />
+            <input type="text" inputMode="numeric" value={amount ? Number(amount).toLocaleString('en-US') : ''} onChange={handleAmountChange} placeholder="0" className={`text-4xl font-bold text-center bg-transparent outline-none w-full ${overLimit ? 'text-red-500' : type === 'income' || type === 'allocation' ? 'text-emerald-600' : 'text-gray-900'}`} />
             <span className="text-4xl font-bold text-gray-300">đ</span>
           </div>
           {overLimit && <p className="text-red-500 text-xs mt-2">⚠️ Vượt hạn mức {formatMoney(activeCat.monthly_limit)} của danh mục này!</p>}
         </div>
         <div className="px-5 mt-8">
-          <p className="text-gray-900 font-semibold text-sm mb-3">Danh mục</p>
+          <p className="text-gray-900 font-semibold text-sm mb-3">{type === 'income' ? 'Danh mục thu nhập' : 'Quỹ / Danh mục'}</p>
           {categoryList.length === 0 ? <p className="text-gray-400 text-sm">Chưa có danh mục. Vào Cài đặt để thêm.</p> : (
             <div className="grid grid-cols-4 sm:grid-cols-5 gap-3">
               {categoryList.map((cat) => {
                 const active = selectedCategory === cat.id;
-                const willExceed = cat.monthly_limit && Number(amount) > Number(cat.monthly_limit);
+                const willExceed = type === 'expense' && cat.monthly_limit && Number(amount) > Number(cat.monthly_limit);
                 return (
                   <button key={cat.id} onClick={() => setSelectedCategory(cat.id)} className="flex flex-col items-center gap-1.5">
                     <EmojiCircle emoji={cat.icon} size={48} active={active} activeColor={willExceed ? '#ef4444' : '#7c3aed'} />
@@ -650,15 +761,17 @@ function AddTransaction({ onClose, accounts, categories, onSaved }) {
             </div>
           )}
         </div>
-        <div className="px-5 mt-8">
-          <p className="text-gray-900 font-semibold text-sm mb-3">Tài khoản</p>
-          <div className="flex gap-2 overflow-x-auto pb-1">
-            {accounts.map((acc) => {
-              const active = selectedAccount === acc.id;
-              return <button key={acc.id} onClick={() => setSelectedAccount(acc.id)} className={`flex items-center gap-2 px-3 py-2 rounded-full flex-shrink-0 border transition ${active ? 'bg-gray-900 border-gray-900 text-white' : 'bg-white border-gray-200 text-gray-600'}`}><span>{acc.icon}</span><span className="text-sm">{acc.name}</span></button>;
-            })}
+        {needsAccount && (
+          <div className="px-5 mt-8">
+            <p className="text-gray-900 font-semibold text-sm mb-3">Tài khoản</p>
+            <div className="flex gap-2 overflow-x-auto pb-1">
+              {accounts.map((acc) => {
+                const active = selectedAccount === acc.id;
+                return <button key={acc.id} onClick={() => setSelectedAccount(acc.id)} className={`flex items-center gap-2 px-3 py-2 rounded-full flex-shrink-0 border transition ${active ? 'bg-gray-900 border-gray-900 text-white' : 'bg-white border-gray-200 text-gray-600'}`}><span>{acc.icon}</span><span className="text-sm">{acc.name}</span></button>;
+              })}
+            </div>
           </div>
-        </div>
+        )}
         <div className="px-5 mt-8">
           <p className="text-gray-900 font-semibold text-sm mb-3">Ngày giờ</p>
           <input type="datetime-local" value={dateTime} onChange={(e) => setDateTime(e.target.value)} className="w-full bg-gray-100 rounded-2xl px-4 py-3 text-sm outline-none" />
@@ -678,11 +791,7 @@ function AddTransaction({ onClose, accounts, categories, onSaved }) {
 /* ---------- Tiền trong tài khoản ---------- */
 
 function Accounts({ setScreen, accounts, transactions, onAddClick, displayName, theme, toggleTheme }) {
-  function balanceOf(acc) {
-    const delta = transactions.filter((t) => t.account_id === acc.id).reduce((s, t) => s + (t.type === 'income' ? Number(t.amount) : -Number(t.amount)), 0);
-    return Number(acc.initial_balance || 0) + delta;
-  }
-  const totalBalance = accounts.reduce((s, a) => s + balanceOf(a), 0);
+  const totalBalance = accounts.reduce((s, a) => s + accountBalance(a, transactions), 0);
   return (
     <div className="min-h-screen bg-gradient-to-b from-violet-400 via-fuchsia-200 to-orange-100 flex justify-center md:pt-20">
       <div className="w-full max-w-sm md:max-w-2xl lg:max-w-3xl min-h-screen pb-28 md:pb-10 md:pt-4 relative">
@@ -697,7 +806,7 @@ function Accounts({ setScreen, accounts, transactions, onAddClick, displayName, 
               <div key={acc.id} className="flex items-center gap-3 bg-gray-50 rounded-2xl p-4">
                 <EmojiCircle emoji={acc.icon} size={44} bg="#ede9fe" />
                 <div className="flex-1 min-w-0"><p className="text-gray-900 font-medium text-sm">{acc.name}</p><p className="text-gray-400 text-xs capitalize">{acc.type}</p></div>
-                <p className="text-gray-900 font-semibold">{formatMoney(balanceOf(acc))}</p>
+                <p className="text-gray-900 font-semibold">{formatMoney(accountBalance(acc, transactions))}</p>
               </div>
             ))}
           </div>
@@ -713,16 +822,16 @@ function Accounts({ setScreen, accounts, transactions, onAddClick, displayName, 
 function CategorySection({ categories, reload }) {
   const [tab, setTab] = useState('expense');
   const [editing, setEditing] = useState(null);
-  const [form, setForm] = useState({ name: '', icon: '', monthly_limit: '', is_fund: false });
+  const [form, setForm] = useState({ name: '', icon: '', monthly_limit: '', is_fund: false, interest_rate: '' });
   const [saving, setSaving] = useState(false);
 
-  function startNew() { setForm({ name: '', icon: '', monthly_limit: '', is_fund: false }); setEditing('new'); }
-  function startEdit(cat) { setForm({ name: cat.name, icon: cat.icon || '', monthly_limit: cat.monthly_limit || '', is_fund: cat.is_fund || false }); setEditing(cat.id); }
+  function startNew() { setForm({ name: '', icon: '', monthly_limit: '', is_fund: false, interest_rate: '' }); setEditing('new'); }
+  function startEdit(cat) { setForm({ name: cat.name, icon: cat.icon || '', monthly_limit: cat.monthly_limit || '', is_fund: cat.is_fund || false, interest_rate: cat.interest_rate || '' }); setEditing(cat.id); }
 
   async function handleSave() {
     if (!form.name) { alert('Nhập tên danh mục'); return; }
     setSaving(true);
-    const payload = { name: form.name, icon: form.icon || '❔', type: tab, monthly_limit: form.monthly_limit ? Number(form.monthly_limit) : null, is_fund: form.is_fund };
+    const payload = { name: form.name, icon: form.icon || '❔', type: tab, monthly_limit: form.monthly_limit ? Number(form.monthly_limit) : null, is_fund: form.is_fund, interest_rate: form.interest_rate ? Number(form.interest_rate) : 0 };
     const { error } = editing === 'new' ? await supabase.from('categories').insert(payload) : await supabase.from('categories').update(payload).eq('id', editing);
     setSaving(false);
     if (error) { alert('Lỗi: ' + error.message); return; }
@@ -751,7 +860,11 @@ function CategorySection({ categories, reload }) {
             <EmojiCircle emoji={cat.icon} size={36} bg="#ede9fe" />
             <div className="flex-1 min-w-0">
               <p className="text-gray-900 font-medium text-sm">{cat.name} {cat.is_fund && <span className="text-[10px] bg-violet-100 text-violet-600 px-1.5 py-0.5 rounded-full ml-1">Quỹ</span>}</p>
-              {cat.monthly_limit && <p className="text-gray-400 text-xs">Hạn mức: {formatMoney(cat.monthly_limit)}</p>}
+              <p className="text-gray-400 text-xs">
+                {cat.monthly_limit ? `Hạn mức: ${formatMoney(cat.monthly_limit)}` : ''}
+                {cat.monthly_limit && cat.interest_rate > 0 ? ' • ' : ''}
+                {cat.interest_rate > 0 ? `Lãi ${cat.interest_rate}%/năm` : ''}
+              </p>
             </div>
             <button onClick={() => startEdit(cat)} className="w-8 h-8 rounded-full bg-white flex items-center justify-center"><Pencil size={14} className="text-gray-500" /></button>
             <button onClick={() => handleDelete(cat.id)} className="w-8 h-8 rounded-full bg-white flex items-center justify-center"><Trash2 size={14} className="text-red-400" /></button>
@@ -761,11 +874,14 @@ function CategorySection({ categories, reload }) {
 
       {editing && (
         <div className="fixed inset-0 bg-black/40 flex items-end z-20" onClick={() => setEditing(null)}>
-          <div className="bg-white w-full rounded-t-3xl p-5 max-w-sm mx-auto" onClick={(e) => e.stopPropagation()}>
+          <div className="bg-white w-full rounded-t-3xl p-5 max-w-sm mx-auto max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-4"><h3 className="font-semibold text-gray-900">{editing === 'new' ? 'Danh mục mới' : 'Sửa danh mục'}</h3><button onClick={() => setEditing(null)}><X size={18} className="text-gray-500" /></button></div>
             <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Tên danh mục" className="w-full bg-gray-100 rounded-xl px-4 py-3 text-sm outline-none mb-3" />
             <input value={form.icon} onChange={(e) => setForm({ ...form, icon: e.target.value })} placeholder="Emoji (vd: 🍜)" className="w-full bg-gray-100 rounded-xl px-4 py-3 text-sm outline-none mb-3" />
             <input value={form.monthly_limit} onChange={(e) => setForm({ ...form, monthly_limit: e.target.value.replace(/\D/g, '') })} inputMode="numeric" placeholder="Hạn mức tối đa mỗi lần nhập (không bắt buộc)" className="w-full bg-gray-100 rounded-xl px-4 py-3 text-sm outline-none mb-3" />
+            {tab === 'expense' && (
+              <input value={form.interest_rate} onChange={(e) => setForm({ ...form, interest_rate: e.target.value.replace(/[^0-9.]/g, '') })} inputMode="decimal" placeholder="Tỷ suất lợi nhuận %/năm (không bắt buộc)" className="w-full bg-gray-100 rounded-xl px-4 py-3 text-sm outline-none mb-3" />
+            )}
             <label className="flex items-center gap-2 mb-4 text-sm text-gray-600"><input type="checkbox" checked={form.is_fund} onChange={(e) => setForm({ ...form, is_fund: e.target.checked })} /> Đây là 1 "quỹ" — hiện thẻ tổng tiền ở Trang chủ</label>
             <button onClick={handleSave} disabled={saving} className="w-full bg-gray-900 text-white rounded-xl py-3 font-semibold flex items-center justify-center gap-2 disabled:opacity-60">{saving ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />} Lưu</button>
           </div>
@@ -952,12 +1068,19 @@ function MainApp({ user, theme, toggleTheme }) {
   useEffect(() => { loadAll(); }, []);
 
   const [showAdd, setShowAdd] = useState(false);
+  const [selectedFundId, setSelectedFundId] = useState(null);
+  function openFund(id) { setSelectedFundId(id); setScreen('fund-detail'); }
 
+  if (screen === 'fund-detail') {
+    const cat = categories.find((c) => c.id === selectedFundId);
+    if (!cat) { setScreen('dashboard'); return null; }
+    return <FundDetail category={cat} transactions={transactions} onBack={() => setScreen('dashboard')} />;
+  }
   if (screen === 'report') return <><Report setScreen={setScreen} onAddClick={() => setShowAdd(true)} displayName={displayName} theme={theme} toggleTheme={toggleTheme} />{showAdd && <AddTransaction onClose={() => setShowAdd(false)} accounts={accounts} categories={categories} onSaved={loadAll} />}</>;
   if (screen === 'goals') return <><Goals setScreen={setScreen} goals={goals} loadingGoals={loadingGoals} reload={loadAll} onAddClick={() => setShowAdd(true)} displayName={displayName} theme={theme} toggleTheme={toggleTheme} />{showAdd && <AddTransaction onClose={() => setShowAdd(false)} accounts={accounts} categories={categories} onSaved={loadAll} />}</>;
   if (screen === 'accounts') return <><Accounts setScreen={setScreen} accounts={accounts} transactions={transactions} onAddClick={() => setShowAdd(true)} displayName={displayName} theme={theme} toggleTheme={toggleTheme} />{showAdd && <AddTransaction onClose={() => setShowAdd(false)} accounts={accounts} categories={categories} onSaved={loadAll} />}</>;
   if (screen === 'settings') return <><Settings setScreen={setScreen} categories={categories} accounts={accounts} reload={loadAll} user={currentUser} onProfileUpdated={refreshUser} onAddClick={() => setShowAdd(true)} theme={theme} toggleTheme={toggleTheme} />{showAdd && <AddTransaction onClose={() => setShowAdd(false)} accounts={accounts} categories={categories} onSaved={loadAll} />}</>;
-  return <><Dashboard setScreen={setScreen} transactions={transactions} categories={categories} accounts={accounts} loading={loading} displayName={displayName} onAddClick={() => setShowAdd(true)} theme={theme} toggleTheme={toggleTheme} />{showAdd && <AddTransaction onClose={() => setShowAdd(false)} accounts={accounts} categories={categories} onSaved={loadAll} />}</>;
+  return <><Dashboard setScreen={setScreen} transactions={transactions} categories={categories} accounts={accounts} loading={loading} displayName={displayName} onAddClick={() => setShowAdd(true)} theme={theme} toggleTheme={toggleTheme} onOpenFund={openFund} />{showAdd && <AddTransaction onClose={() => setShowAdd(false)} accounts={accounts} categories={categories} onSaved={loadAll} />}</>;
 }
 
 export default function App() {
