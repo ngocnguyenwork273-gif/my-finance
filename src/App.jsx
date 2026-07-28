@@ -316,7 +316,6 @@ function Dashboard({ setScreen, transactions, categories, accounts, loading, dis
                 })}
               </div>}
         </div>
-        <BottomNav screen="dashboard" setScreen={setScreen} onAddClick={onAddClick} displayName={displayName} theme={theme} toggleTheme={toggleTheme} />
       </div>
 
       {/* ============ BẢN DESKTOP/TABLET (bố cục kiểu dashboard) ============ */}
@@ -477,6 +476,8 @@ function Dashboard({ setScreen, transactions, categories, accounts, loading, dis
           </div>
         </div>
       </div>
+
+      <BottomNav screen="dashboard" setScreen={setScreen} onAddClick={onAddClick} displayName={displayName} theme={theme} toggleTheme={toggleTheme} />
     </div>
   );
 }
