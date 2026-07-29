@@ -342,6 +342,56 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
               </div>
             </div>
           )}
+
+          {/* Sức khỏe tài chính + Hạn mức chi tiêu (thu gọn, cạnh nhau) */}
+          <div className="grid grid-cols-2 gap-3 mt-8">
+            <div className="bg-gray-50 rounded-2xl p-4 flex flex-col items-center">
+              <p className="text-gray-500 text-xs mb-2 self-start">Sức khỏe tài chính</p>
+              <svg width="72" height="72" viewBox="0 0 120 120" className="-rotate-90">
+                <circle cx="60" cy="60" r="50" fill="none" stroke="#e5e7eb" strokeWidth="14" />
+                <circle cx="60" cy="60" r="50" fill="none" stroke="#7c3aed" strokeWidth="14" strokeLinecap="round"
+                  strokeDasharray={`${(savingsRate / 100) * 2 * Math.PI * 50} ${2 * Math.PI * 50}`} />
+              </svg>
+              <p className="text-lg font-bold text-gray-900 -mt-11">{Math.round(savingsRate)}%</p>
+              <p className="text-gray-400 text-[10px] mt-11">Tỷ lệ tiết kiệm</p>
+            </div>
+            <div className="bg-gray-50 rounded-2xl p-4 flex flex-col justify-center">
+              <p className="text-gray-500 text-xs mb-2">Hạn mức tháng</p>
+              {totalMonthlyLimit === 0 ? (
+                <p className="text-gray-400 text-xs">Chưa đặt hạn mức nào.</p>
+              ) : (
+                <>
+                  <ProgressBar pct={limitPct} colorClass={limitPct > 100 ? 'bg-red-400' : 'bg-violet-500'} />
+                  <p className="text-gray-500 text-[11px] mt-2">{formatMoney(expenseThisMonth)} / {formatMoney(totalMonthlyLimit)}</p>
+                </>
+              )}
+            </div>
+          </div>
+
+          {/* Mục tiêu (thu gọn) */}
+          {goals && goals.length > 0 && (
+            <div className="mt-6">
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="text-gray-900 font-semibold text-lg">Mục tiêu</h2>
+                <button onClick={() => setScreen('goals')} className="text-violet-600 text-sm font-medium">Xem tất cả</button>
+              </div>
+              <div className="flex flex-col gap-3">
+                {goals.slice(0, 2).map((g) => {
+                  const pct = g.target_amount ? Math.min(100, (g.current_amount / g.target_amount) * 100) : 0;
+                  return (
+                    <div key={g.id}>
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-gray-700 text-sm">{g.name}</span>
+                        <span className="text-gray-400 text-xs">{Math.round(pct)}%</span>
+                      </div>
+                      <ProgressBar pct={pct} />
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           <div className="flex items-center justify-between mt-8 mb-3"><h2 className="text-gray-900 font-semibold text-lg">Giao dịch</h2></div>
           {loading ? <div className="flex justify-center py-8"><Loader2 size={24} className="animate-spin text-violet-400" /></div>
             : transactions.length === 0 ? <p className="text-gray-400 text-sm text-center py-8">Chưa có giao dịch nào. Bấm nút + để thêm.</p>
