@@ -237,7 +237,7 @@ function BottomNav({ screen, setScreen, onAddClick, displayName, theme, toggleTh
 
 /* ---------- Dashboard ---------- */
 
-function Dashboard({ setScreen, transactions, categories, accounts, loading, displayName, onAddClick, theme, toggleTheme, onOpenFund }) {
+function Dashboard({ setScreen, transactions, categories, accounts, goals, loading, displayName, onAddClick, theme, toggleTheme, onOpenFund }) {
   const [search, setSearch] = useState('');
   const fundCategories = categories.filter((c) => c.is_fund);
   const expenseCats = categories.filter((c) => c.type === 'expense');
@@ -274,7 +274,22 @@ function Dashboard({ setScreen, transactions, categories, accounts, loading, dis
     const day = i + 1;
     return thisMonthTx.filter((t) => t.type === 'expense' && new Date(t.created_at).getDate() === day).reduce((s, t) => s + Number(t.amount), 0);
   });
-  const maxDaily = Math.max(...dailySpend, 1);
+  const dailyIncome = Array.from({ length: daysInMonth }, (_, i) => {
+    const day = i + 1;
+    return thisMonthTx.filter((t) => t.type === 'income' && new Date(t.created_at).getDate() === day).reduce((s, t) => s + Number(t.amount), 0);
+  });
+  const maxDaily = Math.max(...dailySpend, ...dailyIncome, 1);
+
+  // 7 ngày gần nhất, cho biểu đồ "Số dư theo ngày"
+  const last7 = Array.from({ length: 7 }, (_, i) => daysInMonth - 6 + i).filter((d) => d >= 1);
+  const weekDayLabels = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'];
+
+  // Giới hạn chi tiêu tổng (tổng hạn mức các danh mục đã đặt) so với đã chi tháng này
+  const totalMonthlyLimit = categories.filter((c) => c.type === 'expense' && c.monthly_limit).reduce((s, c) => s + Number(c.monthly_limit), 0);
+  const limitPct = totalMonthlyLimit > 0 ? (expenseThisMonth / totalMonthlyLimit) * 100 : 0;
+
+  // Tỷ lệ tiết kiệm tháng này (sức khỏe tài chính)
+  const savingsRate = incomeThisMonth > 0 ? Math.max(0, Math.min(100, ((incomeThisMonth - expenseThisMonth) / incomeThisMonth) * 100)) : 0;
 
   const filteredTx = transactions.filter((t) => {
     if (!search) return true;
@@ -348,165 +363,176 @@ function Dashboard({ setScreen, transactions, categories, accounts, loading, dis
       {/* ============ BẢN DESKTOP/TABLET (bố cục kiểu dashboard) ============ */}
       <div className="hidden md:block w-full max-w-[1400px] px-8 py-8">
         <div className="grid grid-cols-3 gap-6">
-          {/* Cột trái + giữa (2/3) */}
+          {/* Cột chính (2/3) */}
           <div className="col-span-2 flex flex-col gap-6">
-            {/* Thẻ số liệu lớn */}
+            {/* Biểu đồ số dư 7 ngày gần nhất */}
             <div className="bg-white dark:bg-gray-900 rounded-3xl p-6 shadow-sm shadow-black/5 dark:border dark:border-gray-800 transition-colors">
-              <div className="flex items-center gap-10 flex-wrap">
+              <div className="flex items-center justify-between mb-1">
                 <div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-3xl font-bold text-gray-900 dark:text-white">{formatMoney(totalAssets)}</span>
-                    <span className="text-xs font-semibold bg-violet-50 dark:bg-violet-500/10 text-violet-600 dark:text-violet-400 px-2 py-1 rounded-full">Tài sản</span>
-                  </div>
-                  <p className="text-gray-400 dark:text-gray-500 text-sm mt-1">Tổng tài sản</p>
+                  <p className="text-3xl font-bold text-gray-900 dark:text-white">{formatMoney(totalAssets)}</p>
+                  <p className="text-gray-400 dark:text-gray-500 text-sm">Tổng quan số dư</p>
                 </div>
-                <div className="w-px h-12 bg-gray-100 dark:bg-gray-800" />
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-3xl font-bold text-gray-900 dark:text-white">{formatMoney(incomeThisMonth)}</span>
-                    <span className="text-xs font-semibold bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 px-2 py-1 rounded-full">Thu</span>
-                  </div>
-                  <p className="text-gray-400 dark:text-gray-500 text-sm mt-1">Thu nhập tháng này</p>
-                </div>
-                <div className="w-px h-12 bg-gray-100 dark:bg-gray-800" />
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-3xl font-bold text-gray-900 dark:text-white">{formatMoney(expenseThisMonth)}</span>
-                    <span className="text-xs font-semibold bg-red-50 dark:bg-red-500/10 text-red-500 dark:text-red-400 px-2 py-1 rounded-full">Chi</span>
-                  </div>
-                  <p className="text-gray-400 dark:text-gray-500 text-sm mt-1">Chi tiêu tháng này</p>
+                <div className="flex items-center gap-4 text-xs">
+                  <span className="flex items-center gap-1.5 text-gray-500"><span className="w-2.5 h-2.5 rounded-full bg-emerald-400" />Thu nhập</span>
+                  <span className="flex items-center gap-1.5 text-gray-500"><span className="w-2.5 h-2.5 rounded-full bg-violet-400" />Chi tiêu</span>
                 </div>
               </div>
-              <div className="flex items-center gap-2 mt-6">
-                {monthLabels.map((label, i) => (
-                  <div key={i} className="flex-1">
-                    <div className="h-2 rounded-full" style={{ background: monthShades[Math.min(Math.floor((monthTotals[i] / maxMonthTotal) * (monthShades.length - 1)), monthShades.length - 1)] }} />
-                    <p className="text-[11px] text-gray-400 mt-1 text-center">{label}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Xu hướng chi tiêu theo ngày */}
-            <div className="bg-white dark:bg-gray-900 rounded-3xl p-6 shadow-sm shadow-black/5 dark:border dark:border-gray-800 transition-colors">
-              <h3 className="text-gray-900 dark:text-white font-semibold mb-4">Xu hướng chi tiêu theo ngày</h3>
-              {dailySpend.every((v) => v === 0) ? <p className="text-gray-400 dark:text-gray-500 text-sm text-center py-10">Chưa có dữ liệu tháng này.</p> : (
-                <svg viewBox="0 0 620 160" className="w-full h-40">
-                  <polyline
-                    fill="none" stroke="#7c3aed" strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round"
-                    points={dailySpend.map((v, i) => `${(i / (daysInMonth - 1)) * 600 + 10},${150 - (v / maxDaily) * 130}`).join(' ')}
-                  />
-                  {dailySpend.map((v, i) => v === maxDaily && v > 0 ? (
-                    <g key={i}>
-                      <circle cx={(i / (daysInMonth - 1)) * 600 + 10} cy={150 - (v / maxDaily) * 130} r="4" fill="#7c3aed" />
-                    </g>
-                  ) : null)}
-                </svg>
-              )}
-            </div>
-
-            {/* Bảng giao dịch gần đây */}
-            <div className="bg-white dark:bg-gray-900 rounded-3xl p-6 shadow-sm shadow-black/5 dark:border dark:border-gray-800 transition-colors">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-gray-900 dark:text-white font-semibold text-lg">Giao dịch gần đây</h3>
-                <div className="flex items-center gap-2 bg-gray-50 dark:bg-gray-800 rounded-full px-3 py-2 w-56">
-                  <Search size={15} className="text-gray-400" />
-                  <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Tìm kiếm" className="bg-transparent outline-none text-sm flex-1" />
-                </div>
-              </div>
-              {loading ? <div className="flex justify-center py-8"><Loader2 size={24} className="animate-spin text-violet-400" /></div>
-                : filteredTx.length === 0 ? <p className="text-gray-400 dark:text-gray-500 text-sm text-center py-8">Không có giao dịch nào.</p>
-                : (
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="text-left text-gray-400 border-b border-gray-100 dark:border-gray-800">
-                        <th className="pb-3 font-medium">Danh mục</th>
-                        <th className="pb-3 font-medium">Tài khoản</th>
-                        <th className="pb-3 font-medium">Ngày</th>
-                        <th className="pb-3 font-medium text-right">Số tiền</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filteredTx.slice(0, 10).map((tx) => {
-                        const cat = categories.find((c) => c.id === tx.category_id);
-                        const acc = accounts.find((a) => a.id === tx.account_id);
-                        return (
-                          <tr key={tx.id} className="border-b border-gray-50 dark:border-gray-800 last:border-0">
-                            <td className="py-3">
-                              <div className="flex items-center gap-2">
-                                <EmojiCircle emoji={cat?.icon} size={32} bg={tx.type === 'income' ? '#ecfdf5' : '#f5f3ff'} />
-                                <span className="text-gray-900 dark:text-white font-medium">{cat?.name || 'Khác'}</span>
-                              </div>
-                            </td>
-                            <td className="py-3 text-gray-500 dark:text-gray-400">{acc?.name || '—'}</td>
-                            <td className="py-3 text-gray-500 dark:text-gray-400">{new Date(tx.date || tx.created_at).toLocaleDateString('vi-VN')}</td>
-                            <td className={`py-3 text-right font-medium ${tx.type === 'income' ? 'text-emerald-600' : 'text-gray-900'}`}>{tx.type === 'income' ? '+' : '-'}{formatMoney(tx.amount)}</td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                )}
-            </div>
-          </div>
-
-          {/* Cột phải (1/3) */}
-          <div className="flex flex-col gap-6">
-            {/* Bản đồ nhiệt chi tiêu theo ngày */}
-            <div className="bg-white dark:bg-gray-900 rounded-3xl p-6 shadow-sm shadow-black/5 dark:border dark:border-gray-800 transition-colors">
-              <h3 className="text-gray-900 dark:text-white font-semibold mb-4">Nhiệt độ chi tiêu tháng này</h3>
-              <div className="grid grid-cols-7 gap-1.5">
-                {dailySpend.map((v, i) => {
-                  const intensity = v / maxDaily;
-                  const cellClass = v === 0 ? 'bg-gray-100 dark:bg-gray-800'
-                    : intensity > 0.7 ? 'bg-violet-600 dark:bg-violet-400'
-                    : intensity > 0.4 ? 'bg-violet-400 dark:bg-violet-500/70'
-                    : 'bg-violet-200 dark:bg-violet-500/30';
-                  return <div key={i} className={`aspect-square rounded ${cellClass}`} title={`Ngày ${i + 1}: ${formatMoney(v)}`} />;
+              <div className="flex items-end gap-3 mt-8 h-40">
+                {last7.map((day, i) => {
+                  const inc = dailyIncome[day - 1] || 0;
+                  const exp = dailySpend[day - 1] || 0;
+                  return (
+                    <div key={i} className="flex-1 flex flex-col items-center gap-1 h-full justify-end">
+                      <div className="w-full flex items-end gap-1 h-full">
+                        <div className="flex-1 bg-emerald-100 dark:bg-emerald-500/20 rounded-t-lg" style={{ height: `${(inc / maxDaily) * 100}%`, minHeight: inc > 0 ? 4 : 0 }} />
+                        <div className="flex-1 bg-violet-400 dark:bg-violet-500 rounded-t-lg" style={{ height: `${(exp / maxDaily) * 100}%`, minHeight: exp > 0 ? 4 : 0 }} />
+                      </div>
+                      <span className="text-[11px] text-gray-400">{weekDayLabels[new Date(now.getFullYear(), now.getMonth(), day).getDay()]}</span>
+                    </div>
+                  );
                 })}
               </div>
             </div>
 
-            {/* Ngân sách theo danh mục */}
+            {/* Phân tích chi phí theo danh mục */}
             <div className="bg-white dark:bg-gray-900 rounded-3xl p-6 shadow-sm shadow-black/5 dark:border dark:border-gray-800 transition-colors">
               <div className="flex items-center justify-between mb-4">
-                <h3 className="text-gray-900 dark:text-white font-semibold">Ngân sách theo danh mục</h3>
+                <h3 className="text-gray-900 dark:text-white font-semibold">Phân tích chi phí</h3>
                 <button onClick={() => setScreen('report')} className="text-violet-600 text-xs font-medium">Chi tiết</button>
               </div>
               {spentByCat.length === 0 ? <p className="text-gray-400 dark:text-gray-500 text-sm text-center py-6">Chưa có chi tiêu nào.</p> : (
-                <div className="flex flex-col items-center">
-                  <svg width="150" height="150" viewBox="0 0 150 150" className="-rotate-90 flex-shrink-0 mb-4">
+                <div className="flex items-center gap-8">
+                  <svg width="150" height="150" viewBox="0 0 150 150" className="-rotate-90 flex-shrink-0">
                     {spentByCat.map((cat, i) => {
                       const pct = cat.amount / total; const dash = pct * circumference; const offset = cumulative; cumulative += dash;
                       return <circle key={cat.id} cx="75" cy="75" r={radius} fill="none" stroke={palette[i % palette.length]} strokeWidth="14" strokeDasharray={`${dash} ${circumference - dash}`} strokeDashoffset={-offset} strokeLinecap="round" />;
                     })}
                   </svg>
-                  <div className="flex flex-col gap-2 text-sm w-full">
-                    {spentByCat.map((cat, i) => (
-                      <div key={cat.id} className="flex items-center gap-2">
-                        <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: palette[i % palette.length] }} />
-                        <span className="text-gray-600 dark:text-gray-300">{cat.name}</span><span className="text-gray-900 dark:text-white font-medium ml-auto">{formatMoney(cat.amount)}</span>
-                      </div>
-                    ))}
+                  <div className="flex flex-col gap-2 text-sm flex-1">
+                    {spentByCat.map((cat, i) => {
+                      const pct = Math.round((cat.amount / total) * 100);
+                      return (
+                        <div key={cat.id} className="flex items-center gap-2">
+                          <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: palette[i % palette.length] }} />
+                          <span className="text-gray-600 dark:text-gray-300">{cat.name}</span>
+                          <span className="text-gray-400 text-xs">{pct}%</span>
+                          <span className="text-gray-900 dark:text-white font-medium ml-auto">{formatMoney(cat.amount)}</span>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               )}
             </div>
 
-            {/* Quỹ / thẻ ghim */}
+            {/* Giới hạn chi tiêu tháng */}
             <div className="bg-white dark:bg-gray-900 rounded-3xl p-6 shadow-sm shadow-black/5 dark:border dark:border-gray-800 transition-colors">
-              <h3 className="text-gray-900 dark:text-white font-semibold mb-4">Quỹ của bạn</h3>
-              {fundCategories.length === 0 ? <p className="text-gray-400 dark:text-gray-500 text-sm">Đánh dấu danh mục là "Quỹ" trong Cài đặt để hiện ở đây.</p> : (
-                <div className="flex flex-col gap-3">
-                  {fundCategories.map((f) => (
-                    <button key={f.id} onClick={() => onOpenFund(f.id)} className="flex items-center gap-3 text-left hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl p-1.5 -m-1.5 transition">
-                      <EmojiCircle emoji={f.icon} size={36} active activeColor="#7c3aed" />
-                      <div className="flex-1 min-w-0"><p className="text-gray-900 dark:text-white text-sm font-medium">{f.name}</p></div>
-                      <p className="text-gray-900 dark:text-white font-semibold text-sm">{formatMoney(fundBalance(f.id, transactions))}</p>
-                    </button>
-                  ))}
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-gray-900 dark:text-white font-semibold">Hạn mức chi tiêu tháng</h3>
+                <span className="text-gray-400 text-xs">{formatMoney(expenseThisMonth)} / {totalMonthlyLimit > 0 ? formatMoney(totalMonthlyLimit) : '—'}</span>
+              </div>
+              {totalMonthlyLimit === 0 ? (
+                <p className="text-gray-400 dark:text-gray-500 text-sm">Chưa đặt hạn mức nào. Vào Cài đặt &gt; Danh mục để thêm.</p>
+              ) : (
+                <ProgressBar pct={limitPct} colorClass={limitPct > 100 ? 'bg-red-400' : 'bg-violet-500'} />
+              )}
+            </div>
+          </div>
+
+          {/* Cột phải (1/3) */}
+          <div className="flex flex-col gap-6">
+            {/* Thẻ thống kê dọc */}
+            <div className="bg-white dark:bg-gray-900 rounded-3xl p-6 shadow-sm shadow-black/5 dark:border dark:border-gray-800 transition-colors flex flex-col gap-4">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xl font-bold text-gray-900 dark:text-white">{formatMoney(incomeThisMonth)}</span>
+                  <span className="text-[11px] font-semibold bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 px-2 py-0.5 rounded-full">Thu</span>
+                </div>
+                <p className="text-gray-400 dark:text-gray-500 text-xs mt-0.5">Thu nhập tháng này</p>
+              </div>
+              <div className="h-px bg-gray-100 dark:bg-gray-800" />
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xl font-bold text-gray-900 dark:text-white">{formatMoney(expenseThisMonth)}</span>
+                  <span className="text-[11px] font-semibold bg-red-50 dark:bg-red-500/10 text-red-500 dark:text-red-400 px-2 py-0.5 rounded-full">Chi</span>
+                </div>
+                <p className="text-gray-400 dark:text-gray-500 text-xs mt-0.5">Chi tiêu tháng này</p>
+              </div>
+              <div className="h-px bg-gray-100 dark:bg-gray-800" />
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xl font-bold text-gray-900 dark:text-white">{formatMoney(incomeThisMonth - expenseThisMonth)}</span>
+                  <span className="text-[11px] font-semibold bg-violet-50 dark:bg-violet-500/10 text-violet-600 dark:text-violet-400 px-2 py-0.5 rounded-full">Dư</span>
+                </div>
+                <p className="text-gray-400 dark:text-gray-500 text-xs mt-0.5">Số dư tiết kiệm tháng này</p>
+              </div>
+            </div>
+
+            {/* Sức khỏe tài chính (tỷ lệ tiết kiệm) */}
+            <div className="bg-white dark:bg-gray-900 rounded-3xl p-6 shadow-sm shadow-black/5 dark:border dark:border-gray-800 transition-colors flex flex-col items-center">
+              <h3 className="text-gray-900 dark:text-white font-semibold self-start mb-2">Sức khỏe tài chính</h3>
+              <p className="text-gray-400 text-xs self-start mb-4">Tỷ lệ tiết kiệm tháng này</p>
+              <svg width="120" height="120" viewBox="0 0 120 120" className="-rotate-90">
+                <circle cx="60" cy="60" r="50" fill="none" stroke="#f3f4f6" className="dark:stroke-gray-800" strokeWidth="12" />
+                <circle cx="60" cy="60" r="50" fill="none" stroke="#7c3aed" strokeWidth="12" strokeLinecap="round"
+                  strokeDasharray={`${(savingsRate / 100) * 2 * Math.PI * 50} ${2 * Math.PI * 50}`} />
+              </svg>
+              <p className="text-2xl font-bold text-gray-900 dark:text-white -mt-16">{Math.round(savingsRate)}%</p>
+              <p className="text-gray-400 text-xs mt-16">Dựa trên thu/chi tháng này</p>
+            </div>
+
+            {/* Theo dõi mục tiêu */}
+            <div className="bg-white dark:bg-gray-900 rounded-3xl p-6 shadow-sm shadow-black/5 dark:border dark:border-gray-800 transition-colors">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-gray-900 dark:text-white font-semibold">Mục tiêu</h3>
+                <button onClick={() => setScreen('goals')} className="text-violet-600 text-xs font-medium">Xem tất cả</button>
+              </div>
+              {(!goals || goals.length === 0) ? <p className="text-gray-400 dark:text-gray-500 text-sm text-center py-4">Chưa có mục tiêu nào.</p> : (
+                <div className="flex flex-col gap-4">
+                  {goals.slice(0, 3).map((g) => {
+                    const pct = g.target_amount ? Math.min(100, (g.current_amount / g.target_amount) * 100) : 0;
+                    return (
+                      <div key={g.id}>
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-gray-700 dark:text-gray-300 text-sm">{g.name}</span>
+                          <span className="text-gray-400 text-xs">{Math.round(pct)}%</span>
+                        </div>
+                        <ProgressBar pct={pct} />
+                      </div>
+                    );
+                  })}
                 </div>
               )}
+            </div>
+
+            {/* Giao dịch gần đây (dạng danh sách gọn) */}
+            <div className="bg-white dark:bg-gray-900 rounded-3xl p-6 shadow-sm shadow-black/5 dark:border dark:border-gray-800 transition-colors">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-gray-900 dark:text-white font-semibold">Giao dịch gần đây</h3>
+              </div>
+              <div className="flex items-center gap-2 bg-gray-50 dark:bg-gray-800 rounded-full px-3 py-2 mb-3">
+                <Search size={14} className="text-gray-400" />
+                <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Tìm kiếm" className="bg-transparent outline-none text-sm flex-1" />
+              </div>
+              {loading ? <div className="flex justify-center py-6"><Loader2 size={20} className="animate-spin text-violet-400" /></div>
+                : filteredTx.length === 0 ? <p className="text-gray-400 dark:text-gray-500 text-sm text-center py-4">Không có giao dịch nào.</p>
+                : (
+                  <div className="flex flex-col divide-y divide-gray-50 dark:divide-gray-800">
+                    {filteredTx.slice(0, 6).map((tx) => {
+                      const cat = categories.find((c) => c.id === tx.category_id);
+                      return (
+                        <div key={tx.id} className="flex items-center gap-2.5 py-2.5">
+                          <EmojiCircle emoji={cat?.icon} size={32} bg={tx.type === 'income' ? '#ecfdf5' : '#f5f3ff'} />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-gray-900 dark:text-white font-medium text-sm truncate">{cat?.name || 'Khác'}</p>
+                            <p className="text-gray-400 text-xs">{new Date(tx.date || tx.created_at).toLocaleDateString('vi-VN')}</p>
+                          </div>
+                          <p className={`font-medium text-xs flex-shrink-0 ${tx.type === 'income' ? 'text-emerald-600' : 'text-gray-900 dark:text-white'}`}>{tx.type === 'income' ? '+' : '-'}{formatMoney(tx.amount)}</p>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
             </div>
           </div>
         </div>
@@ -1080,7 +1106,7 @@ function MainApp({ user, theme, toggleTheme }) {
   if (screen === 'goals') return <><Goals setScreen={setScreen} goals={goals} loadingGoals={loadingGoals} reload={loadAll} onAddClick={() => setShowAdd(true)} displayName={displayName} theme={theme} toggleTheme={toggleTheme} />{showAdd && <AddTransaction onClose={() => setShowAdd(false)} accounts={accounts} categories={categories} onSaved={loadAll} />}</>;
   if (screen === 'accounts') return <><Accounts setScreen={setScreen} accounts={accounts} transactions={transactions} onAddClick={() => setShowAdd(true)} displayName={displayName} theme={theme} toggleTheme={toggleTheme} />{showAdd && <AddTransaction onClose={() => setShowAdd(false)} accounts={accounts} categories={categories} onSaved={loadAll} />}</>;
   if (screen === 'settings') return <><Settings setScreen={setScreen} categories={categories} accounts={accounts} reload={loadAll} user={currentUser} onProfileUpdated={refreshUser} onAddClick={() => setShowAdd(true)} theme={theme} toggleTheme={toggleTheme} />{showAdd && <AddTransaction onClose={() => setShowAdd(false)} accounts={accounts} categories={categories} onSaved={loadAll} />}</>;
-  return <><Dashboard setScreen={setScreen} transactions={transactions} categories={categories} accounts={accounts} loading={loading} displayName={displayName} onAddClick={() => setShowAdd(true)} theme={theme} toggleTheme={toggleTheme} onOpenFund={openFund} />{showAdd && <AddTransaction onClose={() => setShowAdd(false)} accounts={accounts} categories={categories} onSaved={loadAll} />}</>;
+  return <><Dashboard setScreen={setScreen} transactions={transactions} categories={categories} accounts={accounts} goals={goals} loading={loading} displayName={displayName} onAddClick={() => setShowAdd(true)} theme={theme} toggleTheme={toggleTheme} onOpenFund={openFund} />{showAdd && <AddTransaction onClose={() => setShowAdd(false)} accounts={accounts} categories={categories} onSaved={loadAll} />}</>;
 }
 
 export default function App() {
