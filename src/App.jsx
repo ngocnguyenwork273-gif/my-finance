@@ -171,6 +171,19 @@ function ProgressBar({ pct, colorClass = 'bg-violet-600' }) {
   return <div className="w-full h-1.5 bg-gray-100 rounded-full overflow-hidden"><div className={`h-full ${colorClass} rounded-full`} style={{ width: `${Math.min(pct, 100)}%` }} /></div>;
 }
 
+// good=true nghĩa là tăng là tốt (thu nhập/tiết kiệm), good=false nghĩa là tăng là xấu (chi tiêu)
+function ChangeBadge({ pct, good = true }) {
+  if (pct === null) return null;
+  const isUp = pct >= 0;
+  const isGoodDirection = isUp === good;
+  const Icon = isUp ? TrendingUp : TrendingDown;
+  return (
+    <span className={`inline-flex items-center gap-0.5 text-xs font-medium ${isGoodDirection ? 'text-emerald-600' : 'text-red-500'}`}>
+      <Icon size={12} />{Math.abs(Math.round(pct))}% so với tháng trước
+    </span>
+  );
+}
+
 function EmojiCircle({ emoji, size = 36, active = false, activeColor = '#7c3aed', bg = '#f3f4f6' }) {
   return <div className="rounded-xl flex items-center justify-center flex-shrink-0" style={{ width: size, height: size, background: active ? activeColor : bg, fontSize: size * 0.5 }}>{emoji || '❔'}</div>;
 }
@@ -194,40 +207,57 @@ function BottomNav({ screen, setScreen, onAddClick, displayName, theme, toggleTh
         <button onClick={() => setScreen('settings')}><SettingsIcon size={20} className={screen === 'settings' ? 'text-gray-900' : 'text-gray-300'} /></button>
       </div>
 
-      {/* Thanh nav ngang trên cùng — chỉ hiện trên tablet/PC (từ md trở lên) */}
-      <div className="hidden md:flex fixed top-0 inset-x-0 h-20 bg-white dark:bg-gray-950 border-b border-gray-100 dark:border-gray-800 items-center px-8 z-20 transition-colors">
-        <div className="flex items-center gap-2 mr-10">
-          <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center flex-shrink-0">
+      {/* Sidebar bên trái — chỉ hiện trên tablet/PC (từ md trở lên) */}
+      <div className="hidden md:flex flex-col fixed left-0 top-0 h-screen w-64 bg-white dark:bg-gray-950 border-r border-gray-100 dark:border-gray-800 px-5 py-6 z-20 transition-colors">
+        <div className="flex items-center gap-2 mb-8 px-1">
+          <div className="w-9 h-9 rounded-xl bg-emerald-500 flex items-center justify-center flex-shrink-0">
             <Wallet size={17} className="text-white" />
           </div>
           <span className="font-semibold text-gray-900 dark:text-white">MyFinance</span>
         </div>
 
-        {/* Nút chuyển Sáng/Tối */}
-        <div className="flex items-center gap-1 bg-gray-50 dark:bg-gray-900 rounded-full p-1 mr-4">
-          <button onClick={() => theme !== 'light' && toggleTheme()} className={`w-8 h-8 rounded-full flex items-center justify-center transition ${theme === 'light' ? 'bg-white shadow text-gray-900' : 'text-gray-400'}`}>
-            <Sun size={15} />
-          </button>
-          <button onClick={() => theme !== 'dark' && toggleTheme()} className={`w-8 h-8 rounded-full flex items-center justify-center transition ${theme === 'dark' ? 'bg-gray-800 shadow text-white' : 'text-gray-400'}`}>
-            <Moon size={15} />
-          </button>
-        </div>
-
-        <div className="flex items-center gap-1 bg-gray-50 dark:bg-gray-900 rounded-full p-1">
+        <div className="flex flex-col gap-1">
           {NAV_ITEMS.map(({ key, icon: Icon, label }) => (
             <button key={key} onClick={() => setScreen(key)}
-              className={`flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium transition ${screen === key ? 'bg-white dark:bg-gray-800 shadow text-gray-900 dark:text-white' : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-200'}`}>
-              <Icon size={16} />{label}
+              className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition ${screen === key ? 'bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-400' : 'text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-900'}`}>
+              <Icon size={17} />{label}
             </button>
           ))}
         </div>
 
+        <div className="mt-auto flex flex-col gap-3">
+          <div className="flex items-center gap-1 bg-gray-50 dark:bg-gray-900 rounded-full p-1 self-start">
+            <button onClick={() => theme !== 'light' && toggleTheme()} className={`w-8 h-8 rounded-full flex items-center justify-center transition ${theme === 'light' ? 'bg-white shadow text-gray-900' : 'text-gray-400'}`}>
+              <Sun size={15} />
+            </button>
+            <button onClick={() => theme !== 'dark' && toggleTheme()} className={`w-8 h-8 rounded-full flex items-center justify-center transition ${theme === 'dark' ? 'bg-gray-800 shadow text-white' : 'text-gray-400'}`}>
+              <Moon size={15} />
+            </button>
+          </div>
+          <div className="bg-gray-900 dark:bg-emerald-500/10 rounded-2xl p-4">
+            <p className="text-white dark:text-emerald-300 text-sm font-semibold mb-1">💡 Mẹo hôm nay</p>
+            <p className="text-gray-300 dark:text-emerald-200/70 text-xs">Nạp quỹ ngay khi có thu nhập để kiểm soát chi tiêu tốt hơn.</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Top bar bên trong nội dung — chỉ hiện trên tablet/PC */}
+      <div className="hidden md:flex fixed top-0 left-64 right-0 h-20 bg-white dark:bg-gray-950 border-b border-gray-100 dark:border-gray-800 items-center px-8 z-10 transition-colors">
+        <div className="flex items-center gap-2 bg-gray-50 dark:bg-gray-900 rounded-full px-4 py-2.5 w-72">
+          <Search size={16} className="text-gray-400" />
+          <input placeholder="Tìm kiếm nhanh" className="bg-transparent outline-none text-sm flex-1" />
+        </div>
         <div className="ml-auto flex items-center gap-3">
-          <button onClick={onAddClick} className="bg-gray-900 dark:bg-violet-600 text-white rounded-full px-4 py-2.5 text-sm font-medium flex items-center gap-2">
+          <button onClick={onAddClick} className="bg-emerald-500 text-white rounded-full px-4 py-2.5 text-sm font-medium flex items-center gap-2">
             <Plus size={16} /> Thêm giao dịch
           </button>
-          <div className="w-9 h-9 rounded-full bg-violet-50 dark:bg-violet-500/20 flex items-center justify-center text-violet-600 dark:text-violet-300 font-semibold text-sm">
-            {(displayName || 'B')[0].toUpperCase()}
+          <button className="w-9 h-9 rounded-full bg-gray-50 dark:bg-gray-900 flex items-center justify-center text-gray-500"><Bell size={16} /></button>
+          <button onClick={() => setScreen('settings')} className="w-9 h-9 rounded-full bg-gray-50 dark:bg-gray-900 flex items-center justify-center text-gray-500"><SettingsIcon size={16} /></button>
+          <div className="flex items-center gap-2 pl-2">
+            <div className="w-9 h-9 rounded-full bg-emerald-50 dark:bg-emerald-500/20 flex items-center justify-center text-emerald-700 dark:text-emerald-300 font-semibold text-sm">
+              {(displayName || 'B')[0].toUpperCase()}
+            </div>
+            <span className="text-sm font-medium text-gray-900 dark:text-white">{displayName || 'Bạn'}</span>
           </div>
         </div>
       </div>
@@ -245,7 +275,7 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
   const total = spentByCat.reduce((s, c) => s + c.amount, 0) || 1;
   const radius = 60, circumference = 2 * Math.PI * radius;
   let cumulative = 0;
-  const palette = ['#7c3aed', '#a78bfa', '#c4b5fd', '#ddd6fe', '#ede9fe', '#f5f3ff'];
+  const palette = ['#16a34a', '#facc15', '#fb923c', '#4ade80', '#fde047', '#fdba74', '#86efac'];
 
   // Tổng tài sản = tổng số dư mọi quỹ (mọi danh mục chi tiêu) + tổng số dư mọi tài khoản
   const totalFunds = expenseCats.reduce((s, c) => s + fundBalance(c.id, transactions), 0);
@@ -257,6 +287,16 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
   const thisMonthTx = transactions.filter((t) => { const d = new Date(t.created_at); return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear(); });
   const incomeThisMonth = thisMonthTx.filter((t) => t.type === 'income').reduce((s, t) => s + Number(t.amount), 0);
   const expenseThisMonth = thisMonthTx.filter((t) => t.type === 'expense').reduce((s, t) => s + Number(t.amount), 0);
+
+  // So sánh với tháng trước (hiện % tăng/giảm)
+  const prevMonthDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const prevMonthTx = transactions.filter((t) => { const d = new Date(t.created_at); return d.getMonth() === prevMonthDate.getMonth() && d.getFullYear() === prevMonthDate.getFullYear(); });
+  const incomePrevMonth = prevMonthTx.filter((t) => t.type === 'income').reduce((s, t) => s + Number(t.amount), 0);
+  const expensePrevMonth = prevMonthTx.filter((t) => t.type === 'expense').reduce((s, t) => s + Number(t.amount), 0);
+  function pctChange(current, prev) { return prev > 0 ? ((current - prev) / prev) * 100 : null; }
+  const incomeChange = pctChange(incomeThisMonth, incomePrevMonth);
+  const expenseChange = pctChange(expenseThisMonth, expensePrevMonth);
+  const savedChange = pctChange(incomeThisMonth - expenseThisMonth, incomePrevMonth - expensePrevMonth);
 
   const monthLabels = [];
   const monthTotals = [];
@@ -298,7 +338,9 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
   });
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-violet-400 via-fuchsia-300 to-orange-100 md:bg-gray-50 dark:md:bg-gray-950 flex justify-center md:pt-20 transition-colors">
+    <div className="min-h-screen relative bg-gray-100 dark:bg-gray-950 flex justify-center md:pl-64 md:pt-20 transition-colors">
+      {/* Lớp nền gradient — chỉ hiện trên điện thoại, tách riêng để không xung đột với nền desktop */}
+      <div className="absolute inset-0 bg-gradient-to-b from-violet-400 via-fuchsia-300 to-orange-100 md:hidden" />
       {/* ============ BẢN ĐIỆN THOẠI (giữ nguyên) ============ */}
       <div className="w-full max-w-sm md:hidden min-h-screen pb-28 relative">
         <div className="px-5 pt-8 flex items-center justify-between">
@@ -410,180 +452,207 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
         </div>
       </div>
 
-      {/* ============ BẢN DESKTOP/TABLET (bố cục kiểu dashboard) ============ */}
+      {/* ============ BẢN DESKTOP/TABLET (bố cục kiểu dashboard, đúng vị trí như ảnh tham khảo) ============ */}
       <div className="hidden md:block w-full max-w-[1400px] px-8 py-8">
-        <div className="grid grid-cols-3 gap-6">
-          {/* Cột chính (2/3) */}
-          <div className="col-span-2 flex flex-col gap-6">
-            {/* Biểu đồ số dư 7 ngày gần nhất */}
-            <div className="bg-white dark:bg-gray-900 rounded-3xl p-6 shadow-sm shadow-black/5 dark:border dark:border-gray-800 transition-colors">
-              <div className="flex items-center justify-between mb-1">
-                <div>
-                  <p className="text-3xl font-bold text-gray-900 dark:text-white">{formatMoney(totalAssets)}</p>
-                  <p className="text-gray-400 dark:text-gray-500 text-sm">Tổng quan số dư</p>
-                </div>
-                <div className="flex items-center gap-4 text-xs">
-                  <span className="flex items-center gap-1.5 text-gray-500"><span className="w-2.5 h-2.5 rounded-full bg-emerald-400" />Thu nhập</span>
-                  <span className="flex items-center gap-1.5 text-gray-500"><span className="w-2.5 h-2.5 rounded-full bg-violet-400" />Chi tiêu</span>
-                </div>
+        <div
+          className="grid gap-6"
+          style={{
+            gridTemplateColumns: '2fr 1fr 1fr',
+            gridTemplateAreas: `
+              "chart chart right"
+              "limit tips  right"
+              "cost health goal"
+              "history history history"
+            `,
+          }}
+        >
+          {/* Tổng quan số dư — góc trên trái, rộng */}
+          <div style={{ gridArea: 'chart' }} className="bg-white dark:bg-gray-900 rounded-3xl p-6 shadow-sm shadow-black/5 border border-gray-100 dark:border-gray-800 transition-colors">
+            <div className="flex items-center justify-between mb-1">
+              <div>
+                <p className="text-3xl font-bold text-gray-900 dark:text-white">{formatMoney(totalAssets)}</p>
+                <p className="text-gray-400 dark:text-gray-500 text-sm">Tổng quan số dư</p>
               </div>
-              <div className="flex items-end gap-3 mt-8 h-40">
-                {last7.map((day, i) => {
-                  const inc = dailyIncome[day - 1] || 0;
-                  const exp = dailySpend[day - 1] || 0;
-                  return (
-                    <div key={i} className="flex-1 flex flex-col items-center gap-1 h-full justify-end">
-                      <div className="w-full flex items-end gap-1 h-full">
-                        <div className="flex-1 bg-emerald-100 dark:bg-emerald-500/20 rounded-t-lg" style={{ height: `${(inc / maxDaily) * 100}%`, minHeight: inc > 0 ? 4 : 0 }} />
-                        <div className="flex-1 bg-violet-400 dark:bg-violet-500 rounded-t-lg" style={{ height: `${(exp / maxDaily) * 100}%`, minHeight: exp > 0 ? 4 : 0 }} />
-                      </div>
-                      <span className="text-[11px] text-gray-400">{weekDayLabels[new Date(now.getFullYear(), now.getMonth(), day).getDay()]}</span>
+              <div className="flex items-center gap-4 text-xs">
+                <span className="flex items-center gap-1.5 text-gray-500"><span className="w-2.5 h-2.5 rounded-full bg-yellow-400" />Tiết kiệm</span>
+                <span className="flex items-center gap-1.5 text-gray-500"><span className="w-2.5 h-2.5 rounded-full bg-emerald-500" />Thu nhập</span>
+                <span className="flex items-center gap-1.5 text-gray-500"><span className="w-2.5 h-2.5 rounded-full bg-orange-400" />Chi tiêu</span>
+              </div>
+            </div>
+            <div className="flex items-end gap-3 mt-8 h-40">
+              {last7.map((day, i) => {
+                const inc = dailyIncome[day - 1] || 0;
+                const exp = dailySpend[day - 1] || 0;
+                return (
+                  <div key={i} className="flex-1 flex flex-col items-center gap-1 h-full justify-end">
+                    <div className="w-full flex items-end gap-1 h-full">
+                      <div className="flex-1 bg-emerald-400 dark:bg-emerald-500 rounded-t-lg" style={{ height: `${(inc / maxDaily) * 100}%`, minHeight: inc > 0 ? 4 : 0 }} />
+                      <div className="flex-1 bg-orange-300 dark:bg-orange-500 rounded-t-lg" style={{ height: `${(exp / maxDaily) * 100}%`, minHeight: exp > 0 ? 4 : 0 }} />
                     </div>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* Phân tích chi phí theo danh mục */}
-            <div className="bg-white dark:bg-gray-900 rounded-3xl p-6 shadow-sm shadow-black/5 dark:border dark:border-gray-800 transition-colors">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-gray-900 dark:text-white font-semibold">Phân tích chi phí</h3>
-                <button onClick={() => setScreen('report')} className="text-violet-600 text-xs font-medium">Chi tiết</button>
-              </div>
-              {spentByCat.length === 0 ? <p className="text-gray-400 dark:text-gray-500 text-sm text-center py-6">Chưa có chi tiêu nào.</p> : (
-                <div className="flex items-center gap-8">
-                  <svg width="150" height="150" viewBox="0 0 150 150" className="-rotate-90 flex-shrink-0">
-                    {spentByCat.map((cat, i) => {
-                      const pct = cat.amount / total; const dash = pct * circumference; const offset = cumulative; cumulative += dash;
-                      return <circle key={cat.id} cx="75" cy="75" r={radius} fill="none" stroke={palette[i % palette.length]} strokeWidth="14" strokeDasharray={`${dash} ${circumference - dash}`} strokeDashoffset={-offset} strokeLinecap="round" />;
-                    })}
-                  </svg>
-                  <div className="flex flex-col gap-2 text-sm flex-1">
-                    {spentByCat.map((cat, i) => {
-                      const pct = Math.round((cat.amount / total) * 100);
-                      return (
-                        <div key={cat.id} className="flex items-center gap-2">
-                          <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: palette[i % palette.length] }} />
-                          <span className="text-gray-600 dark:text-gray-300">{cat.name}</span>
-                          <span className="text-gray-400 text-xs">{pct}%</span>
-                          <span className="text-gray-900 dark:text-white font-medium ml-auto">{formatMoney(cat.amount)}</span>
-                        </div>
-                      );
-                    })}
+                    <span className="text-[11px] text-gray-400">{weekDayLabels[new Date(now.getFullYear(), now.getMonth(), day).getDay()]}</span>
                   </div>
-                </div>
-              )}
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Cột phải — Thu/Chi/Số dư + Tài khoản, xếp chồng, kéo dài xuống 2 hàng như "My card" trong ảnh */}
+          <div style={{ gridArea: 'right' }} className="flex flex-col gap-6">
+            <div className="bg-white dark:bg-gray-900 rounded-3xl p-6 shadow-sm shadow-black/5 border border-gray-100 dark:border-gray-800 transition-colors flex flex-col gap-4">
+              <div>
+                <p className="text-gray-400 dark:text-gray-500 text-xs mb-0.5">Thu nhập tháng này</p>
+                <span className="text-xl font-bold text-gray-900 dark:text-white">{formatMoney(incomeThisMonth)}</span>
+                <div className="mt-0.5"><ChangeBadge pct={incomeChange} good={true} /></div>
+              </div>
+              <div className="h-px bg-gray-100 dark:bg-gray-800" />
+              <div>
+                <p className="text-gray-400 dark:text-gray-500 text-xs mb-0.5">Chi tiêu tháng này</p>
+                <span className="text-xl font-bold text-gray-900 dark:text-white">{formatMoney(expenseThisMonth)}</span>
+                <div className="mt-0.5"><ChangeBadge pct={expenseChange} good={false} /></div>
+              </div>
+              <div className="h-px bg-gray-100 dark:bg-gray-800" />
+              <div>
+                <p className="text-gray-400 dark:text-gray-500 text-xs mb-0.5">Số dư tiết kiệm tháng này</p>
+                <span className="text-xl font-bold text-gray-900 dark:text-white">{formatMoney(incomeThisMonth - expenseThisMonth)}</span>
+                <div className="mt-0.5"><ChangeBadge pct={savedChange} good={true} /></div>
+              </div>
             </div>
 
-            {/* Giới hạn chi tiêu tháng */}
-            <div className="bg-white dark:bg-gray-900 rounded-3xl p-6 shadow-sm shadow-black/5 dark:border dark:border-gray-800 transition-colors">
-              <div className="flex items-center justify-between mb-3">
-                <h3 className="text-gray-900 dark:text-white font-semibold">Hạn mức chi tiêu tháng</h3>
-                <span className="text-gray-400 text-xs">{formatMoney(expenseThisMonth)} / {totalMonthlyLimit > 0 ? formatMoney(totalMonthlyLimit) : '—'}</span>
+            <div className="bg-white dark:bg-gray-900 rounded-3xl p-6 shadow-sm shadow-black/5 border border-gray-100 dark:border-gray-800 transition-colors flex-1">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-gray-900 dark:text-white font-semibold">Tài khoản của bạn</h3>
+                <button onClick={() => setScreen('accounts')} className="text-emerald-600 text-xs font-medium">Xem tất cả</button>
               </div>
-              {totalMonthlyLimit === 0 ? (
-                <p className="text-gray-400 dark:text-gray-500 text-sm">Chưa đặt hạn mức nào. Vào Cài đặt &gt; Danh mục để thêm.</p>
-              ) : (
-                <ProgressBar pct={limitPct} colorClass={limitPct > 100 ? 'bg-red-400' : 'bg-violet-500'} />
+              {accounts.length === 0 ? <p className="text-gray-400 dark:text-gray-500 text-sm text-center py-4">Chưa có tài khoản nào.</p> : (
+                <div className="flex flex-col gap-3">
+                  {accounts.slice(0, 3).map((acc) => (
+                    <div key={acc.id} className="flex items-center gap-3">
+                      <EmojiCircle emoji={acc.icon} size={36} bg="#ecfdf5" />
+                      <div className="flex-1 min-w-0"><p className="text-gray-900 dark:text-white text-sm font-medium">{acc.name}</p></div>
+                      <p className="text-gray-900 dark:text-white font-semibold text-sm">{formatMoney(accountBalance(acc, transactions))}</p>
+                    </div>
+                  ))}
+                </div>
               )}
             </div>
           </div>
 
-          {/* Cột phải (1/3) */}
-          <div className="flex flex-col gap-6">
-            {/* Thẻ thống kê dọc */}
-            <div className="bg-white dark:bg-gray-900 rounded-3xl p-6 shadow-sm shadow-black/5 dark:border dark:border-gray-800 transition-colors flex flex-col gap-4">
-              <div>
-                <div className="flex items-center gap-2">
-                  <span className="text-xl font-bold text-gray-900 dark:text-white">{formatMoney(incomeThisMonth)}</span>
-                  <span className="text-[11px] font-semibold bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 px-2 py-0.5 rounded-full">Thu</span>
-                </div>
-                <p className="text-gray-400 dark:text-gray-500 text-xs mt-0.5">Thu nhập tháng này</p>
-              </div>
-              <div className="h-px bg-gray-100 dark:bg-gray-800" />
-              <div>
-                <div className="flex items-center gap-2">
-                  <span className="text-xl font-bold text-gray-900 dark:text-white">{formatMoney(expenseThisMonth)}</span>
-                  <span className="text-[11px] font-semibold bg-red-50 dark:bg-red-500/10 text-red-500 dark:text-red-400 px-2 py-0.5 rounded-full">Chi</span>
-                </div>
-                <p className="text-gray-400 dark:text-gray-500 text-xs mt-0.5">Chi tiêu tháng này</p>
-              </div>
-              <div className="h-px bg-gray-100 dark:bg-gray-800" />
-              <div>
-                <div className="flex items-center gap-2">
-                  <span className="text-xl font-bold text-gray-900 dark:text-white">{formatMoney(incomeThisMonth - expenseThisMonth)}</span>
-                  <span className="text-[11px] font-semibold bg-violet-50 dark:bg-violet-500/10 text-violet-600 dark:text-violet-400 px-2 py-0.5 rounded-full">Dư</span>
-                </div>
-                <p className="text-gray-400 dark:text-gray-500 text-xs mt-0.5">Số dư tiết kiệm tháng này</p>
-              </div>
-            </div>
+          {/* Hạn mức chi tiêu tháng */}
+          <div style={{ gridArea: 'limit' }} className="bg-white dark:bg-gray-900 rounded-3xl p-6 shadow-sm shadow-black/5 border border-gray-100 dark:border-gray-800 transition-colors">
+            <h3 className="text-gray-900 dark:text-white font-semibold mb-1">Hạn mức chi tiêu tháng</h3>
+            <p className="text-gray-400 text-xs mb-3">{formatMoney(expenseThisMonth)} / {totalMonthlyLimit > 0 ? formatMoney(totalMonthlyLimit) : '—'}</p>
+            {totalMonthlyLimit === 0 ? (
+              <p className="text-gray-400 dark:text-gray-500 text-sm">Chưa đặt hạn mức nào. Vào Cài đặt &gt; Danh mục để thêm.</p>
+            ) : (
+              <ProgressBar pct={limitPct} colorClass={limitPct > 100 ? 'bg-red-400' : 'bg-emerald-500'} />
+            )}
+          </div>
 
-            {/* Sức khỏe tài chính (tỷ lệ tiết kiệm) */}
-            <div className="bg-white dark:bg-gray-900 rounded-3xl p-6 shadow-sm shadow-black/5 dark:border dark:border-gray-800 transition-colors flex flex-col items-center">
-              <h3 className="text-gray-900 dark:text-white font-semibold self-start mb-2">Sức khỏe tài chính</h3>
-              <p className="text-gray-400 text-xs self-start mb-4">Tỷ lệ tiết kiệm tháng này</p>
-              <svg width="120" height="120" viewBox="0 0 120 120" className="-rotate-90">
-                <circle cx="60" cy="60" r="50" fill="none" stroke="#f3f4f6" className="dark:stroke-gray-800" strokeWidth="12" />
-                <circle cx="60" cy="60" r="50" fill="none" stroke="#7c3aed" strokeWidth="12" strokeLinecap="round"
-                  strokeDasharray={`${(savingsRate / 100) * 2 * Math.PI * 50} ${2 * Math.PI * 50}`} />
-              </svg>
-              <p className="text-2xl font-bold text-gray-900 dark:text-white -mt-16">{Math.round(savingsRate)}%</p>
-              <p className="text-gray-400 text-xs mt-16">Dựa trên thu/chi tháng này</p>
-            </div>
+          {/* Gợi ý tiết kiệm */}
+          <div style={{ gridArea: 'tips' }} className="bg-gray-900 dark:bg-emerald-950 rounded-3xl p-6 text-white">
+            <h3 className="font-semibold mb-2">💡 Gợi ý tiết kiệm</h3>
+            <p className="text-gray-300 dark:text-emerald-200/70 text-sm">
+              {savingsRate >= 20
+                ? `Tuyệt vời! Bạn đã tiết kiệm được ${Math.round(savingsRate)}% thu nhập tháng này.`
+                : `Bạn mới tiết kiệm được ${Math.round(savingsRate)}% thu nhập. Thử đặt hạn mức cho các danh mục hay vượt chi.`}
+            </p>
+          </div>
 
-            {/* Theo dõi mục tiêu */}
-            <div className="bg-white dark:bg-gray-900 rounded-3xl p-6 shadow-sm shadow-black/5 dark:border dark:border-gray-800 transition-colors">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-gray-900 dark:text-white font-semibold">Mục tiêu</h3>
-                <button onClick={() => setScreen('goals')} className="text-violet-600 text-xs font-medium">Xem tất cả</button>
-              </div>
-              {(!goals || goals.length === 0) ? <p className="text-gray-400 dark:text-gray-500 text-sm text-center py-4">Chưa có mục tiêu nào.</p> : (
-                <div className="flex flex-col gap-4">
-                  {goals.slice(0, 3).map((g) => {
-                    const pct = g.target_amount ? Math.min(100, (g.current_amount / g.target_amount) * 100) : 0;
+          {/* Phân tích chi phí */}
+          <div style={{ gridArea: 'cost' }} className="bg-white dark:bg-gray-900 rounded-3xl p-6 shadow-sm shadow-black/5 border border-gray-100 dark:border-gray-800 transition-colors">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-gray-900 dark:text-white font-semibold">Phân tích chi phí</h3>
+              <button onClick={() => setScreen('report')} className="text-emerald-600 text-xs font-medium">Chi tiết</button>
+            </div>
+            {spentByCat.length === 0 ? <p className="text-gray-400 dark:text-gray-500 text-sm text-center py-6">Chưa có chi tiêu nào.</p> : (
+              <div className="flex flex-col items-center gap-4">
+                <svg width="120" height="120" viewBox="0 0 150 150" className="-rotate-90 flex-shrink-0">
+                  {spentByCat.map((cat, i) => {
+                    const pct = cat.amount / total; const dash = pct * circumference; const offset = cumulative; cumulative += dash;
+                    return <circle key={cat.id} cx="75" cy="75" r={radius} fill="none" stroke={palette[i % palette.length]} strokeWidth="14" strokeDasharray={`${dash} ${circumference - dash}`} strokeDashoffset={-offset} strokeLinecap="round" />;
+                  })}
+                </svg>
+                <div className="flex flex-col gap-2 text-sm w-full">
+                  {spentByCat.slice(0, 4).map((cat, i) => {
+                    const pct = Math.round((cat.amount / total) * 100);
                     return (
-                      <div key={g.id}>
-                        <div className="flex items-center justify-between mb-1">
-                          <span className="text-gray-700 dark:text-gray-300 text-sm">{g.name}</span>
-                          <span className="text-gray-400 text-xs">{Math.round(pct)}%</span>
+                      <div key={cat.id} className="flex items-center gap-2">
+                        <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: palette[i % palette.length] }} />
+                        <span className="text-gray-600 dark:text-gray-300 truncate">{cat.name}</span>
+                        <span className="text-gray-400 text-xs ml-auto">{pct}%</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Sức khỏe tài chính */}
+          <div style={{ gridArea: 'health' }} className="bg-white dark:bg-gray-900 rounded-3xl p-6 shadow-sm shadow-black/5 border border-gray-100 dark:border-gray-800 transition-colors flex flex-col items-center">
+            <h3 className="text-gray-900 dark:text-white font-semibold self-start mb-1">Sức khỏe tài chính</h3>
+            <p className="text-gray-400 text-xs self-start mb-4">Tỷ lệ tiết kiệm</p>
+            <svg width="100" height="100" viewBox="0 0 120 120" className="-rotate-90">
+              <circle cx="60" cy="60" r="50" fill="none" stroke="#f3f4f6" className="dark:stroke-gray-800" strokeWidth="12" />
+              <circle cx="60" cy="60" r="50" fill="none" stroke="#22c55e" strokeWidth="12" strokeLinecap="round"
+                strokeDasharray={`${(savingsRate / 100) * 2 * Math.PI * 50} ${2 * Math.PI * 50}`} />
+            </svg>
+            <p className="text-xl font-bold text-gray-900 dark:text-white -mt-14">{Math.round(savingsRate)}%</p>
+            <p className="text-gray-400 text-xs mt-14">Dựa trên tháng này</p>
+          </div>
+
+          {/* Theo dõi mục tiêu */}
+          <div style={{ gridArea: 'goal' }} className="bg-white dark:bg-gray-900 rounded-3xl p-6 shadow-sm shadow-black/5 border border-gray-100 dark:border-gray-800 transition-colors">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-gray-900 dark:text-white font-semibold">Mục tiêu</h3>
+              <button onClick={() => setScreen('goals')} className="text-emerald-600 text-xs font-medium">Xem tất cả</button>
+            </div>
+            {(!goals || goals.length === 0) ? <p className="text-gray-400 dark:text-gray-500 text-sm text-center py-4">Chưa có mục tiêu nào.</p> : (
+              <div className="flex flex-col gap-4">
+                {goals.slice(0, 3).map((g) => {
+                  const pct = g.target_amount ? Math.min(100, (g.current_amount / g.target_amount) * 100) : 0;
+                  return (
+                    <div key={g.id}>
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-gray-700 dark:text-gray-300 text-sm">{g.name}</span>
+                        <span className="text-gray-400 text-xs">{Math.round(pct)}%</span>
+                      </div>
+                      <ProgressBar pct={pct} colorClass="bg-emerald-500" />
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* Giao dịch gần đây — full width, hàng dưới cùng */}
+          <div style={{ gridArea: 'history' }} className="bg-white dark:bg-gray-900 rounded-3xl p-6 shadow-sm shadow-black/5 border border-gray-100 dark:border-gray-800 transition-colors">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-gray-900 dark:text-white font-semibold">Giao dịch gần đây</h3>
+              <div className="flex items-center gap-2 bg-gray-50 dark:bg-gray-800 rounded-full px-3 py-2 w-64">
+                <Search size={14} className="text-gray-400" />
+                <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Tìm kiếm" className="bg-transparent outline-none text-sm flex-1" />
+              </div>
+            </div>
+            {loading ? <div className="flex justify-center py-6"><Loader2 size={20} className="animate-spin text-emerald-400" /></div>
+              : filteredTx.length === 0 ? <p className="text-gray-400 dark:text-gray-500 text-sm text-center py-4">Không có giao dịch nào.</p>
+              : (
+                <div className="grid grid-cols-2 gap-x-8 gap-y-1">
+                  {filteredTx.slice(0, 8).map((tx) => {
+                    const cat = categories.find((c) => c.id === tx.category_id);
+                    return (
+                      <div key={tx.id} className="flex items-center gap-2.5 py-2.5 border-b border-gray-50 dark:border-gray-800">
+                        <EmojiCircle emoji={cat?.icon} size={32} bg={tx.type === 'income' ? '#ecfdf5' : '#fff7ed'} />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-gray-900 dark:text-white font-medium text-sm truncate">{cat?.name || 'Khác'}</p>
+                          <p className="text-gray-400 text-xs">{new Date(tx.date || tx.created_at).toLocaleDateString('vi-VN')}</p>
                         </div>
-                        <ProgressBar pct={pct} />
+                        <p className={`font-medium text-xs flex-shrink-0 ${tx.type === 'income' ? 'text-emerald-600' : 'text-gray-900 dark:text-white'}`}>{tx.type === 'income' ? '+' : '-'}{formatMoney(tx.amount)}</p>
                       </div>
                     );
                   })}
                 </div>
               )}
-            </div>
-
-            {/* Giao dịch gần đây (dạng danh sách gọn) */}
-            <div className="bg-white dark:bg-gray-900 rounded-3xl p-6 shadow-sm shadow-black/5 dark:border dark:border-gray-800 transition-colors">
-              <div className="flex items-center justify-between mb-3">
-                <h3 className="text-gray-900 dark:text-white font-semibold">Giao dịch gần đây</h3>
-              </div>
-              <div className="flex items-center gap-2 bg-gray-50 dark:bg-gray-800 rounded-full px-3 py-2 mb-3">
-                <Search size={14} className="text-gray-400" />
-                <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Tìm kiếm" className="bg-transparent outline-none text-sm flex-1" />
-              </div>
-              {loading ? <div className="flex justify-center py-6"><Loader2 size={20} className="animate-spin text-violet-400" /></div>
-                : filteredTx.length === 0 ? <p className="text-gray-400 dark:text-gray-500 text-sm text-center py-4">Không có giao dịch nào.</p>
-                : (
-                  <div className="flex flex-col divide-y divide-gray-50 dark:divide-gray-800">
-                    {filteredTx.slice(0, 6).map((tx) => {
-                      const cat = categories.find((c) => c.id === tx.category_id);
-                      return (
-                        <div key={tx.id} className="flex items-center gap-2.5 py-2.5">
-                          <EmojiCircle emoji={cat?.icon} size={32} bg={tx.type === 'income' ? '#ecfdf5' : '#f5f3ff'} />
-                          <div className="flex-1 min-w-0">
-                            <p className="text-gray-900 dark:text-white font-medium text-sm truncate">{cat?.name || 'Khác'}</p>
-                            <p className="text-gray-400 text-xs">{new Date(tx.date || tx.created_at).toLocaleDateString('vi-VN')}</p>
-                          </div>
-                          <p className={`font-medium text-xs flex-shrink-0 ${tx.type === 'income' ? 'text-emerald-600' : 'text-gray-900 dark:text-white'}`}>{tx.type === 'income' ? '+' : '-'}{formatMoney(tx.amount)}</p>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-            </div>
           </div>
         </div>
       </div>
@@ -609,7 +678,7 @@ function FundDetail({ category, transactions, onBack }) {
   const estimatedProfit = balance > 0 ? balance * (rate / 100) : 0;
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-violet-400 via-fuchsia-200 to-orange-100 flex justify-center md:pt-20">
+    <div className="min-h-screen bg-gradient-to-b from-violet-400 via-fuchsia-200 to-orange-100 flex justify-center md:pl-64 md:pt-20">
       <div className="w-full max-w-sm md:max-w-2xl min-h-screen pb-28 md:pb-10 relative">
         <div className="px-5 pt-8 flex items-center gap-3">
           <button onClick={onBack} className="w-9 h-9 rounded-full bg-white/30 backdrop-blur flex items-center justify-center"><ArrowLeft size={18} className="text-white" /></button>
@@ -671,7 +740,7 @@ function Report({ setScreen, onAddClick, displayName, theme, toggleTheme }) {
   const periods = ['Weekly', 'Monthly', 'Quarterly', 'Yearly'];
   const periodLabels = { Weekly: 'Tuần', Monthly: 'Tháng', Quarterly: 'Quý', Yearly: 'Năm' };
   return (
-    <div className="min-h-screen bg-gradient-to-b from-violet-400 via-fuchsia-200 to-orange-100 flex justify-center md:pt-20">
+    <div className="min-h-screen bg-gradient-to-b from-violet-400 via-fuchsia-200 to-orange-100 flex justify-center md:pl-64 md:pt-20">
       <div className="w-full max-w-sm md:max-w-2xl lg:max-w-3xl min-h-screen pb-28 md:pb-10 md:pt-4 relative">
         <div className="px-5 pt-8 flex items-center justify-between">
           <button onClick={() => setScreen('dashboard')} className="w-9 h-9 rounded-full bg-white/30 backdrop-blur flex items-center justify-center"><ArrowLeft size={18} className="text-white" /></button>
@@ -725,7 +794,7 @@ function AddGoalForm({ onClose, onSaved }) {
 function Goals({ setScreen, goals, loadingGoals, reload, onAddClick, displayName, theme, toggleTheme }) {
   const [showAddGoal, setShowAddGoal] = useState(false);
   return (
-    <div className="min-h-screen bg-gradient-to-b from-violet-400 via-fuchsia-200 to-orange-100 flex justify-center md:pt-20">
+    <div className="min-h-screen bg-gradient-to-b from-violet-400 via-fuchsia-200 to-orange-100 flex justify-center md:pl-64 md:pt-20">
       <div className="w-full max-w-sm md:max-w-2xl lg:max-w-3xl min-h-screen pb-28 md:pb-10 md:pt-4 relative">
         <div className="px-5 pt-8 flex items-center gap-3">
           <button onClick={() => setScreen('dashboard')} className="w-9 h-9 rounded-full bg-white/30 backdrop-blur flex items-center justify-center"><ArrowLeft size={18} className="text-white" /></button>
@@ -869,7 +938,7 @@ function AddTransaction({ onClose, accounts, categories, onSaved }) {
 function Accounts({ setScreen, accounts, transactions, onAddClick, displayName, theme, toggleTheme }) {
   const totalBalance = accounts.reduce((s, a) => s + accountBalance(a, transactions), 0);
   return (
-    <div className="min-h-screen bg-gradient-to-b from-violet-400 via-fuchsia-200 to-orange-100 flex justify-center md:pt-20">
+    <div className="min-h-screen bg-gradient-to-b from-violet-400 via-fuchsia-200 to-orange-100 flex justify-center md:pl-64 md:pt-20">
       <div className="w-full max-w-sm md:max-w-2xl lg:max-w-3xl min-h-screen pb-28 md:pb-10 md:pt-4 relative">
         <div className="px-5 pt-8 flex items-center gap-3">
           <button onClick={() => setScreen('dashboard')} className="w-9 h-9 rounded-full bg-white/30 backdrop-blur flex items-center justify-center"><ArrowLeft size={18} className="text-white" /></button>
@@ -1083,7 +1152,7 @@ function Settings({ setScreen, categories, accounts, reload, user, onProfileUpda
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-violet-400 via-fuchsia-200 to-orange-100 flex justify-center md:pt-20">
+    <div className="min-h-screen bg-gradient-to-b from-violet-400 via-fuchsia-200 to-orange-100 flex justify-center md:pl-64 md:pt-20">
       <div className="w-full max-w-sm md:max-w-2xl lg:max-w-3xl min-h-screen pb-28 md:pb-10 md:pt-4 relative">
         <div className="px-5 pt-8 flex items-center justify-between">
           <div className="flex items-center gap-3">
