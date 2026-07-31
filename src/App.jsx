@@ -17,25 +17,6 @@ function nowForInput() {
   return d.toISOString().slice(0, 16);
 }
 
-// Số dư quỹ = tổng đã Nạp - tổng đã Chi (rút) cho đúng danh mục đó
-function fundBalance(categoryId, transactions) {
-  return transactions
-    .filter((t) => t.category_id === categoryId)
-    .reduce((s, t) => {
-      if (t.type === 'allocation') return s + Number(t.amount);
-      if (t.type === 'expense') return s - Number(t.amount);
-      return s;
-    }, 0);
-}
-
-// Số dư tài khoản = số dư ban đầu + Thu nhập - Chi tiêu (Nạp quỹ không tính, vì tiền chưa thật sự rời khỏi ví)
-function accountBalance(acc, transactions) {
-  const delta = transactions
-    .filter((t) => t.account_id === acc.id && (t.type === 'income' || t.type === 'expense'))
-    .reduce((s, t) => s + (t.type === 'income' ? Number(t.amount) : -Number(t.amount)), 0);
-  return Number(acc.initial_balance || 0) + delta;
-}
-
 /* ---------- Màn Đăng nhập / Đăng ký ---------- */
 
 function AuthScreen() {
@@ -171,26 +152,12 @@ function ProgressBar({ pct, colorClass = 'bg-violet-600' }) {
   return <div className="w-full h-1.5 bg-gray-100 rounded-full overflow-hidden"><div className={`h-full ${colorClass} rounded-full`} style={{ width: `${Math.min(pct, 100)}%` }} /></div>;
 }
 
-// good=true nghĩa là tăng là tốt (thu nhập/tiết kiệm), good=false nghĩa là tăng là xấu (chi tiêu)
-function ChangeBadge({ pct, good = true }) {
-  if (pct === null) return null;
-  const isUp = pct >= 0;
-  const isGoodDirection = isUp === good;
-  const Icon = isUp ? TrendingUp : TrendingDown;
-  return (
-    <span className={`inline-flex items-center gap-0.5 text-xs font-medium ${isGoodDirection ? 'text-emerald-600' : 'text-red-500'}`}>
-      <Icon size={12} />{Math.abs(Math.round(pct))}% so với tháng trước
-    </span>
-  );
-}
-
 function EmojiCircle({ emoji, size = 36, active = false, activeColor = '#7c3aed', bg = '#f3f4f6' }) {
   return <div className="rounded-xl flex items-center justify-center flex-shrink-0" style={{ width: size, height: size, background: active ? activeColor : bg, fontSize: size * 0.5 }}>{emoji || '❔'}</div>;
 }
 
 const NAV_ITEMS = [
   { key: 'dashboard', icon: Home, label: 'Trang chủ' },
-  { key: 'funds', icon: PiggyBank, label: 'Quỹ' },
   { key: 'goals', icon: Sparkles, label: 'Mục tiêu' },
   { key: 'report', icon: BarChart3, label: 'Báo cáo' },
   { key: 'settings', icon: SettingsIcon, label: 'Cài đặt' },
@@ -200,66 +167,48 @@ function BottomNav({ screen, setScreen, onAddClick, displayName, theme, toggleTh
   return (
     <>
       {/* Thanh dưới cùng — chỉ hiện trên điện thoại */}
-      <div className="fixed bottom-4 left-1/2 -translate-x-1/2 w-[calc(100%-1.5rem)] max-w-sm bg-white rounded-full shadow-xl shadow-black/10 px-4 py-3 flex items-center justify-between z-10 md:hidden">
-        <button onClick={() => setScreen('dashboard')}><Home size={19} className={screen === 'dashboard' ? 'text-gray-900' : 'text-gray-300'} /></button>
-        <button onClick={() => setScreen('funds')}><PiggyBank size={19} className={screen === 'funds' ? 'text-gray-900' : 'text-gray-300'} /></button>
-        <button onClick={onAddClick} className="w-11 h-11 rounded-full bg-gray-900 flex items-center justify-center -mt-6 shadow-lg flex-shrink-0"><Plus size={20} className="text-white" /></button>
-        <button onClick={() => setScreen('goals')}><Sparkles size={19} className={screen === 'goals' ? 'text-gray-900' : 'text-gray-300'} /></button>
-        <button onClick={() => setScreen('report')}><BarChart3 size={19} className={screen === 'report' ? 'text-gray-900' : 'text-gray-300'} /></button>
-        <button onClick={() => setScreen('settings')}><SettingsIcon size={19} className={screen === 'settings' ? 'text-gray-900' : 'text-gray-300'} /></button>
+      <div className="fixed bottom-4 left-1/2 -translate-x-1/2 w-[calc(100%-2.5rem)] max-w-sm bg-white rounded-full shadow-xl shadow-black/10 px-6 py-3 flex items-center justify-between z-10 md:hidden">
+        <button onClick={() => setScreen('dashboard')}><Home size={20} className={screen === 'dashboard' ? 'text-gray-900' : 'text-gray-300'} /></button>
+        <button onClick={() => setScreen('goals')}><Sparkles size={20} className={screen === 'goals' ? 'text-gray-900' : 'text-gray-300'} /></button>
+        <button onClick={onAddClick} className="w-11 h-11 rounded-full bg-gray-900 flex items-center justify-center -mt-6 shadow-lg"><Plus size={20} className="text-white" /></button>
+        <button onClick={() => setScreen('report')}><BarChart3 size={20} className={screen === 'report' ? 'text-gray-900' : 'text-gray-300'} /></button>
+        <button onClick={() => setScreen('settings')}><SettingsIcon size={20} className={screen === 'settings' ? 'text-gray-900' : 'text-gray-300'} /></button>
       </div>
 
-      {/* Sidebar bên trái — chỉ hiện trên tablet/PC (từ md trở lên) */}
-      <div className="hidden md:flex flex-col fixed left-0 top-0 h-screen w-64 bg-white dark:bg-gray-950 border-r border-gray-100 dark:border-gray-800 px-5 py-6 z-20 transition-colors">
-        <div className="flex items-center gap-2 mb-8 px-1">
-          <div className="w-9 h-9 rounded-xl bg-emerald-500 flex items-center justify-center flex-shrink-0">
+      {/* Thanh nav ngang trên cùng — chỉ hiện trên tablet/PC (từ md trở lên) */}
+      <div className="hidden md:flex fixed top-0 inset-x-0 h-20 bg-white dark:bg-gray-950 border-b border-gray-100 dark:border-gray-800 items-center px-8 z-20 transition-colors">
+        <div className="flex items-center gap-2 mr-10">
+          <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center flex-shrink-0">
             <Wallet size={17} className="text-white" />
           </div>
           <span className="font-semibold text-gray-900 dark:text-white">MyFinance</span>
         </div>
 
-        <div className="flex flex-col gap-1">
+        {/* Nút chuyển Sáng/Tối */}
+        <div className="flex items-center gap-1 bg-gray-50 dark:bg-gray-900 rounded-full p-1 mr-4">
+          <button onClick={() => theme !== 'light' && toggleTheme()} className={`w-8 h-8 rounded-full flex items-center justify-center transition ${theme === 'light' ? 'bg-white shadow text-gray-900' : 'text-gray-400'}`}>
+            <Sun size={15} />
+          </button>
+          <button onClick={() => theme !== 'dark' && toggleTheme()} className={`w-8 h-8 rounded-full flex items-center justify-center transition ${theme === 'dark' ? 'bg-gray-800 shadow text-white' : 'text-gray-400'}`}>
+            <Moon size={15} />
+          </button>
+        </div>
+
+        <div className="flex items-center gap-1 bg-gray-50 dark:bg-gray-900 rounded-full p-1">
           {NAV_ITEMS.map(({ key, icon: Icon, label }) => (
             <button key={key} onClick={() => setScreen(key)}
-              className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition ${screen === key ? 'bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-400' : 'text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-900'}`}>
-              <Icon size={17} />{label}
+              className={`flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium transition ${screen === key ? 'bg-white dark:bg-gray-800 shadow text-gray-900 dark:text-white' : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-200'}`}>
+              <Icon size={16} />{label}
             </button>
           ))}
         </div>
 
-        <div className="mt-auto flex flex-col gap-3">
-          <div className="flex items-center gap-1 bg-gray-50 dark:bg-gray-900 rounded-full p-1 self-start">
-            <button onClick={() => theme !== 'light' && toggleTheme()} className={`w-8 h-8 rounded-full flex items-center justify-center transition ${theme === 'light' ? 'bg-white shadow text-gray-900' : 'text-gray-400'}`}>
-              <Sun size={15} />
-            </button>
-            <button onClick={() => theme !== 'dark' && toggleTheme()} className={`w-8 h-8 rounded-full flex items-center justify-center transition ${theme === 'dark' ? 'bg-gray-800 shadow text-white' : 'text-gray-400'}`}>
-              <Moon size={15} />
-            </button>
-          </div>
-          <div className="bg-gray-900 dark:bg-emerald-500/10 rounded-2xl p-4">
-            <p className="text-white dark:text-emerald-300 text-sm font-semibold mb-1">💡 Mẹo hôm nay</p>
-            <p className="text-gray-300 dark:text-emerald-200/70 text-xs">Nạp quỹ ngay khi có thu nhập để kiểm soát chi tiêu tốt hơn.</p>
-          </div>
-        </div>
-      </div>
-
-      {/* Top bar bên trong nội dung — chỉ hiện trên tablet/PC */}
-      <div className="hidden md:flex fixed top-0 left-64 right-0 h-20 bg-white dark:bg-gray-950 border-b border-gray-100 dark:border-gray-800 items-center px-8 z-10 transition-colors">
-        <div className="flex items-center gap-2 bg-gray-50 dark:bg-gray-900 rounded-full px-4 py-2.5 w-72">
-          <Search size={16} className="text-gray-400" />
-          <input placeholder="Tìm kiếm nhanh" className="bg-transparent outline-none text-sm flex-1" />
-        </div>
         <div className="ml-auto flex items-center gap-3">
-          <button onClick={onAddClick} className="bg-emerald-500 text-white rounded-full px-4 py-2.5 text-sm font-medium flex items-center gap-2">
+          <button onClick={onAddClick} className="bg-gray-900 dark:bg-violet-600 text-white rounded-full px-4 py-2.5 text-sm font-medium flex items-center gap-2">
             <Plus size={16} /> Thêm giao dịch
           </button>
-          <button className="w-9 h-9 rounded-full bg-gray-50 dark:bg-gray-900 flex items-center justify-center text-gray-500"><Bell size={16} /></button>
-          <button onClick={() => setScreen('settings')} className="w-9 h-9 rounded-full bg-gray-50 dark:bg-gray-900 flex items-center justify-center text-gray-500"><SettingsIcon size={16} /></button>
-          <div className="flex items-center gap-2 pl-2">
-            <div className="w-9 h-9 rounded-full bg-emerald-50 dark:bg-emerald-500/20 flex items-center justify-center text-emerald-700 dark:text-emerald-300 font-semibold text-sm">
-              {(displayName || 'B')[0].toUpperCase()}
-            </div>
-            <span className="text-sm font-medium text-gray-900 dark:text-white">{displayName || 'Bạn'}</span>
+          <div className="w-9 h-9 rounded-full bg-violet-50 dark:bg-violet-500/20 flex items-center justify-center text-violet-600 dark:text-violet-300 font-semibold text-sm">
+            {(displayName || 'B')[0].toUpperCase()}
           </div>
         </div>
       </div>
@@ -269,36 +218,22 @@ function BottomNav({ screen, setScreen, onAddClick, displayName, theme, toggleTh
 
 /* ---------- Dashboard ---------- */
 
-function Dashboard({ setScreen, transactions, categories, accounts, goals, loading, displayName, onAddClick, theme, toggleTheme, onOpenFund }) {
+function Dashboard({ setScreen, transactions, categories, accounts, loading, displayName, onAddClick, theme, toggleTheme }) {
   const [search, setSearch] = useState('');
   const fundCategories = categories.filter((c) => c.is_fund);
-  const expenseCats = categories.filter((c) => c.type === 'expense');
+  function fundTotal(catId) { return transactions.filter((t) => t.category_id === catId).reduce((s, t) => s + Number(t.amount), 0); }
+  const expenseCats = categories.filter((c) => c.type === 'expense' && !c.is_fund);
   const spentByCat = expenseCats.map((c) => ({ ...c, amount: transactions.filter((t) => t.category_id === c.id && t.type === 'expense').reduce((s, t) => s + Number(t.amount), 0) })).filter((c) => c.amount > 0);
   const total = spentByCat.reduce((s, c) => s + c.amount, 0) || 1;
   const radius = 60, circumference = 2 * Math.PI * radius;
   let cumulative = 0;
-  const palette = ['#16a34a', '#facc15', '#fb923c', '#4ade80', '#fde047', '#fdba74', '#86efac'];
-
-  // Tổng tài sản = tổng số dư mọi quỹ (mọi danh mục chi tiêu) + tổng số dư mọi tài khoản
-  const totalFunds = expenseCats.reduce((s, c) => s + fundBalance(c.id, transactions), 0);
-  const totalAccounts = accounts.reduce((s, a) => s + accountBalance(a, transactions), 0);
-  const totalAssets = totalFunds + totalAccounts;
+  const palette = ['#7c3aed', '#a78bfa', '#c4b5fd', '#ddd6fe', '#ede9fe', '#f5f3ff'];
 
   // ----- Dữ liệu tính thêm cho bố cục desktop -----
   const now = new Date();
   const thisMonthTx = transactions.filter((t) => { const d = new Date(t.created_at); return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear(); });
   const incomeThisMonth = thisMonthTx.filter((t) => t.type === 'income').reduce((s, t) => s + Number(t.amount), 0);
   const expenseThisMonth = thisMonthTx.filter((t) => t.type === 'expense').reduce((s, t) => s + Number(t.amount), 0);
-
-  // So sánh với tháng trước (hiện % tăng/giảm)
-  const prevMonthDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-  const prevMonthTx = transactions.filter((t) => { const d = new Date(t.created_at); return d.getMonth() === prevMonthDate.getMonth() && d.getFullYear() === prevMonthDate.getFullYear(); });
-  const incomePrevMonth = prevMonthTx.filter((t) => t.type === 'income').reduce((s, t) => s + Number(t.amount), 0);
-  const expensePrevMonth = prevMonthTx.filter((t) => t.type === 'expense').reduce((s, t) => s + Number(t.amount), 0);
-  function pctChange(current, prev) { return prev > 0 ? ((current - prev) / prev) * 100 : null; }
-  const incomeChange = pctChange(incomeThisMonth, incomePrevMonth);
-  const expenseChange = pctChange(expenseThisMonth, expensePrevMonth);
-  const savedChange = pctChange(incomeThisMonth - expenseThisMonth, incomePrevMonth - expensePrevMonth);
 
   const monthLabels = [];
   const monthTotals = [];
@@ -316,22 +251,7 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
     const day = i + 1;
     return thisMonthTx.filter((t) => t.type === 'expense' && new Date(t.created_at).getDate() === day).reduce((s, t) => s + Number(t.amount), 0);
   });
-  const dailyIncome = Array.from({ length: daysInMonth }, (_, i) => {
-    const day = i + 1;
-    return thisMonthTx.filter((t) => t.type === 'income' && new Date(t.created_at).getDate() === day).reduce((s, t) => s + Number(t.amount), 0);
-  });
-  const maxDaily = Math.max(...dailySpend, ...dailyIncome, 1);
-
-  // 7 ngày gần nhất, cho biểu đồ "Số dư theo ngày"
-  const last7 = Array.from({ length: 7 }, (_, i) => daysInMonth - 6 + i).filter((d) => d >= 1);
-  const weekDayLabels = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'];
-
-  // Giới hạn chi tiêu tổng (tổng hạn mức các danh mục đã đặt) so với đã chi tháng này
-  const totalMonthlyLimit = categories.filter((c) => c.type === 'expense' && c.monthly_limit).reduce((s, c) => s + Number(c.monthly_limit), 0);
-  const limitPct = totalMonthlyLimit > 0 ? (expenseThisMonth / totalMonthlyLimit) * 100 : 0;
-
-  // Tỷ lệ tiết kiệm tháng này (sức khỏe tài chính)
-  const savingsRate = incomeThisMonth > 0 ? Math.max(0, Math.min(100, ((incomeThisMonth - expenseThisMonth) / incomeThisMonth) * 100)) : 0;
+  const maxDaily = Math.max(...dailySpend, 1);
 
   const filteredTx = transactions.filter((t) => {
     if (!search) return true;
@@ -340,27 +260,21 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
   });
 
   return (
-    <div className="min-h-screen relative bg-gray-100 dark:bg-gray-950 flex justify-center md:pl-64 md:pt-20 transition-colors">
-      {/* Lớp nền gradient — chỉ hiện trên điện thoại, tách riêng để không xung đột với nền desktop */}
-      <div className="absolute inset-0 bg-gradient-to-b from-violet-400 via-fuchsia-300 to-orange-100 md:hidden" />
+    <div className="min-h-screen bg-gradient-to-b from-violet-400 via-fuchsia-300 to-orange-100 md:bg-gray-50 dark:md:bg-gray-950 flex justify-center md:pt-20 transition-colors">
       {/* ============ BẢN ĐIỆN THOẠI (giữ nguyên) ============ */}
       <div className="w-full max-w-sm md:hidden min-h-screen pb-28 relative">
         <div className="px-5 pt-8 flex items-center justify-between">
           <div><p className="text-white/80 text-sm">Chào bạn!</p><h1 className="text-white text-2xl font-semibold">{displayName || 'Bạn'}</h1></div>
           <button onClick={() => setScreen('accounts')} className="w-11 h-11 rounded-full bg-white/30 backdrop-blur flex items-center justify-center text-white border border-white/40"><Wallet size={18} /></button>
         </div>
-        <div className="px-5 mt-4">
-          <p className="text-white/70 text-xs">Tổng tài sản</p>
-          <p className="text-white text-3xl font-bold">{formatMoney(totalAssets)}</p>
-        </div>
         <div className="mt-6 px-5 flex gap-3 overflow-x-auto pb-2">
           {fundCategories.length === 0 ? <p className="text-white/70 text-sm">Đánh dấu danh mục là "Quỹ" trong Cài đặt để hiện ở đây.</p>
             : fundCategories.map((f) => (
-              <button key={f.id} onClick={() => onOpenFund(f.id)} className="min-w-[150px] text-left bg-white/90 backdrop-blur rounded-3xl p-4 shadow-lg shadow-black/5 flex-shrink-0">
+              <div key={f.id} className="min-w-[150px] bg-white/90 backdrop-blur rounded-3xl p-4 shadow-lg shadow-black/5 flex-shrink-0">
                 <EmojiCircle emoji={f.icon} size={36} active activeColor="#7c3aed" />
                 <p className="text-gray-500 text-xs mt-3">{f.name}</p>
-                <p className="text-gray-900 font-semibold text-base">{formatMoney(fundBalance(f.id, transactions))}</p>
-              </button>
+                <p className="text-gray-900 font-semibold text-base">{formatMoney(fundTotal(f.id))}</p>
+              </div>
             ))}
         </div>
         <div className="mt-6 bg-white rounded-t-[2.5rem] min-h-[60vh] px-5 pt-6 pb-6">
@@ -386,56 +300,6 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
               </div>
             </div>
           )}
-
-          {/* Sức khỏe tài chính + Hạn mức chi tiêu (thu gọn, cạnh nhau) */}
-          <div className="grid grid-cols-2 gap-3 mt-8">
-            <div className="bg-gray-50 rounded-2xl p-4 flex flex-col items-center">
-              <p className="text-gray-500 text-xs mb-2 self-start">Sức khỏe tài chính</p>
-              <svg width="72" height="72" viewBox="0 0 120 120" className="-rotate-90">
-                <circle cx="60" cy="60" r="50" fill="none" stroke="#e5e7eb" strokeWidth="14" />
-                <circle cx="60" cy="60" r="50" fill="none" stroke="#7c3aed" strokeWidth="14" strokeLinecap="round"
-                  strokeDasharray={`${(savingsRate / 100) * 2 * Math.PI * 50} ${2 * Math.PI * 50}`} />
-              </svg>
-              <p className="text-lg font-bold text-gray-900 -mt-11">{Math.round(savingsRate)}%</p>
-              <p className="text-gray-400 text-[10px] mt-11">Tỷ lệ tiết kiệm</p>
-            </div>
-            <div className="bg-gray-50 rounded-2xl p-4 flex flex-col justify-center">
-              <p className="text-gray-500 text-xs mb-2">Hạn mức tháng</p>
-              {totalMonthlyLimit === 0 ? (
-                <p className="text-gray-400 text-xs">Chưa đặt hạn mức nào.</p>
-              ) : (
-                <>
-                  <ProgressBar pct={limitPct} colorClass={limitPct > 100 ? 'bg-red-400' : 'bg-violet-500'} />
-                  <p className="text-gray-500 text-[11px] mt-2">{formatMoney(expenseThisMonth)} / {formatMoney(totalMonthlyLimit)}</p>
-                </>
-              )}
-            </div>
-          </div>
-
-          {/* Mục tiêu (thu gọn) */}
-          {goals && goals.length > 0 && (
-            <div className="mt-6">
-              <div className="flex items-center justify-between mb-3">
-                <h2 className="text-gray-900 font-semibold text-lg">Mục tiêu</h2>
-                <button onClick={() => setScreen('goals')} className="text-violet-600 text-sm font-medium">Xem tất cả</button>
-              </div>
-              <div className="flex flex-col gap-3">
-                {goals.slice(0, 2).map((g) => {
-                  const pct = g.target_amount ? Math.min(100, (g.current_amount / g.target_amount) * 100) : 0;
-                  return (
-                    <div key={g.id}>
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="text-gray-700 text-sm">{g.name}</span>
-                        <span className="text-gray-400 text-xs">{Math.round(pct)}%</span>
-                      </div>
-                      <ProgressBar pct={pct} />
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
           <div className="flex items-center justify-between mt-8 mb-3"><h2 className="text-gray-900 font-semibold text-lg">Giao dịch</h2></div>
           {loading ? <div className="flex justify-center py-8"><Loader2 size={24} className="animate-spin text-violet-400" /></div>
             : transactions.length === 0 ? <p className="text-gray-400 text-sm text-center py-8">Chưa có giao dịch nào. Bấm nút + để thêm.</p>
@@ -454,207 +318,161 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
         </div>
       </div>
 
-      {/* ============ BẢN DESKTOP/TABLET (bố cục kiểu dashboard, đúng vị trí như ảnh tham khảo) ============ */}
+      {/* ============ BẢN DESKTOP/TABLET (bố cục kiểu dashboard) ============ */}
       <div className="hidden md:block w-full max-w-[1400px] px-8 py-8">
-        <div
-          className="grid gap-6"
-          style={{
-            gridTemplateColumns: '2fr 1fr 1fr',
-            gridTemplateAreas: `
-              "chart chart right"
-              "limit tips  right"
-              "cost health goal"
-              "history history history"
-            `,
-          }}
-        >
-          {/* Tổng quan số dư — góc trên trái, rộng */}
-          <div style={{ gridArea: 'chart' }} className="bg-white dark:bg-gray-900 rounded-3xl p-6 shadow-sm shadow-black/5 border border-gray-100 dark:border-gray-800 transition-colors">
-            <div className="flex items-center justify-between mb-1">
-              <div>
-                <p className="text-3xl font-bold text-gray-900 dark:text-white">{formatMoney(totalAssets)}</p>
-                <p className="text-gray-400 dark:text-gray-500 text-sm">Tổng quan số dư</p>
+        <div className="grid grid-cols-3 gap-6">
+          {/* Cột trái + giữa (2/3) */}
+          <div className="col-span-2 flex flex-col gap-6">
+            {/* Thẻ số liệu lớn */}
+            <div className="bg-white dark:bg-gray-900 rounded-3xl p-6 shadow-sm shadow-black/5 dark:border dark:border-gray-800 transition-colors">
+              <div className="flex items-center gap-10">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-3xl font-bold text-gray-900 dark:text-white">{formatMoney(incomeThisMonth)}</span>
+                    <span className="text-xs font-semibold bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 px-2 py-1 rounded-full">Thu</span>
+                  </div>
+                  <p className="text-gray-400 dark:text-gray-500 text-sm mt-1">Thu nhập tháng này</p>
+                </div>
+                <div className="w-px h-12 bg-gray-100 dark:bg-gray-800" />
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-3xl font-bold text-gray-900 dark:text-white">{formatMoney(expenseThisMonth)}</span>
+                    <span className="text-xs font-semibold bg-red-50 dark:bg-red-500/10 text-red-500 dark:text-red-400 px-2 py-1 rounded-full">Chi</span>
+                  </div>
+                  <p className="text-gray-400 dark:text-gray-500 text-sm mt-1">Chi tiêu tháng này</p>
+                </div>
               </div>
-              <div className="flex items-center gap-4 text-xs">
-                <span className="flex items-center gap-1.5 text-gray-500"><span className="w-2.5 h-2.5 rounded-full bg-yellow-400" />Tiết kiệm</span>
-                <span className="flex items-center gap-1.5 text-gray-500"><span className="w-2.5 h-2.5 rounded-full bg-emerald-500" />Thu nhập</span>
-                <span className="flex items-center gap-1.5 text-gray-500"><span className="w-2.5 h-2.5 rounded-full bg-orange-400" />Chi tiêu</span>
+              <div className="flex items-center gap-2 mt-6">
+                {monthLabels.map((label, i) => (
+                  <div key={i} className="flex-1">
+                    <div className="h-2 rounded-full" style={{ background: monthShades[Math.min(Math.floor((monthTotals[i] / maxMonthTotal) * (monthShades.length - 1)), monthShades.length - 1)] }} />
+                    <p className="text-[11px] text-gray-400 mt-1 text-center">{label}</p>
+                  </div>
+                ))}
               </div>
             </div>
-            <div className="flex items-end gap-3 mt-8 h-40">
-              {last7.map((day, i) => {
-                const inc = dailyIncome[day - 1] || 0;
-                const exp = dailySpend[day - 1] || 0;
-                return (
-                  <div key={i} className="flex-1 flex flex-col items-center gap-1 h-full justify-end">
-                    <div className="w-full flex items-end gap-1 h-full">
-                      <div className="flex-1 bg-emerald-400 dark:bg-emerald-500 rounded-t-lg" style={{ height: `${(inc / maxDaily) * 100}%`, minHeight: inc > 0 ? 4 : 0 }} />
-                      <div className="flex-1 bg-orange-300 dark:bg-orange-500 rounded-t-lg" style={{ height: `${(exp / maxDaily) * 100}%`, minHeight: exp > 0 ? 4 : 0 }} />
-                    </div>
-                    <span className="text-[11px] text-gray-400">{weekDayLabels[new Date(now.getFullYear(), now.getMonth(), day).getDay()]}</span>
-                  </div>
-                );
-              })}
+
+            {/* Xu hướng chi tiêu theo ngày */}
+            <div className="bg-white dark:bg-gray-900 rounded-3xl p-6 shadow-sm shadow-black/5 dark:border dark:border-gray-800 transition-colors">
+              <h3 className="text-gray-900 dark:text-white font-semibold mb-4">Xu hướng chi tiêu theo ngày</h3>
+              {dailySpend.every((v) => v === 0) ? <p className="text-gray-400 dark:text-gray-500 text-sm text-center py-10">Chưa có dữ liệu tháng này.</p> : (
+                <svg viewBox="0 0 620 160" className="w-full h-40">
+                  <polyline
+                    fill="none" stroke="#7c3aed" strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round"
+                    points={dailySpend.map((v, i) => `${(i / (daysInMonth - 1)) * 600 + 10},${150 - (v / maxDaily) * 130}`).join(' ')}
+                  />
+                  {dailySpend.map((v, i) => v === maxDaily && v > 0 ? (
+                    <g key={i}>
+                      <circle cx={(i / (daysInMonth - 1)) * 600 + 10} cy={150 - (v / maxDaily) * 130} r="4" fill="#7c3aed" />
+                    </g>
+                  ) : null)}
+                </svg>
+              )}
+            </div>
+
+            {/* Bảng giao dịch gần đây */}
+            <div className="bg-white dark:bg-gray-900 rounded-3xl p-6 shadow-sm shadow-black/5 dark:border dark:border-gray-800 transition-colors">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-gray-900 dark:text-white font-semibold text-lg">Giao dịch gần đây</h3>
+                <div className="flex items-center gap-2 bg-gray-50 dark:bg-gray-800 rounded-full px-3 py-2 w-56">
+                  <Search size={15} className="text-gray-400" />
+                  <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Tìm kiếm" className="bg-transparent outline-none text-sm flex-1" />
+                </div>
+              </div>
+              {loading ? <div className="flex justify-center py-8"><Loader2 size={24} className="animate-spin text-violet-400" /></div>
+                : filteredTx.length === 0 ? <p className="text-gray-400 dark:text-gray-500 text-sm text-center py-8">Không có giao dịch nào.</p>
+                : (
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="text-left text-gray-400 border-b border-gray-100 dark:border-gray-800">
+                        <th className="pb-3 font-medium">Danh mục</th>
+                        <th className="pb-3 font-medium">Tài khoản</th>
+                        <th className="pb-3 font-medium">Ngày</th>
+                        <th className="pb-3 font-medium text-right">Số tiền</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredTx.slice(0, 10).map((tx) => {
+                        const cat = categories.find((c) => c.id === tx.category_id);
+                        const acc = accounts.find((a) => a.id === tx.account_id);
+                        return (
+                          <tr key={tx.id} className="border-b border-gray-50 dark:border-gray-800 last:border-0">
+                            <td className="py-3">
+                              <div className="flex items-center gap-2">
+                                <EmojiCircle emoji={cat?.icon} size={32} bg={tx.type === 'income' ? '#ecfdf5' : '#f5f3ff'} />
+                                <span className="text-gray-900 dark:text-white font-medium">{cat?.name || 'Khác'}</span>
+                              </div>
+                            </td>
+                            <td className="py-3 text-gray-500 dark:text-gray-400">{acc?.name || '—'}</td>
+                            <td className="py-3 text-gray-500 dark:text-gray-400">{new Date(tx.date || tx.created_at).toLocaleDateString('vi-VN')}</td>
+                            <td className={`py-3 text-right font-medium ${tx.type === 'income' ? 'text-emerald-600' : 'text-gray-900'}`}>{tx.type === 'income' ? '+' : '-'}{formatMoney(tx.amount)}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                )}
             </div>
           </div>
 
-          {/* Cột phải — Thu/Chi/Số dư + Tài khoản, xếp chồng, kéo dài xuống 2 hàng như "My card" trong ảnh */}
-          <div style={{ gridArea: 'right' }} className="flex flex-col gap-6">
-            <div className="bg-white dark:bg-gray-900 rounded-3xl p-6 shadow-sm shadow-black/5 border border-gray-100 dark:border-gray-800 transition-colors flex flex-col gap-4">
-              <div>
-                <p className="text-gray-400 dark:text-gray-500 text-xs mb-0.5">Thu nhập tháng này</p>
-                <span className="text-xl font-bold text-gray-900 dark:text-white">{formatMoney(incomeThisMonth)}</span>
-                <div className="mt-0.5"><ChangeBadge pct={incomeChange} good={true} /></div>
-              </div>
-              <div className="h-px bg-gray-100 dark:bg-gray-800" />
-              <div>
-                <p className="text-gray-400 dark:text-gray-500 text-xs mb-0.5">Chi tiêu tháng này</p>
-                <span className="text-xl font-bold text-gray-900 dark:text-white">{formatMoney(expenseThisMonth)}</span>
-                <div className="mt-0.5"><ChangeBadge pct={expenseChange} good={false} /></div>
-              </div>
-              <div className="h-px bg-gray-100 dark:bg-gray-800" />
-              <div>
-                <p className="text-gray-400 dark:text-gray-500 text-xs mb-0.5">Số dư tiết kiệm tháng này</p>
-                <span className="text-xl font-bold text-gray-900 dark:text-white">{formatMoney(incomeThisMonth - expenseThisMonth)}</span>
-                <div className="mt-0.5"><ChangeBadge pct={savedChange} good={true} /></div>
+          {/* Cột phải (1/3) */}
+          <div className="flex flex-col gap-6">
+            {/* Bản đồ nhiệt chi tiêu theo ngày */}
+            <div className="bg-white dark:bg-gray-900 rounded-3xl p-6 shadow-sm shadow-black/5 dark:border dark:border-gray-800 transition-colors">
+              <h3 className="text-gray-900 dark:text-white font-semibold mb-4">Nhiệt độ chi tiêu tháng này</h3>
+              <div className="grid grid-cols-7 gap-1.5">
+                {dailySpend.map((v, i) => {
+                  const intensity = v / maxDaily;
+                  const cellClass = v === 0 ? 'bg-gray-100 dark:bg-gray-800'
+                    : intensity > 0.7 ? 'bg-violet-600 dark:bg-violet-400'
+                    : intensity > 0.4 ? 'bg-violet-400 dark:bg-violet-500/70'
+                    : 'bg-violet-200 dark:bg-violet-500/30';
+                  return <div key={i} className={`aspect-square rounded ${cellClass}`} title={`Ngày ${i + 1}: ${formatMoney(v)}`} />;
+                })}
               </div>
             </div>
 
-            <div className="bg-white dark:bg-gray-900 rounded-3xl p-6 shadow-sm shadow-black/5 border border-gray-100 dark:border-gray-800 transition-colors flex-1">
+            {/* Ngân sách theo danh mục */}
+            <div className="bg-white dark:bg-gray-900 rounded-3xl p-6 shadow-sm shadow-black/5 dark:border dark:border-gray-800 transition-colors">
               <div className="flex items-center justify-between mb-4">
-                <h3 className="text-gray-900 dark:text-white font-semibold">Tài khoản của bạn</h3>
-                <button onClick={() => setScreen('accounts')} className="text-emerald-600 text-xs font-medium">Xem tất cả</button>
+                <h3 className="text-gray-900 dark:text-white font-semibold">Ngân sách theo danh mục</h3>
+                <button onClick={() => setScreen('report')} className="text-violet-600 text-xs font-medium">Chi tiết</button>
               </div>
-              {accounts.length === 0 ? <p className="text-gray-400 dark:text-gray-500 text-sm text-center py-4">Chưa có tài khoản nào.</p> : (
+              {spentByCat.length === 0 ? <p className="text-gray-400 dark:text-gray-500 text-sm text-center py-6">Chưa có chi tiêu nào.</p> : (
+                <div className="flex flex-col items-center">
+                  <svg width="150" height="150" viewBox="0 0 150 150" className="-rotate-90 flex-shrink-0 mb-4">
+                    {spentByCat.map((cat, i) => {
+                      const pct = cat.amount / total; const dash = pct * circumference; const offset = cumulative; cumulative += dash;
+                      return <circle key={cat.id} cx="75" cy="75" r={radius} fill="none" stroke={palette[i % palette.length]} strokeWidth="14" strokeDasharray={`${dash} ${circumference - dash}`} strokeDashoffset={-offset} strokeLinecap="round" />;
+                    })}
+                  </svg>
+                  <div className="flex flex-col gap-2 text-sm w-full">
+                    {spentByCat.map((cat, i) => (
+                      <div key={cat.id} className="flex items-center gap-2">
+                        <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: palette[i % palette.length] }} />
+                        <span className="text-gray-600 dark:text-gray-300">{cat.name}</span><span className="text-gray-900 dark:text-white font-medium ml-auto">{formatMoney(cat.amount)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Quỹ / thẻ ghim */}
+            <div className="bg-white dark:bg-gray-900 rounded-3xl p-6 shadow-sm shadow-black/5 dark:border dark:border-gray-800 transition-colors">
+              <h3 className="text-gray-900 dark:text-white font-semibold mb-4">Quỹ của bạn</h3>
+              {fundCategories.length === 0 ? <p className="text-gray-400 dark:text-gray-500 text-sm">Đánh dấu danh mục là "Quỹ" trong Cài đặt để hiện ở đây.</p> : (
                 <div className="flex flex-col gap-3">
-                  {accounts.slice(0, 3).map((acc) => (
-                    <div key={acc.id} className="flex items-center gap-3">
-                      <EmojiCircle emoji={acc.icon} size={36} bg="#ecfdf5" />
-                      <div className="flex-1 min-w-0"><p className="text-gray-900 dark:text-white text-sm font-medium">{acc.name}</p></div>
-                      <p className="text-gray-900 dark:text-white font-semibold text-sm">{formatMoney(accountBalance(acc, transactions))}</p>
+                  {fundCategories.map((f) => (
+                    <div key={f.id} className="flex items-center gap-3">
+                      <EmojiCircle emoji={f.icon} size={36} active activeColor="#7c3aed" />
+                      <div className="flex-1 min-w-0"><p className="text-gray-900 text-sm font-medium">{f.name}</p></div>
+                      <p className="text-gray-900 dark:text-white font-semibold text-sm">{formatMoney(fundTotal(f.id))}</p>
                     </div>
                   ))}
                 </div>
               )}
             </div>
-          </div>
-
-          {/* Hạn mức chi tiêu tháng */}
-          <div style={{ gridArea: 'limit' }} className="bg-white dark:bg-gray-900 rounded-3xl p-6 shadow-sm shadow-black/5 border border-gray-100 dark:border-gray-800 transition-colors">
-            <h3 className="text-gray-900 dark:text-white font-semibold mb-1">Hạn mức chi tiêu tháng</h3>
-            <p className="text-gray-400 text-xs mb-3">{formatMoney(expenseThisMonth)} / {totalMonthlyLimit > 0 ? formatMoney(totalMonthlyLimit) : '—'}</p>
-            {totalMonthlyLimit === 0 ? (
-              <p className="text-gray-400 dark:text-gray-500 text-sm">Chưa đặt hạn mức nào. Vào Cài đặt &gt; Danh mục để thêm.</p>
-            ) : (
-              <ProgressBar pct={limitPct} colorClass={limitPct > 100 ? 'bg-red-400' : 'bg-emerald-500'} />
-            )}
-          </div>
-
-          {/* Gợi ý tiết kiệm */}
-          <div style={{ gridArea: 'tips' }} className="bg-gray-900 dark:bg-emerald-950 rounded-3xl p-6 text-white">
-            <h3 className="font-semibold mb-2">💡 Gợi ý tiết kiệm</h3>
-            <p className="text-gray-300 dark:text-emerald-200/70 text-sm">
-              {savingsRate >= 20
-                ? `Tuyệt vời! Bạn đã tiết kiệm được ${Math.round(savingsRate)}% thu nhập tháng này.`
-                : `Bạn mới tiết kiệm được ${Math.round(savingsRate)}% thu nhập. Thử đặt hạn mức cho các danh mục hay vượt chi.`}
-            </p>
-          </div>
-
-          {/* Phân tích chi phí */}
-          <div style={{ gridArea: 'cost' }} className="bg-white dark:bg-gray-900 rounded-3xl p-6 shadow-sm shadow-black/5 border border-gray-100 dark:border-gray-800 transition-colors">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-gray-900 dark:text-white font-semibold">Phân tích chi phí</h3>
-              <button onClick={() => setScreen('report')} className="text-emerald-600 text-xs font-medium">Chi tiết</button>
-            </div>
-            {spentByCat.length === 0 ? <p className="text-gray-400 dark:text-gray-500 text-sm text-center py-6">Chưa có chi tiêu nào.</p> : (
-              <div className="flex flex-col items-center gap-4">
-                <svg width="120" height="120" viewBox="0 0 150 150" className="-rotate-90 flex-shrink-0">
-                  {spentByCat.map((cat, i) => {
-                    const pct = cat.amount / total; const dash = pct * circumference; const offset = cumulative; cumulative += dash;
-                    return <circle key={cat.id} cx="75" cy="75" r={radius} fill="none" stroke={palette[i % palette.length]} strokeWidth="14" strokeDasharray={`${dash} ${circumference - dash}`} strokeDashoffset={-offset} strokeLinecap="round" />;
-                  })}
-                </svg>
-                <div className="flex flex-col gap-2 text-sm w-full">
-                  {spentByCat.slice(0, 4).map((cat, i) => {
-                    const pct = Math.round((cat.amount / total) * 100);
-                    return (
-                      <div key={cat.id} className="flex items-center gap-2">
-                        <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: palette[i % palette.length] }} />
-                        <span className="text-gray-600 dark:text-gray-300 truncate">{cat.name}</span>
-                        <span className="text-gray-400 text-xs ml-auto">{pct}%</span>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Sức khỏe tài chính */}
-          <div style={{ gridArea: 'health' }} className="bg-white dark:bg-gray-900 rounded-3xl p-6 shadow-sm shadow-black/5 border border-gray-100 dark:border-gray-800 transition-colors flex flex-col items-center">
-            <h3 className="text-gray-900 dark:text-white font-semibold self-start mb-1">Sức khỏe tài chính</h3>
-            <p className="text-gray-400 text-xs self-start mb-4">Tỷ lệ tiết kiệm</p>
-            <svg width="100" height="100" viewBox="0 0 120 120" className="-rotate-90">
-              <circle cx="60" cy="60" r="50" fill="none" stroke="#f3f4f6" className="dark:stroke-gray-800" strokeWidth="12" />
-              <circle cx="60" cy="60" r="50" fill="none" stroke="#22c55e" strokeWidth="12" strokeLinecap="round"
-                strokeDasharray={`${(savingsRate / 100) * 2 * Math.PI * 50} ${2 * Math.PI * 50}`} />
-            </svg>
-            <p className="text-xl font-bold text-gray-900 dark:text-white -mt-14">{Math.round(savingsRate)}%</p>
-            <p className="text-gray-400 text-xs mt-14">Dựa trên tháng này</p>
-          </div>
-
-          {/* Theo dõi mục tiêu */}
-          <div style={{ gridArea: 'goal' }} className="bg-white dark:bg-gray-900 rounded-3xl p-6 shadow-sm shadow-black/5 border border-gray-100 dark:border-gray-800 transition-colors">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-gray-900 dark:text-white font-semibold">Mục tiêu</h3>
-              <button onClick={() => setScreen('goals')} className="text-emerald-600 text-xs font-medium">Xem tất cả</button>
-            </div>
-            {(!goals || goals.length === 0) ? <p className="text-gray-400 dark:text-gray-500 text-sm text-center py-4">Chưa có mục tiêu nào.</p> : (
-              <div className="flex flex-col gap-4">
-                {goals.slice(0, 3).map((g) => {
-                  const pct = g.target_amount ? Math.min(100, (g.current_amount / g.target_amount) * 100) : 0;
-                  return (
-                    <div key={g.id}>
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="text-gray-700 dark:text-gray-300 text-sm">{g.name}</span>
-                        <span className="text-gray-400 text-xs">{Math.round(pct)}%</span>
-                      </div>
-                      <ProgressBar pct={pct} colorClass="bg-emerald-500" />
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-
-          {/* Giao dịch gần đây — full width, hàng dưới cùng */}
-          <div style={{ gridArea: 'history' }} className="bg-white dark:bg-gray-900 rounded-3xl p-6 shadow-sm shadow-black/5 border border-gray-100 dark:border-gray-800 transition-colors">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-gray-900 dark:text-white font-semibold">Giao dịch gần đây</h3>
-              <div className="flex items-center gap-2 bg-gray-50 dark:bg-gray-800 rounded-full px-3 py-2 w-64">
-                <Search size={14} className="text-gray-400" />
-                <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Tìm kiếm" className="bg-transparent outline-none text-sm flex-1" />
-              </div>
-            </div>
-            {loading ? <div className="flex justify-center py-6"><Loader2 size={20} className="animate-spin text-emerald-400" /></div>
-              : filteredTx.length === 0 ? <p className="text-gray-400 dark:text-gray-500 text-sm text-center py-4">Không có giao dịch nào.</p>
-              : (
-                <div className="grid grid-cols-2 gap-x-8 gap-y-1">
-                  {filteredTx.slice(0, 8).map((tx) => {
-                    const cat = categories.find((c) => c.id === tx.category_id);
-                    return (
-                      <div key={tx.id} className="flex items-center gap-2.5 py-2.5 border-b border-gray-50 dark:border-gray-800">
-                        <EmojiCircle emoji={cat?.icon} size={32} bg={tx.type === 'income' ? '#ecfdf5' : '#fff7ed'} />
-                        <div className="flex-1 min-w-0">
-                          <p className="text-gray-900 dark:text-white font-medium text-sm truncate">{cat?.name || 'Khác'}</p>
-                          <p className="text-gray-400 text-xs">{new Date(tx.date || tx.created_at).toLocaleDateString('vi-VN')}</p>
-                        </div>
-                        <p className={`font-medium text-xs flex-shrink-0 ${tx.type === 'income' ? 'text-emerald-600' : 'text-gray-900 dark:text-white'}`}>{tx.type === 'income' ? '+' : '-'}{formatMoney(tx.amount)}</p>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
           </div>
         </div>
       </div>
@@ -666,238 +484,12 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
 
 /* ---------- Report ---------- */
 
-/* ---------- Chi tiết quỹ ---------- */
-
-function EditFundForm({ category, onClose, onSaved, isNew }) {
-  const [form, setForm] = useState({
-    name: category?.name || '',
-    icon: category?.icon || '',
-    description: category?.description || '',
-    target_amount: category?.target_amount || '',
-    monthly_limit: category?.monthly_limit || '',
-    interest_rate: category?.interest_rate || '',
-    background_url: category?.background_url || '',
-  });
-  const [saving, setSaving] = useState(false);
-
-  async function handleSave() {
-    if (!form.name) { alert('Nhập tên quỹ'); return; }
-    setSaving(true);
-    const payload = {
-      name: form.name, icon: form.icon || '💰', type: 'expense', is_fund: true,
-      description: form.description || null,
-      target_amount: form.target_amount ? Number(form.target_amount) : null,
-      monthly_limit: form.monthly_limit ? Number(form.monthly_limit) : null,
-      interest_rate: form.interest_rate ? Number(form.interest_rate) : 0,
-      background_url: form.background_url || null,
-    };
-    const { error } = isNew ? await supabase.from('categories').insert(payload) : await supabase.from('categories').update(payload).eq('id', category.id);
-    setSaving(false);
-    if (error) { alert('Lỗi: ' + error.message); return; }
-    onSaved(); onClose();
-  }
-
-  return (
-    <div className="fixed inset-0 bg-black/40 flex items-end md:items-center md:justify-center z-30" onClick={onClose}>
-      <div className="bg-white w-full md:max-w-md rounded-t-3xl md:rounded-3xl p-5 max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="font-semibold text-gray-900">{isNew ? 'Tạo quỹ mới' : 'Sửa quỹ'}</h3>
-          <button onClick={onClose}><X size={18} className="text-gray-500" /></button>
-        </div>
-        <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Tên quỹ" className="w-full bg-gray-100 rounded-xl px-4 py-3 text-sm outline-none mb-3" />
-        <input value={form.icon} onChange={(e) => setForm({ ...form, icon: e.target.value })} placeholder="Emoji icon (vd: 💊)" className="w-full bg-gray-100 rounded-xl px-4 py-3 text-sm outline-none mb-3" />
-        <textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="Mô tả quỹ (không bắt buộc)" rows={2} className="w-full bg-gray-100 rounded-xl px-4 py-3 text-sm outline-none mb-3 resize-none" />
-        <input value={form.target_amount} onChange={(e) => setForm({ ...form, target_amount: e.target.value.replace(/\D/g, '') })} inputMode="numeric" placeholder="Số tiền mục tiêu (không bắt buộc)" className="w-full bg-gray-100 rounded-xl px-4 py-3 text-sm outline-none mb-3" />
-        <input value={form.monthly_limit} onChange={(e) => setForm({ ...form, monthly_limit: e.target.value.replace(/\D/g, '') })} inputMode="numeric" placeholder="Hạn mức mỗi lần chi (không bắt buộc)" className="w-full bg-gray-100 rounded-xl px-4 py-3 text-sm outline-none mb-3" />
-        <input value={form.interest_rate} onChange={(e) => setForm({ ...form, interest_rate: e.target.value.replace(/[^0-9.]/g, '') })} inputMode="decimal" placeholder="Tỷ suất lợi nhuận %/năm (không bắt buộc)" className="w-full bg-gray-100 rounded-xl px-4 py-3 text-sm outline-none mb-3" />
-        <input value={form.background_url} onChange={(e) => setForm({ ...form, background_url: e.target.value })} placeholder="Link ảnh nền quỹ (không bắt buộc)" className="w-full bg-gray-100 rounded-xl px-4 py-3 text-sm outline-none mb-4" />
-        <button onClick={handleSave} disabled={saving} className="w-full bg-gray-900 text-white rounded-xl py-3 font-semibold flex items-center justify-center gap-2 disabled:opacity-60">
-          {saving ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />} Lưu quỹ
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function FundDetail({ category, transactions, onBack, reload }) {
-  const [filter, setFilter] = useState('all'); // 'all' | 'allocation' | 'expense' | 'profit'
-  const [showEdit, setShowEdit] = useState(false);
-
-  const allHistory = transactions
-    .filter((t) => t.category_id === category.id && (t.type === 'allocation' || t.type === 'expense'))
-    .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-  const history = filter === 'all' ? allHistory : filter === 'profit' ? [] : allHistory.filter((t) => t.type === filter);
-
-  const balance = fundBalance(category.id, transactions);
-  const totalIn = allHistory.filter((t) => t.type === 'allocation').reduce((s, t) => s + Number(t.amount), 0);
-  const totalOut = allHistory.filter((t) => t.type === 'expense').reduce((s, t) => s + Number(t.amount), 0);
-  const rate = Number(category.interest_rate || 0);
-  const dailyProfit = balance > 0 ? balance * (rate / 100) / 365 : 0;
-  const yearlyProfit = balance > 0 ? balance * (rate / 100) : 0;
-  const target = Number(category.target_amount || 0);
-  const targetPct = target > 0 ? Math.min(100, (balance / target) * 100) : 0;
-
-  async function handleDelete() {
-    if (!confirm('Xóa quỹ này? Các giao dịch cũ vẫn giữ nguyên số tiền.')) return;
-    const { error } = await supabase.from('categories').delete().eq('id', category.id);
-    if (error) { alert('Lỗi: ' + error.message); return; }
-    reload(); onBack();
-  }
-
-  return (
-    <div className="min-h-screen bg-gradient-to-b from-violet-400 via-fuchsia-200 to-orange-100 flex justify-center md:pl-64 md:pt-20"
-      style={category.background_url ? { backgroundImage: `linear-gradient(rgba(0,0,0,0.35),rgba(0,0,0,0.35)), url(${category.background_url})`, backgroundSize: 'cover', backgroundPosition: 'center' } : undefined}>
-      <div className="w-full max-w-sm md:max-w-2xl min-h-screen pb-28 md:pb-10 relative">
-        <div className="px-5 pt-8 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <button onClick={onBack} className="w-9 h-9 rounded-full bg-white/30 backdrop-blur flex items-center justify-center"><ArrowLeft size={18} className="text-white" /></button>
-            <div className="flex items-center gap-2">
-              <EmojiCircle emoji={category.icon} size={28} active activeColor="rgba(255,255,255,0.3)" bg="rgba(255,255,255,0.3)" />
-              <h1 className="text-white text-lg font-semibold">{category.name}</h1>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <button onClick={() => setShowEdit(true)} className="w-9 h-9 rounded-full bg-white/30 backdrop-blur flex items-center justify-center"><Pencil size={15} className="text-white" /></button>
-            <button onClick={handleDelete} className="w-9 h-9 rounded-full bg-white/30 backdrop-blur flex items-center justify-center"><Trash2 size={15} className="text-white" /></button>
-          </div>
-        </div>
-
-        {category.description && <p className="px-5 mt-3 text-white/80 text-sm text-center">{category.description}</p>}
-
-        <div className="px-5 mt-4 text-center">
-          <p className="text-white/70 text-sm">Số dư hiện tại</p>
-          <p className="text-white text-4xl font-bold">{formatMoney(balance)}</p>
-          {target > 0 && (
-            <div className="max-w-xs mx-auto mt-3">
-              <ProgressBar pct={targetPct} colorClass="bg-white" />
-              <p className="text-white/80 text-xs mt-1">{formatMoney(balance)} / {formatMoney(target)} mục tiêu ({Math.round(targetPct)}%)</p>
-            </div>
-          )}
-          {rate > 0 && (
-            <p className="text-white/80 text-sm mt-2">
-              Lãi suất {rate}%/năm — ước tính <span className="font-semibold">{formatMoney(dailyProfit)}</span>/ngày
-            </p>
-          )}
-        </div>
-
-        <div className="mt-6 bg-white rounded-t-[2.5rem] min-h-[65vh] px-5 pt-6 pb-6">
-          <div className="grid grid-cols-2 gap-3 mb-4">
-            <div className="bg-emerald-50 rounded-2xl p-4">
-              <p className="text-emerald-600 text-xs font-medium mb-1">Tổng đã nạp</p>
-              <p className="text-emerald-700 font-semibold">{formatMoney(totalIn)}</p>
-            </div>
-            <div className="bg-red-50 rounded-2xl p-4">
-              <p className="text-red-500 text-xs font-medium mb-1">Tổng đã rút</p>
-              <p className="text-red-600 font-semibold">{formatMoney(totalOut)}</p>
-            </div>
-          </div>
-
-          <div className="flex gap-2 overflow-x-auto pb-1 mb-4">
-            {[{ key: 'all', label: 'Tất cả' }, { key: 'allocation', label: 'Nạp (Thu)' }, { key: 'expense', label: 'Chi' }, { key: 'profit', label: 'Lợi nhuận' }].map((f) => (
-              <button key={f.key} onClick={() => setFilter(f.key)} className={`px-4 py-1.5 rounded-full text-sm flex-shrink-0 ${filter === f.key ? 'bg-gray-900 text-white font-medium' : 'bg-gray-100 text-gray-500'}`}>{f.label}</button>
-            ))}
-          </div>
-
-          {filter === 'profit' ? (
-            rate === 0 ? <p className="text-gray-400 text-sm text-center py-8">Chưa đặt tỷ suất lợi nhuận cho quỹ này. Bấm ✏️ để đặt.</p> : (
-              <div className="bg-gray-50 rounded-2xl p-5 text-center">
-                <p className="text-gray-500 text-sm mb-1">Lợi nhuận ước tính</p>
-                <p className="text-gray-900 text-2xl font-bold">{formatMoney(dailyProfit)}<span className="text-sm font-normal text-gray-400">/ngày</span></p>
-                <p className="text-gray-400 text-sm mt-1">≈ {formatMoney(yearlyProfit)}/năm với lãi suất {rate}%/năm</p>
-              </div>
-            )
-          ) : (
-            <>
-              <h2 className="text-gray-900 font-semibold text-lg mb-3">Lịch sử</h2>
-              {history.length === 0 ? <p className="text-gray-400 text-sm text-center py-8">Chưa có giao dịch nào.</p> : (
-                <div className="flex flex-col divide-y divide-gray-100">
-                  {history.map((tx) => (
-                    <div key={tx.id} className="flex items-center gap-3 py-3">
-                      <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${tx.type === 'allocation' ? 'bg-emerald-50' : 'bg-red-50'}`}>
-                        {tx.type === 'allocation' ? <TrendingUp size={16} className="text-emerald-600" /> : <TrendingDown size={16} className="text-red-500" />}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-gray-900 font-medium text-sm">{tx.type === 'allocation' ? 'Nạp quỹ' : 'Rút quỹ (chi tiêu)'}</p>
-                        <p className="text-gray-400 text-xs">{tx.note || new Date(tx.date || tx.created_at).toLocaleString('vi-VN')}</p>
-                      </div>
-                      <p className={`font-medium text-sm flex-shrink-0 ${tx.type === 'allocation' ? 'text-emerald-600' : 'text-red-500'}`}>{tx.type === 'allocation' ? '+' : '-'}{formatMoney(tx.amount)}</p>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </>
-          )}
-        </div>
-      </div>
-
-      {showEdit && <EditFundForm category={category} onClose={() => setShowEdit(false)} onSaved={reload} isNew={false} />}
-    </div>
-  );
-}
-
-/* ---------- Danh sách Quỹ ---------- */
-
-function Funds({ setScreen, categories, transactions, onOpenFund, reload, onAddClick, displayName, theme, toggleTheme }) {
-  const [showCreate, setShowCreate] = useState(false);
-  const funds = categories.filter((c) => c.type === 'expense');
-  const totalFunds = funds.reduce((s, c) => s + fundBalance(c.id, transactions), 0);
-
-  return (
-    <div className="min-h-screen bg-gradient-to-b from-violet-400 via-fuchsia-200 to-orange-100 flex justify-center md:pl-64 md:pt-20">
-      <div className="w-full max-w-sm md:max-w-2xl min-h-screen pb-28 md:pb-10 relative">
-        <div className="px-5 pt-8 flex items-center justify-between">
-          <h1 className="text-white text-xl font-semibold">Quản lý quỹ</h1>
-          <button onClick={() => setShowCreate(true)} className="w-10 h-10 rounded-full bg-white/30 backdrop-blur flex items-center justify-center"><Plus size={20} className="text-white" /></button>
-        </div>
-        <div className="px-5 mt-3">
-          <p className="text-white/70 text-sm">Tổng số dư mọi quỹ</p>
-          <p className="text-white text-3xl font-bold">{formatMoney(totalFunds)}</p>
-        </div>
-
-        <div className="mt-6 bg-white rounded-t-[2.5rem] min-h-[70vh] px-5 pt-6 pb-6">
-          {funds.length === 0 ? (
-            <p className="text-gray-400 text-sm text-center py-10">Chưa có quỹ nào. Bấm + để tạo quỹ đầu tiên.</p>
-          ) : (
-            <div className="flex flex-col gap-2 md:grid md:grid-cols-2 md:gap-3">
-              {funds.map((f) => {
-                const balance = fundBalance(f.id, transactions);
-                const target = Number(f.target_amount || 0);
-                const pct = target > 0 ? Math.min(100, (balance / target) * 100) : null;
-                return (
-                  <button key={f.id} onClick={() => onOpenFund(f.id, 'funds')} className="flex items-center gap-3 bg-gray-50 rounded-2xl p-3 text-left hover:bg-gray-100 transition">
-                    <EmojiCircle emoji={f.icon} size={40} bg="#ede9fe" />
-                    <div className="flex-1 min-w-0">
-                      <p className="text-gray-900 font-medium text-sm truncate">{f.name}</p>
-                      {pct !== null ? (
-                        <div className="mt-1"><ProgressBar pct={pct} /></div>
-                      ) : (
-                        <p className="text-gray-400 text-xs">{f.description || ' '}</p>
-                      )}
-                    </div>
-                    <p className="text-gray-900 font-semibold text-sm flex-shrink-0">{formatMoney(balance)}</p>
-                  </button>
-                );
-              })}
-            </div>
-          )}
-        </div>
-
-        {showCreate && <EditFundForm onClose={() => setShowCreate(false)} onSaved={reload} isNew={true} />}
-        <BottomNav screen="funds" setScreen={setScreen} onAddClick={onAddClick} displayName={displayName} theme={theme} toggleTheme={toggleTheme} />
-      </div>
-    </div>
-  );
-}
-
-/* ---------- Financial Report ---------- */
-/* ---------- Financial Report ---------- */
-
 function Report({ setScreen, onAddClick, displayName, theme, toggleTheme }) {
   const [period, setPeriod] = useState('Monthly');
   const periods = ['Weekly', 'Monthly', 'Quarterly', 'Yearly'];
   const periodLabels = { Weekly: 'Tuần', Monthly: 'Tháng', Quarterly: 'Quý', Yearly: 'Năm' };
   return (
-    <div className="min-h-screen bg-gradient-to-b from-violet-400 via-fuchsia-200 to-orange-100 flex justify-center md:pl-64 md:pt-20">
+    <div className="min-h-screen bg-gradient-to-b from-violet-400 via-fuchsia-200 to-orange-100 flex justify-center md:pt-20">
       <div className="w-full max-w-sm md:max-w-2xl lg:max-w-3xl min-h-screen pb-28 md:pb-10 md:pt-4 relative">
         <div className="px-5 pt-8 flex items-center justify-between">
           <button onClick={() => setScreen('dashboard')} className="w-9 h-9 rounded-full bg-white/30 backdrop-blur flex items-center justify-center"><ArrowLeft size={18} className="text-white" /></button>
@@ -951,7 +543,7 @@ function AddGoalForm({ onClose, onSaved }) {
 function Goals({ setScreen, goals, loadingGoals, reload, onAddClick, displayName, theme, toggleTheme }) {
   const [showAddGoal, setShowAddGoal] = useState(false);
   return (
-    <div className="min-h-screen bg-gradient-to-b from-violet-400 via-fuchsia-200 to-orange-100 flex justify-center md:pl-64 md:pt-20">
+    <div className="min-h-screen bg-gradient-to-b from-violet-400 via-fuchsia-200 to-orange-100 flex justify-center md:pt-20">
       <div className="w-full max-w-sm md:max-w-2xl lg:max-w-3xl min-h-screen pb-28 md:pb-10 md:pt-4 relative">
         <div className="px-5 pt-8 flex items-center gap-3">
           <button onClick={() => setScreen('dashboard')} className="w-9 h-9 rounded-full bg-white/30 backdrop-blur flex items-center justify-center"><ArrowLeft size={18} className="text-white" /></button>
@@ -990,7 +582,7 @@ function Goals({ setScreen, goals, loadingGoals, reload, onAddClick, displayName
 /* ---------- Thêm giao dịch ---------- */
 
 function AddTransaction({ onClose, accounts, categories, onSaved }) {
-  const [type, setType] = useState('expense'); // 'income' | 'allocation' | 'expense'
+  const [type, setType] = useState('expense');
   const [amount, setAmount] = useState('');
   const [selectedCategory, setSelectedCategory] = useState(null);
   const [selectedAccount, setSelectedAccount] = useState(null);
@@ -1000,12 +592,9 @@ function AddTransaction({ onClose, accounts, categories, onSaved }) {
 
   useEffect(() => { if (accounts.length > 0 && !selectedAccount) setSelectedAccount(accounts[0].id); }, [accounts]);
 
-  // Nạp quỹ dùng chung danh mục "chi tiêu" (vì mọi danh mục chi tiêu đều là 1 quỹ)
-  const categoryType = type === 'income' ? 'income' : 'expense';
-  const categoryList = categories.filter((c) => c.type === categoryType);
+  const categoryList = categories.filter((c) => c.type === type);
   const activeCat = categories.find((c) => c.id === selectedCategory);
-  const overLimit = type === 'expense' && activeCat?.monthly_limit && Number(amount) > Number(activeCat.monthly_limit);
-  const needsAccount = type !== 'allocation';
+  const overLimit = activeCat?.monthly_limit && Number(amount) > Number(activeCat.monthly_limit);
 
   function handleAmountChange(e) { setAmount(e.target.value.replace(/\D/g, '')); }
 
@@ -1014,7 +603,7 @@ function AddTransaction({ onClose, accounts, categories, onSaved }) {
     if (!selectedCategory) { alert('Vui lòng chọn danh mục'); return; }
     setSaving(true);
     const { error } = await supabase.from('transactions').insert({
-      account_id: needsAccount ? selectedAccount : null, category_id: selectedCategory, type, amount: Number(amount),
+      account_id: selectedAccount, category_id: selectedCategory, type, amount: Number(amount),
       note: note || null, date: dateTime.slice(0, 10), created_at: new Date(dateTime).toISOString(),
     });
     setSaving(false);
@@ -1032,27 +621,25 @@ function AddTransaction({ onClose, accounts, categories, onSaved }) {
         </div>
         <div className="px-5 mt-6">
           <div className="flex bg-gray-100 rounded-full p-1">
-            <button onClick={() => { setType('income'); setSelectedCategory(null); }} className={`flex-1 py-2 rounded-full text-xs sm:text-sm font-medium transition ${type === 'income' ? 'bg-white text-gray-900 shadow' : 'text-gray-400'}`}>Thu nhập</button>
-            <button onClick={() => { setType('allocation'); setSelectedCategory(null); }} className={`flex-1 py-2 rounded-full text-xs sm:text-sm font-medium transition ${type === 'allocation' ? 'bg-white text-gray-900 shadow' : 'text-gray-400'}`}>Nạp quỹ</button>
-            <button onClick={() => { setType('expense'); setSelectedCategory(null); }} className={`flex-1 py-2 rounded-full text-xs sm:text-sm font-medium transition ${type === 'expense' ? 'bg-white text-gray-900 shadow' : 'text-gray-400'}`}>Chi tiêu</button>
+            <button onClick={() => { setType('expense'); setSelectedCategory(null); }} className={`flex-1 py-2 rounded-full text-sm font-medium transition ${type === 'expense' ? 'bg-white text-gray-900 shadow' : 'text-gray-400'}`}>Chi tiêu</button>
+            <button onClick={() => { setType('income'); setSelectedCategory(null); }} className={`flex-1 py-2 rounded-full text-sm font-medium transition ${type === 'income' ? 'bg-white text-gray-900 shadow' : 'text-gray-400'}`}>Thu nhập</button>
           </div>
-          {type === 'allocation' && <p className="text-gray-400 text-xs mt-2 text-center">Chuyển 1 phần thu nhập vào quỹ để dành, chưa tính là tiền rời khỏi tài khoản.</p>}
         </div>
         <div className="px-5 mt-8 text-center">
           <p className="text-gray-400 text-sm mb-1">Số tiền</p>
           <div className="flex items-center justify-center gap-1">
-            <input type="text" inputMode="numeric" value={amount ? Number(amount).toLocaleString('en-US') : ''} onChange={handleAmountChange} placeholder="0" className={`text-4xl font-bold text-center bg-transparent outline-none w-full ${overLimit ? 'text-red-500' : type === 'income' || type === 'allocation' ? 'text-emerald-600' : 'text-gray-900'}`} />
+            <input type="text" inputMode="numeric" value={amount ? Number(amount).toLocaleString('en-US') : ''} onChange={handleAmountChange} placeholder="0" className={`text-4xl font-bold text-center bg-transparent outline-none w-full ${overLimit ? 'text-red-500' : type === 'income' ? 'text-emerald-600' : 'text-gray-900'}`} />
             <span className="text-4xl font-bold text-gray-300">đ</span>
           </div>
           {overLimit && <p className="text-red-500 text-xs mt-2">⚠️ Vượt hạn mức {formatMoney(activeCat.monthly_limit)} của danh mục này!</p>}
         </div>
         <div className="px-5 mt-8">
-          <p className="text-gray-900 font-semibold text-sm mb-3">{type === 'income' ? 'Danh mục thu nhập' : 'Quỹ / Danh mục'}</p>
+          <p className="text-gray-900 font-semibold text-sm mb-3">Danh mục</p>
           {categoryList.length === 0 ? <p className="text-gray-400 text-sm">Chưa có danh mục. Vào Cài đặt để thêm.</p> : (
             <div className="grid grid-cols-4 sm:grid-cols-5 gap-3">
               {categoryList.map((cat) => {
                 const active = selectedCategory === cat.id;
-                const willExceed = type === 'expense' && cat.monthly_limit && Number(amount) > Number(cat.monthly_limit);
+                const willExceed = cat.monthly_limit && Number(amount) > Number(cat.monthly_limit);
                 return (
                   <button key={cat.id} onClick={() => setSelectedCategory(cat.id)} className="flex flex-col items-center gap-1.5">
                     <EmojiCircle emoji={cat.icon} size={48} active={active} activeColor={willExceed ? '#ef4444' : '#7c3aed'} />
@@ -1063,17 +650,15 @@ function AddTransaction({ onClose, accounts, categories, onSaved }) {
             </div>
           )}
         </div>
-        {needsAccount && (
-          <div className="px-5 mt-8">
-            <p className="text-gray-900 font-semibold text-sm mb-3">Tài khoản</p>
-            <div className="flex gap-2 overflow-x-auto pb-1">
-              {accounts.map((acc) => {
-                const active = selectedAccount === acc.id;
-                return <button key={acc.id} onClick={() => setSelectedAccount(acc.id)} className={`flex items-center gap-2 px-3 py-2 rounded-full flex-shrink-0 border transition ${active ? 'bg-gray-900 border-gray-900 text-white' : 'bg-white border-gray-200 text-gray-600'}`}><span>{acc.icon}</span><span className="text-sm">{acc.name}</span></button>;
-              })}
-            </div>
+        <div className="px-5 mt-8">
+          <p className="text-gray-900 font-semibold text-sm mb-3">Tài khoản</p>
+          <div className="flex gap-2 overflow-x-auto pb-1">
+            {accounts.map((acc) => {
+              const active = selectedAccount === acc.id;
+              return <button key={acc.id} onClick={() => setSelectedAccount(acc.id)} className={`flex items-center gap-2 px-3 py-2 rounded-full flex-shrink-0 border transition ${active ? 'bg-gray-900 border-gray-900 text-white' : 'bg-white border-gray-200 text-gray-600'}`}><span>{acc.icon}</span><span className="text-sm">{acc.name}</span></button>;
+            })}
           </div>
-        )}
+        </div>
         <div className="px-5 mt-8">
           <p className="text-gray-900 font-semibold text-sm mb-3">Ngày giờ</p>
           <input type="datetime-local" value={dateTime} onChange={(e) => setDateTime(e.target.value)} className="w-full bg-gray-100 rounded-2xl px-4 py-3 text-sm outline-none" />
@@ -1093,9 +678,13 @@ function AddTransaction({ onClose, accounts, categories, onSaved }) {
 /* ---------- Tiền trong tài khoản ---------- */
 
 function Accounts({ setScreen, accounts, transactions, onAddClick, displayName, theme, toggleTheme }) {
-  const totalBalance = accounts.reduce((s, a) => s + accountBalance(a, transactions), 0);
+  function balanceOf(acc) {
+    const delta = transactions.filter((t) => t.account_id === acc.id).reduce((s, t) => s + (t.type === 'income' ? Number(t.amount) : -Number(t.amount)), 0);
+    return Number(acc.initial_balance || 0) + delta;
+  }
+  const totalBalance = accounts.reduce((s, a) => s + balanceOf(a), 0);
   return (
-    <div className="min-h-screen bg-gradient-to-b from-violet-400 via-fuchsia-200 to-orange-100 flex justify-center md:pl-64 md:pt-20">
+    <div className="min-h-screen bg-gradient-to-b from-violet-400 via-fuchsia-200 to-orange-100 flex justify-center md:pt-20">
       <div className="w-full max-w-sm md:max-w-2xl lg:max-w-3xl min-h-screen pb-28 md:pb-10 md:pt-4 relative">
         <div className="px-5 pt-8 flex items-center gap-3">
           <button onClick={() => setScreen('dashboard')} className="w-9 h-9 rounded-full bg-white/30 backdrop-blur flex items-center justify-center"><ArrowLeft size={18} className="text-white" /></button>
@@ -1108,7 +697,7 @@ function Accounts({ setScreen, accounts, transactions, onAddClick, displayName, 
               <div key={acc.id} className="flex items-center gap-3 bg-gray-50 rounded-2xl p-4">
                 <EmojiCircle emoji={acc.icon} size={44} bg="#ede9fe" />
                 <div className="flex-1 min-w-0"><p className="text-gray-900 font-medium text-sm">{acc.name}</p><p className="text-gray-400 text-xs capitalize">{acc.type}</p></div>
-                <p className="text-gray-900 font-semibold">{formatMoney(accountBalance(acc, transactions))}</p>
+                <p className="text-gray-900 font-semibold">{formatMoney(balanceOf(acc))}</p>
               </div>
             ))}
           </div>
@@ -1124,16 +713,16 @@ function Accounts({ setScreen, accounts, transactions, onAddClick, displayName, 
 function CategorySection({ categories, reload }) {
   const [tab, setTab] = useState('expense');
   const [editing, setEditing] = useState(null);
-  const [form, setForm] = useState({ name: '', icon: '', monthly_limit: '', is_fund: false, interest_rate: '' });
+  const [form, setForm] = useState({ name: '', icon: '', monthly_limit: '', is_fund: false });
   const [saving, setSaving] = useState(false);
 
-  function startNew() { setForm({ name: '', icon: '', monthly_limit: '', is_fund: false, interest_rate: '' }); setEditing('new'); }
-  function startEdit(cat) { setForm({ name: cat.name, icon: cat.icon || '', monthly_limit: cat.monthly_limit || '', is_fund: cat.is_fund || false, interest_rate: cat.interest_rate || '' }); setEditing(cat.id); }
+  function startNew() { setForm({ name: '', icon: '', monthly_limit: '', is_fund: false }); setEditing('new'); }
+  function startEdit(cat) { setForm({ name: cat.name, icon: cat.icon || '', monthly_limit: cat.monthly_limit || '', is_fund: cat.is_fund || false }); setEditing(cat.id); }
 
   async function handleSave() {
     if (!form.name) { alert('Nhập tên danh mục'); return; }
     setSaving(true);
-    const payload = { name: form.name, icon: form.icon || '❔', type: tab, monthly_limit: form.monthly_limit ? Number(form.monthly_limit) : null, is_fund: form.is_fund, interest_rate: form.interest_rate ? Number(form.interest_rate) : 0 };
+    const payload = { name: form.name, icon: form.icon || '❔', type: tab, monthly_limit: form.monthly_limit ? Number(form.monthly_limit) : null, is_fund: form.is_fund };
     const { error } = editing === 'new' ? await supabase.from('categories').insert(payload) : await supabase.from('categories').update(payload).eq('id', editing);
     setSaving(false);
     if (error) { alert('Lỗi: ' + error.message); return; }
@@ -1162,11 +751,7 @@ function CategorySection({ categories, reload }) {
             <EmojiCircle emoji={cat.icon} size={36} bg="#ede9fe" />
             <div className="flex-1 min-w-0">
               <p className="text-gray-900 font-medium text-sm">{cat.name} {cat.is_fund && <span className="text-[10px] bg-violet-100 text-violet-600 px-1.5 py-0.5 rounded-full ml-1">Quỹ</span>}</p>
-              <p className="text-gray-400 text-xs">
-                {cat.monthly_limit ? `Hạn mức: ${formatMoney(cat.monthly_limit)}` : ''}
-                {cat.monthly_limit && cat.interest_rate > 0 ? ' • ' : ''}
-                {cat.interest_rate > 0 ? `Lãi ${cat.interest_rate}%/năm` : ''}
-              </p>
+              {cat.monthly_limit && <p className="text-gray-400 text-xs">Hạn mức: {formatMoney(cat.monthly_limit)}</p>}
             </div>
             <button onClick={() => startEdit(cat)} className="w-8 h-8 rounded-full bg-white flex items-center justify-center"><Pencil size={14} className="text-gray-500" /></button>
             <button onClick={() => handleDelete(cat.id)} className="w-8 h-8 rounded-full bg-white flex items-center justify-center"><Trash2 size={14} className="text-red-400" /></button>
@@ -1176,14 +761,11 @@ function CategorySection({ categories, reload }) {
 
       {editing && (
         <div className="fixed inset-0 bg-black/40 flex items-end z-20" onClick={() => setEditing(null)}>
-          <div className="bg-white w-full rounded-t-3xl p-5 max-w-sm mx-auto max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+          <div className="bg-white w-full rounded-t-3xl p-5 max-w-sm mx-auto" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-4"><h3 className="font-semibold text-gray-900">{editing === 'new' ? 'Danh mục mới' : 'Sửa danh mục'}</h3><button onClick={() => setEditing(null)}><X size={18} className="text-gray-500" /></button></div>
             <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Tên danh mục" className="w-full bg-gray-100 rounded-xl px-4 py-3 text-sm outline-none mb-3" />
             <input value={form.icon} onChange={(e) => setForm({ ...form, icon: e.target.value })} placeholder="Emoji (vd: 🍜)" className="w-full bg-gray-100 rounded-xl px-4 py-3 text-sm outline-none mb-3" />
             <input value={form.monthly_limit} onChange={(e) => setForm({ ...form, monthly_limit: e.target.value.replace(/\D/g, '') })} inputMode="numeric" placeholder="Hạn mức tối đa mỗi lần nhập (không bắt buộc)" className="w-full bg-gray-100 rounded-xl px-4 py-3 text-sm outline-none mb-3" />
-            {tab === 'expense' && (
-              <input value={form.interest_rate} onChange={(e) => setForm({ ...form, interest_rate: e.target.value.replace(/[^0-9.]/g, '') })} inputMode="decimal" placeholder="Tỷ suất lợi nhuận %/năm (không bắt buộc)" className="w-full bg-gray-100 rounded-xl px-4 py-3 text-sm outline-none mb-3" />
-            )}
             <label className="flex items-center gap-2 mb-4 text-sm text-gray-600"><input type="checkbox" checked={form.is_fund} onChange={(e) => setForm({ ...form, is_fund: e.target.checked })} /> Đây là 1 "quỹ" — hiện thẻ tổng tiền ở Trang chủ</label>
             <button onClick={handleSave} disabled={saving} className="w-full bg-gray-900 text-white rounded-xl py-3 font-semibold flex items-center justify-center gap-2 disabled:opacity-60">{saving ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />} Lưu</button>
           </div>
@@ -1309,7 +891,7 @@ function Settings({ setScreen, categories, accounts, reload, user, onProfileUpda
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-violet-400 via-fuchsia-200 to-orange-100 flex justify-center md:pl-64 md:pt-20">
+    <div className="min-h-screen bg-gradient-to-b from-violet-400 via-fuchsia-200 to-orange-100 flex justify-center md:pt-20">
       <div className="w-full max-w-sm md:max-w-2xl lg:max-w-3xl min-h-screen pb-28 md:pb-10 md:pt-4 relative">
         <div className="px-5 pt-8 flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -1370,21 +952,12 @@ function MainApp({ user, theme, toggleTheme }) {
   useEffect(() => { loadAll(); }, []);
 
   const [showAdd, setShowAdd] = useState(false);
-  const [selectedFundId, setSelectedFundId] = useState(null);
-  const [fundReturnScreen, setFundReturnScreen] = useState('dashboard');
-  function openFund(id, from = 'dashboard') { setSelectedFundId(id); setFundReturnScreen(from); setScreen('fund-detail'); }
 
-  if (screen === 'fund-detail') {
-    const cat = categories.find((c) => c.id === selectedFundId);
-    if (!cat) { setScreen('dashboard'); return null; }
-    return <FundDetail category={cat} transactions={transactions} onBack={() => setScreen(fundReturnScreen)} reload={loadAll} />;
-  }
-  if (screen === 'funds') return <Funds setScreen={setScreen} categories={categories} transactions={transactions} onOpenFund={openFund} reload={loadAll} onAddClick={() => setShowAdd(true)} displayName={displayName} theme={theme} toggleTheme={toggleTheme} />;
   if (screen === 'report') return <><Report setScreen={setScreen} onAddClick={() => setShowAdd(true)} displayName={displayName} theme={theme} toggleTheme={toggleTheme} />{showAdd && <AddTransaction onClose={() => setShowAdd(false)} accounts={accounts} categories={categories} onSaved={loadAll} />}</>;
   if (screen === 'goals') return <><Goals setScreen={setScreen} goals={goals} loadingGoals={loadingGoals} reload={loadAll} onAddClick={() => setShowAdd(true)} displayName={displayName} theme={theme} toggleTheme={toggleTheme} />{showAdd && <AddTransaction onClose={() => setShowAdd(false)} accounts={accounts} categories={categories} onSaved={loadAll} />}</>;
   if (screen === 'accounts') return <><Accounts setScreen={setScreen} accounts={accounts} transactions={transactions} onAddClick={() => setShowAdd(true)} displayName={displayName} theme={theme} toggleTheme={toggleTheme} />{showAdd && <AddTransaction onClose={() => setShowAdd(false)} accounts={accounts} categories={categories} onSaved={loadAll} />}</>;
   if (screen === 'settings') return <><Settings setScreen={setScreen} categories={categories} accounts={accounts} reload={loadAll} user={currentUser} onProfileUpdated={refreshUser} onAddClick={() => setShowAdd(true)} theme={theme} toggleTheme={toggleTheme} />{showAdd && <AddTransaction onClose={() => setShowAdd(false)} accounts={accounts} categories={categories} onSaved={loadAll} />}</>;
-  return <><Dashboard setScreen={setScreen} transactions={transactions} categories={categories} accounts={accounts} goals={goals} loading={loading} displayName={displayName} onAddClick={() => setShowAdd(true)} theme={theme} toggleTheme={toggleTheme} onOpenFund={(id) => openFund(id, 'dashboard')} />{showAdd && <AddTransaction onClose={() => setShowAdd(false)} accounts={accounts} categories={categories} onSaved={loadAll} />}</>;
+  return <><Dashboard setScreen={setScreen} transactions={transactions} categories={categories} accounts={accounts} loading={loading} displayName={displayName} onAddClick={() => setShowAdd(true)} theme={theme} toggleTheme={toggleTheme} />{showAdd && <AddTransaction onClose={() => setShowAdd(false)} accounts={accounts} categories={categories} onSaved={loadAll} />}</>;
 }
 
 export default function App() {
