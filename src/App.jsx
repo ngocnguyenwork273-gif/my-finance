@@ -17,7 +17,7 @@ function nowForInput() {
   return d.toISOString().slice(0, 16);
 }
 
-// Số dư quỹ = tổng đã Nạp - tổng đã Chi (rút) cho đúng danh mục đó
+// Số dư quỹ = tổng đã Nạp - tổng đã Chi (rút) cho đúng danh mục đó — KHÔNG tính lãi
 function fundBalance(categoryId, transactions) {
   return transactions
     .filter((t) => t.category_id === categoryId)
@@ -26,6 +26,45 @@ function fundBalance(categoryId, transactions) {
       if (t.type === 'expense') return s - Number(t.amount);
       return s;
     }, 0);
+}
+
+// Số dư quỹ CÓ TÍNH LÃI KÉP hàng ngày, trễ 1 ngày:
+// nạp ngày 16/7 -> bắt đầu tính lời từ 17/7 -> app cộng lời của ngày 17 vào số dư kể từ ngày 18/7.
+// Lời được cộng dồn vào số dư và tiếp tục sinh lời (lãi kép).
+function fundBalanceWithProfit(category, transactions) {
+  const rate = Number(category.interest_rate || 0);
+  const history = transactions
+    .filter((t) => t.category_id === category.id && (t.type === 'allocation' || t.type === 'expense'))
+    .sort((a, b) => new Date(a.date || a.created_at) - new Date(b.date || b.created_at));
+
+  if (history.length === 0) return 0;
+
+  const dailyRate = rate / 100 / 365;
+  const toDay = (d) => { const x = new Date(d); x.setHours(0, 0, 0, 0); return x; };
+  const startDate = toDay(history[0].date || history[0].created_at);
+  const today = toDay(new Date());
+  const yesterday = new Date(today); yesterday.setDate(yesterday.getDate() - 1);
+
+  // Gom giao dịch theo từng ngày
+  const changesByDay = {};
+  history.forEach((t) => {
+    const key = toDay(t.date || t.created_at).getTime();
+    const delta = t.type === 'allocation' ? Number(t.amount) : -Number(t.amount);
+    changesByDay[key] = (changesByDay[key] || 0) + delta;
+  });
+
+  let balance = 0;
+  const cursor = new Date(startDate);
+  // Chạy từng ngày từ ngày giao dịch đầu tiên đến hết HÔM QUA, cộng lãi kép mỗi ngày đã qua
+  while (cursor <= yesterday) {
+    balance += changesByDay[cursor.getTime()] || 0;
+    if (balance > 0 && dailyRate > 0) balance *= 1 + dailyRate;
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  // Cộng thêm giao dịch của HÔM NAY (chưa tính lãi hôm nay, vì lãi hôm nay chỉ hiện từ ngày mai)
+  balance += changesByDay[today.getTime()] || 0;
+
+  return balance;
 }
 
 // Số dư tài khoản = số dư ban đầu + Thu nhập - Chi tiêu (Nạp quỹ không tính, vì tiền chưa thật sự rời khỏi ví)
@@ -184,6 +223,15 @@ function ChangeBadge({ pct, good = true }) {
   );
 }
 
+// Input số tiền dùng chung — tự động có dấu phẩy ngăn cách hàng nghìn khi gõ
+function MoneyInput({ value, onChange, placeholder, className }) {
+  function handleChange(e) { onChange(e.target.value.replace(/\D/g, '')); }
+  return (
+    <input type="text" inputMode="numeric" value={value ? Number(value).toLocaleString('en-US') : ''}
+      onChange={handleChange} placeholder={placeholder} className={className} />
+  );
+}
+
 function EmojiCircle({ emoji, size = 36, active = false, activeColor = '#7c3aed', bg = '#f3f4f6' }) {
   return <div className="rounded-xl flex items-center justify-center flex-shrink-0" style={{ width: size, height: size, background: active ? activeColor : bg, fontSize: size * 0.5 }}>{emoji || '❔'}</div>;
 }
@@ -280,7 +328,7 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
   const palette = ['#16a34a', '#facc15', '#fb923c', '#4ade80', '#fde047', '#fdba74', '#86efac'];
 
   // Tổng tài sản = tổng số dư mọi quỹ (mọi danh mục chi tiêu) + tổng số dư mọi tài khoản
-  const totalFunds = expenseCats.reduce((s, c) => s + fundBalance(c.id, transactions), 0);
+  const totalFunds = expenseCats.reduce((s, c) => s + fundBalanceWithProfit(c, transactions), 0);
   const totalAccounts = accounts.reduce((s, a) => s + accountBalance(a, transactions), 0);
   const totalAssets = totalFunds + totalAccounts;
 
@@ -359,7 +407,7 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
               <button key={f.id} onClick={() => onOpenFund(f.id)} className="min-w-[150px] text-left bg-white/90 backdrop-blur rounded-3xl p-4 shadow-lg shadow-black/5 flex-shrink-0">
                 <EmojiCircle emoji={f.icon} size={36} active activeColor="#7c3aed" />
                 <p className="text-gray-500 text-xs mt-3">{f.name}</p>
-                <p className="text-gray-900 font-semibold text-base">{formatMoney(fundBalance(f.id, transactions))}</p>
+                <p className="text-gray-900 font-semibold text-base">{formatMoney(fundBalanceWithProfit(f, transactions))}</p>
               </button>
             ))}
         </div>
@@ -468,20 +516,31 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
             `,
           }}
         >
-          {/* Tổng quan số dư — góc trên trái, rộng */}
+          {/* Tổng quan tài sản — góc trên trái, rộng */}
           <div style={{ gridArea: 'chart' }} className="bg-white dark:bg-gray-900 rounded-3xl p-6 shadow-sm shadow-black/5 border border-gray-100 dark:border-gray-800 transition-colors">
-            <div className="flex items-center justify-between mb-1">
+            <p className="text-gray-900 dark:text-white font-semibold mb-4">Tổng quan tài sản</p>
+            <div className="grid grid-cols-3 gap-4 mb-6">
               <div>
-                <p className="text-3xl font-bold text-gray-900 dark:text-white">{formatMoney(totalAssets)}</p>
-                <p className="text-gray-400 dark:text-gray-500 text-sm">Tổng quan số dư</p>
+                <p className="text-gray-400 dark:text-gray-500 text-xs mb-1">Tiền ví</p>
+                <p className="text-xl font-bold text-gray-900 dark:text-white">{formatMoney(totalAccounts)}</p>
               </div>
+              <div>
+                <p className="text-gray-400 dark:text-gray-500 text-xs mb-1">Tiền quỹ</p>
+                <p className="text-xl font-bold text-gray-900 dark:text-white">{formatMoney(totalFunds)}</p>
+              </div>
+              <div>
+                <p className="text-gray-400 dark:text-gray-500 text-xs mb-1">Tổng cộng</p>
+                <p className="text-xl font-bold text-emerald-600">{formatMoney(totalAssets)}</p>
+              </div>
+            </div>
+            <div className="flex items-center justify-between mb-1">
+              <p className="text-gray-400 dark:text-gray-500 text-xs">Biến động theo ngày (7 ngày gần nhất)</p>
               <div className="flex items-center gap-4 text-xs">
-                <span className="flex items-center gap-1.5 text-gray-500"><span className="w-2.5 h-2.5 rounded-full bg-yellow-400" />Tiết kiệm</span>
                 <span className="flex items-center gap-1.5 text-gray-500"><span className="w-2.5 h-2.5 rounded-full bg-emerald-500" />Thu nhập</span>
                 <span className="flex items-center gap-1.5 text-gray-500"><span className="w-2.5 h-2.5 rounded-full bg-orange-400" />Chi tiêu</span>
               </div>
             </div>
-            <div className="flex items-end gap-3 mt-8 h-40">
+            <div className="flex items-end gap-3 mt-4 h-32">
               {last7.map((day, i) => {
                 const inc = dailyIncome[day - 1] || 0;
                 const exp = dailySpend[day - 1] || 0;
@@ -674,11 +733,24 @@ function EditFundForm({ category, onClose, onSaved, isNew }) {
     icon: category?.icon || '',
     description: category?.description || '',
     target_amount: category?.target_amount || '',
-    monthly_limit: category?.monthly_limit || '',
     interest_rate: category?.interest_rate || '',
     background_url: category?.background_url || '',
+    initial_allocation: '',
   });
   const [saving, setSaving] = useState(false);
+  const [uploading, setUploading] = useState(false);
+
+  async function handleFileUpload(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    const fileName = `${Date.now()}-${file.name}`;
+    const { error: uploadError } = await supabase.storage.from('fund-images').upload(fileName, file);
+    if (uploadError) { alert('Lỗi tải ảnh lên: ' + uploadError.message); setUploading(false); return; }
+    const { data } = supabase.storage.from('fund-images').getPublicUrl(fileName);
+    setForm((f) => ({ ...f, background_url: data.publicUrl }));
+    setUploading(false);
+  }
 
   async function handleSave() {
     if (!form.name) { alert('Nhập tên quỹ'); return; }
@@ -687,13 +759,23 @@ function EditFundForm({ category, onClose, onSaved, isNew }) {
       name: form.name, icon: form.icon || '💰', type: 'expense', is_fund: true,
       description: form.description || null,
       target_amount: form.target_amount ? Number(form.target_amount) : null,
-      monthly_limit: form.monthly_limit ? Number(form.monthly_limit) : null,
       interest_rate: form.interest_rate ? Number(form.interest_rate) : 0,
       background_url: form.background_url || null,
     };
-    const { error } = isNew ? await supabase.from('categories').insert(payload) : await supabase.from('categories').update(payload).eq('id', category.id);
+    if (isNew) {
+      const { data: newCat, error } = await supabase.from('categories').insert(payload).select().single();
+      if (error) { setSaving(false); alert('Lỗi: ' + error.message); return; }
+      if (form.initial_allocation && Number(form.initial_allocation) > 0) {
+        await supabase.from('transactions').insert({
+          category_id: newCat.id, type: 'allocation', amount: Number(form.initial_allocation),
+          note: 'Nạp quỹ lần đầu', date: new Date().toISOString().slice(0, 10),
+        });
+      }
+    } else {
+      const { error } = await supabase.from('categories').update(payload).eq('id', category.id);
+      if (error) { setSaving(false); alert('Lỗi: ' + error.message); return; }
+    }
     setSaving(false);
-    if (error) { alert('Lỗi: ' + error.message); return; }
     onSaved(); onClose();
   }
 
@@ -704,14 +786,36 @@ function EditFundForm({ category, onClose, onSaved, isNew }) {
           <h3 className="font-semibold text-gray-900">{isNew ? 'Tạo quỹ mới' : 'Sửa quỹ'}</h3>
           <button onClick={onClose}><X size={18} className="text-gray-500" /></button>
         </div>
+
         <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Tên quỹ" className="w-full bg-gray-100 rounded-xl px-4 py-3 text-sm outline-none mb-3" />
         <input value={form.icon} onChange={(e) => setForm({ ...form, icon: e.target.value })} placeholder="Emoji icon (vd: 💊)" className="w-full bg-gray-100 rounded-xl px-4 py-3 text-sm outline-none mb-3" />
         <textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="Mô tả quỹ (không bắt buộc)" rows={2} className="w-full bg-gray-100 rounded-xl px-4 py-3 text-sm outline-none mb-3 resize-none" />
-        <input value={form.target_amount} onChange={(e) => setForm({ ...form, target_amount: e.target.value.replace(/\D/g, '') })} inputMode="numeric" placeholder="Số tiền mục tiêu (không bắt buộc)" className="w-full bg-gray-100 rounded-xl px-4 py-3 text-sm outline-none mb-3" />
-        <input value={form.monthly_limit} onChange={(e) => setForm({ ...form, monthly_limit: e.target.value.replace(/\D/g, '') })} inputMode="numeric" placeholder="Hạn mức mỗi lần chi (không bắt buộc)" className="w-full bg-gray-100 rounded-xl px-4 py-3 text-sm outline-none mb-3" />
-        <input value={form.interest_rate} onChange={(e) => setForm({ ...form, interest_rate: e.target.value.replace(/[^0-9.]/g, '') })} inputMode="decimal" placeholder="Tỷ suất lợi nhuận %/năm (không bắt buộc)" className="w-full bg-gray-100 rounded-xl px-4 py-3 text-sm outline-none mb-3" />
-        <input value={form.background_url} onChange={(e) => setForm({ ...form, background_url: e.target.value })} placeholder="Link ảnh nền quỹ (không bắt buộc)" className="w-full bg-gray-100 rounded-xl px-4 py-3 text-sm outline-none mb-4" />
-        <button onClick={handleSave} disabled={saving} className="w-full bg-gray-900 text-white rounded-xl py-3 font-semibold flex items-center justify-center gap-2 disabled:opacity-60">
+
+        {isNew && (
+          <MoneyInput value={form.initial_allocation} onChange={(v) => setForm({ ...form, initial_allocation: v })} placeholder="Số tiền nạp quỹ lần đầu (không bắt buộc)" className="w-full bg-gray-100 rounded-xl px-4 py-3 text-sm outline-none mb-3" />
+        )}
+        <MoneyInput value={form.target_amount} onChange={(v) => setForm({ ...form, target_amount: v })} placeholder="Số tiền mục tiêu (không bắt buộc)" className="w-full bg-gray-100 rounded-xl px-4 py-3 text-sm outline-none mb-3" />
+
+        <div className="relative mb-3">
+          <input value={form.interest_rate} onChange={(e) => setForm({ ...form, interest_rate: e.target.value.replace(/[^0-9.]/g, '') })} inputMode="decimal" placeholder="Tỷ suất lợi nhuận /năm (không bắt buộc)" className="w-full bg-gray-100 rounded-xl px-4 py-3 pr-10 text-sm outline-none" />
+          {form.interest_rate && <span className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500 text-sm font-medium">%</span>}
+        </div>
+
+        <p className="text-sm text-gray-600 mb-2">Ảnh nền quỹ</p>
+        {form.background_url && (
+          <div className="w-full h-28 rounded-xl overflow-hidden mb-2 bg-gray-100">
+            <img src={form.background_url} alt="" className="w-full h-full object-cover" />
+          </div>
+        )}
+        <div className="flex gap-2 mb-3">
+          <label className="flex-1 bg-gray-100 rounded-xl px-4 py-3 text-sm text-gray-500 text-center cursor-pointer hover:bg-gray-200 transition">
+            {uploading ? 'Đang tải...' : 'Tải ảnh từ thiết bị'}
+            <input type="file" accept="image/*" onChange={handleFileUpload} className="hidden" disabled={uploading} />
+          </label>
+        </div>
+        <input value={form.background_url} onChange={(e) => setForm({ ...form, background_url: e.target.value })} placeholder="Hoặc dán link ảnh" className="w-full bg-gray-100 rounded-xl px-4 py-3 text-sm outline-none mb-4" />
+
+        <button onClick={handleSave} disabled={saving || uploading} className="w-full bg-gray-900 text-white rounded-xl py-3 font-semibold flex items-center justify-center gap-2 disabled:opacity-60">
           {saving ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />} Lưu quỹ
         </button>
       </div>
@@ -719,21 +823,57 @@ function EditFundForm({ category, onClose, onSaved, isNew }) {
   );
 }
 
-function FundDetail({ category, transactions, onBack, reload }) {
+function QuickAllocateWithdrawForm({ category, mode, onClose, onSaved }) {
+  const [amount, setAmount] = useState('');
+  const [note, setNote] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  async function handleSave() {
+    if (!amount || Number(amount) === 0) { alert('Nhập số tiền'); return; }
+    setSaving(true);
+    const { error } = await supabase.from('transactions').insert({
+      category_id: category.id, type: mode, amount: Number(amount), note: note || null,
+      date: new Date().toISOString().slice(0, 10), created_at: new Date().toISOString(),
+    });
+    setSaving(false);
+    if (error) { alert('Lỗi: ' + error.message); return; }
+    onSaved(); onClose();
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-end md:items-center md:justify-center z-30" onClick={onClose}>
+      <div className="bg-white w-full md:max-w-sm rounded-t-3xl md:rounded-3xl p-5" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="font-semibold text-gray-900">{mode === 'allocation' ? `Nạp vào ${category.name}` : `Rút từ ${category.name}`}</h3>
+          <button onClick={onClose}><X size={18} className="text-gray-500" /></button>
+        </div>
+        <MoneyInput value={amount} onChange={setAmount} placeholder="Số tiền" className="w-full bg-gray-100 rounded-xl px-4 py-3 text-lg font-semibold outline-none mb-3" />
+        <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Ghi chú (không bắt buộc)" className="w-full bg-gray-100 rounded-xl px-4 py-3 text-sm outline-none mb-4" />
+        <button onClick={handleSave} disabled={saving} className={`w-full text-white rounded-xl py-3 font-semibold flex items-center justify-center gap-2 disabled:opacity-60 ${mode === 'allocation' ? 'bg-emerald-600' : 'bg-red-500'}`}>
+          {saving ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />} {mode === 'allocation' ? 'Nạp quỹ' : 'Rút quỹ'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function FundDetail({ category, transactions, onBack, reload, setScreen, onAddClick, displayName, theme, toggleTheme }) {
   const [filter, setFilter] = useState('all'); // 'all' | 'allocation' | 'expense' | 'profit'
   const [showEdit, setShowEdit] = useState(false);
+  const [quickMode, setQuickMode] = useState(null); // 'allocation' | 'expense' | null
 
   const allHistory = transactions
     .filter((t) => t.category_id === category.id && (t.type === 'allocation' || t.type === 'expense'))
     .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
   const history = filter === 'all' ? allHistory : filter === 'profit' ? [] : allHistory.filter((t) => t.type === filter);
 
-  const balance = fundBalance(category.id, transactions);
+  const balance = fundBalanceWithProfit(category, transactions);
+  const principalBalance = fundBalance(category.id, transactions);
+  const accruedProfit = Math.max(0, balance - principalBalance);
   const totalIn = allHistory.filter((t) => t.type === 'allocation').reduce((s, t) => s + Number(t.amount), 0);
   const totalOut = allHistory.filter((t) => t.type === 'expense').reduce((s, t) => s + Number(t.amount), 0);
   const rate = Number(category.interest_rate || 0);
   const dailyProfit = balance > 0 ? balance * (rate / 100) / 365 : 0;
-  const yearlyProfit = balance > 0 ? balance * (rate / 100) : 0;
   const target = Number(category.target_amount || 0);
   const targetPct = target > 0 ? Math.min(100, (balance / target) * 100) : 0;
 
@@ -767,6 +907,7 @@ function FundDetail({ category, transactions, onBack, reload }) {
         <div className="px-5 mt-4 text-center">
           <p className="text-white/70 text-sm">Số dư hiện tại</p>
           <p className="text-white text-4xl font-bold">{formatMoney(balance)}</p>
+          {accruedProfit > 1 && <p className="text-white/70 text-xs mt-1">Trong đó lãi cộng dồn: {formatMoney(accruedProfit)}</p>}
           {target > 0 && (
             <div className="max-w-xs mx-auto mt-3">
               <ProgressBar pct={targetPct} colorClass="bg-white" />
@@ -775,9 +916,18 @@ function FundDetail({ category, transactions, onBack, reload }) {
           )}
           {rate > 0 && (
             <p className="text-white/80 text-sm mt-2">
-              Lãi suất {rate}%/năm — ước tính <span className="font-semibold">{formatMoney(dailyProfit)}</span>/ngày
+              Lãi suất {rate}%/năm — ước tính <span className="font-semibold">{formatMoney(dailyProfit)}</span>/ngày, cộng dồn tiếp tục sinh lời
             </p>
           )}
+
+          <div className="flex items-center justify-center gap-3 mt-4">
+            <button onClick={() => setQuickMode('allocation')} className="bg-white text-emerald-600 rounded-full px-5 py-2.5 text-sm font-semibold flex items-center gap-1.5 shadow-lg">
+              <TrendingUp size={15} /> Nạp quỹ
+            </button>
+            <button onClick={() => setQuickMode('expense')} className="bg-white text-red-500 rounded-full px-5 py-2.5 text-sm font-semibold flex items-center gap-1.5 shadow-lg">
+              <TrendingDown size={15} /> Rút quỹ
+            </button>
+          </div>
         </div>
 
         <div className="mt-6 bg-white rounded-t-[2.5rem] min-h-[65vh] px-5 pt-6 pb-6">
@@ -801,9 +951,10 @@ function FundDetail({ category, transactions, onBack, reload }) {
           {filter === 'profit' ? (
             rate === 0 ? <p className="text-gray-400 text-sm text-center py-8">Chưa đặt tỷ suất lợi nhuận cho quỹ này. Bấm ✏️ để đặt.</p> : (
               <div className="bg-gray-50 rounded-2xl p-5 text-center">
-                <p className="text-gray-500 text-sm mb-1">Lợi nhuận ước tính</p>
-                <p className="text-gray-900 text-2xl font-bold">{formatMoney(dailyProfit)}<span className="text-sm font-normal text-gray-400">/ngày</span></p>
-                <p className="text-gray-400 text-sm mt-1">≈ {formatMoney(yearlyProfit)}/năm với lãi suất {rate}%/năm</p>
+                <p className="text-gray-500 text-sm mb-1">Lợi nhuận cộng dồn đến hôm nay</p>
+                <p className="text-gray-900 text-2xl font-bold">{formatMoney(accruedProfit)}</p>
+                <p className="text-gray-400 text-sm mt-2">Dự kiến ngày mai: +{formatMoney(dailyProfit)}</p>
+                <p className="text-gray-400 text-xs mt-1">Lãi được cộng dồn vào số dư và tiếp tục sinh lời (lãi kép), tính từ ngày sau khi nạp.</p>
               </div>
             )
           ) : (
@@ -831,6 +982,8 @@ function FundDetail({ category, transactions, onBack, reload }) {
       </div>
 
       {showEdit && <EditFundForm category={category} onClose={() => setShowEdit(false)} onSaved={reload} isNew={false} />}
+      {quickMode && <QuickAllocateWithdrawForm category={category} mode={quickMode} onClose={() => setQuickMode(null)} onSaved={reload} />}
+      <BottomNav screen="funds" setScreen={setScreen} onAddClick={onAddClick} displayName={displayName} theme={theme} toggleTheme={toggleTheme} />
     </div>
   );
 }
@@ -840,11 +993,12 @@ function FundDetail({ category, transactions, onBack, reload }) {
 function Funds({ setScreen, categories, transactions, onOpenFund, reload, onAddClick, displayName, theme, toggleTheme }) {
   const [showCreate, setShowCreate] = useState(false);
   const funds = categories.filter((c) => c.type === 'expense');
-  const totalFunds = funds.reduce((s, c) => s + fundBalance(c.id, transactions), 0);
+  const totalFunds = funds.reduce((s, c) => s + fundBalanceWithProfit(c, transactions), 0);
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-violet-400 via-fuchsia-200 to-orange-100 flex justify-center md:pl-64 md:pt-20">
-      <div className="w-full max-w-sm md:max-w-2xl min-h-screen pb-28 md:pb-10 relative">
+    <div className="min-h-screen bg-gradient-to-b from-violet-400 via-fuchsia-200 to-orange-100 md:bg-gray-100 relative flex justify-center md:pl-64 md:pt-20 transition-colors">
+      {/* ============ BẢN ĐIỆN THOẠI ============ */}
+      <div className="w-full max-w-sm md:hidden min-h-screen pb-28 relative">
         <div className="px-5 pt-8 flex items-center justify-between">
           <h1 className="text-white text-xl font-semibold">Quản lý quỹ</h1>
           <button onClick={() => setShowCreate(true)} className="w-10 h-10 rounded-full bg-white/30 backdrop-blur flex items-center justify-center"><Plus size={20} className="text-white" /></button>
@@ -858,9 +1012,9 @@ function Funds({ setScreen, categories, transactions, onOpenFund, reload, onAddC
           {funds.length === 0 ? (
             <p className="text-gray-400 text-sm text-center py-10">Chưa có quỹ nào. Bấm + để tạo quỹ đầu tiên.</p>
           ) : (
-            <div className="flex flex-col gap-2 md:grid md:grid-cols-2 md:gap-3">
+            <div className="flex flex-col gap-2">
               {funds.map((f) => {
-                const balance = fundBalance(f.id, transactions);
+                const balance = fundBalanceWithProfit(f, transactions);
                 const target = Number(f.target_amount || 0);
                 const pct = target > 0 ? Math.min(100, (balance / target) * 100) : null;
                 return (
@@ -871,7 +1025,7 @@ function Funds({ setScreen, categories, transactions, onOpenFund, reload, onAddC
                       {pct !== null ? (
                         <div className="mt-1"><ProgressBar pct={pct} /></div>
                       ) : (
-                        <p className="text-gray-400 text-xs">{f.description || ' '}</p>
+                        <p className="text-gray-400 text-xs truncate">{f.description || ' '}</p>
                       )}
                     </div>
                     <p className="text-gray-900 font-semibold text-sm flex-shrink-0">{formatMoney(balance)}</p>
@@ -881,15 +1035,63 @@ function Funds({ setScreen, categories, transactions, onOpenFund, reload, onAddC
             </div>
           )}
         </div>
-
-        {showCreate && <EditFundForm onClose={() => setShowCreate(false)} onSaved={reload} isNew={true} />}
-        <BottomNav screen="funds" setScreen={setScreen} onAddClick={onAddClick} displayName={displayName} theme={theme} toggleTheme={toggleTheme} />
       </div>
+
+      {/* ============ BẢN DESKTOP/TABLET — dạng thẻ lớn, khác điện thoại ============ */}
+      <div className="hidden md:block w-full max-w-[1400px] px-8 py-8">
+        <div className="flex items-center justify-between mb-2">
+          <div>
+            <h1 className="text-gray-900 text-2xl font-semibold">Quản lý quỹ</h1>
+            <p className="text-gray-400 text-sm mt-1">Tổng số dư mọi quỹ: <span className="text-gray-900 font-semibold">{formatMoney(totalFunds)}</span></p>
+          </div>
+          <button onClick={() => setShowCreate(true)} className="bg-gray-900 text-white rounded-full px-5 py-2.5 text-sm font-medium flex items-center gap-2">
+            <Plus size={16} /> Tạo quỹ mới
+          </button>
+        </div>
+
+        {funds.length === 0 ? (
+          <p className="text-gray-400 text-sm text-center py-16">Chưa có quỹ nào. Bấm "Tạo quỹ mới" để bắt đầu.</p>
+        ) : (
+          <div className="grid grid-cols-3 gap-5 mt-6">
+            {funds.map((f) => {
+              const balance = fundBalanceWithProfit(f, transactions);
+              const target = Number(f.target_amount || 0);
+              const pct = target > 0 ? Math.min(100, (balance / target) * 100) : null;
+              return (
+                <button key={f.id} onClick={() => onOpenFund(f.id, 'funds')} className="text-left bg-white rounded-3xl overflow-hidden shadow-sm shadow-black/5 border border-gray-100 hover:shadow-md transition">
+                  <div
+                    className="h-24 flex items-end p-4"
+                    style={f.background_url
+                      ? { backgroundImage: `linear-gradient(rgba(0,0,0,0.15),rgba(0,0,0,0.45)), url(${f.background_url})`, backgroundSize: 'cover', backgroundPosition: 'center' }
+                      : { background: 'linear-gradient(135deg,#a78bfa,#7c3aed)' }}
+                  >
+                    <span className="text-2xl">{f.icon}</span>
+                  </div>
+                  <div className="p-4">
+                    <p className="text-gray-900 font-semibold truncate">{f.name}</p>
+                    {f.description && <p className="text-gray-400 text-xs mt-0.5 truncate">{f.description}</p>}
+                    <p className="text-gray-900 text-xl font-bold mt-2">{formatMoney(balance)}</p>
+                    {pct !== null && (
+                      <div className="mt-2">
+                        <ProgressBar pct={pct} colorClass="bg-violet-500" />
+                        <p className="text-gray-400 text-xs mt-1">{Math.round(pct)}% / mục tiêu {formatMoney(target)}</p>
+                      </div>
+                    )}
+                    {f.interest_rate > 0 && <p className="text-emerald-600 text-xs font-medium mt-2">Lãi {f.interest_rate}%/năm</p>}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {showCreate && <EditFundForm onClose={() => setShowCreate(false)} onSaved={reload} isNew={true} />}
+      <BottomNav screen="funds" setScreen={setScreen} onAddClick={onAddClick} displayName={displayName} theme={theme} toggleTheme={toggleTheme} />
     </div>
   );
 }
 
-/* ---------- Financial Report ---------- */
 /* ---------- Financial Report ---------- */
 
 function Report({ setScreen, onAddClick, displayName, theme, toggleTheme }) {
@@ -941,7 +1143,7 @@ function AddGoalForm({ onClose, onSaved }) {
       <div className="bg-white w-full rounded-t-3xl p-5 max-w-sm mx-auto" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-4"><h3 className="font-semibold text-gray-900">Mục tiêu mới</h3><button onClick={onClose}><X size={18} className="text-gray-500" /></button></div>
         <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Tên mục tiêu" className="w-full bg-gray-100 rounded-xl px-4 py-3 text-sm outline-none mb-3" />
-        <input value={target} onChange={(e) => setTarget(e.target.value.replace(/\D/g, ''))} inputMode="numeric" placeholder="Số tiền mục tiêu" className="w-full bg-gray-100 rounded-xl px-4 py-3 text-sm outline-none mb-4" />
+        <MoneyInput value={target} onChange={setTarget} placeholder="Số tiền mục tiêu" className="w-full bg-gray-100 rounded-xl px-4 py-3 text-sm outline-none mb-4" />
         <button onClick={handleSave} disabled={saving} className="w-full bg-gray-900 text-white rounded-xl py-3 font-semibold flex items-center justify-center gap-2 disabled:opacity-60">{saving ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />} Lưu mục tiêu</button>
       </div>
     </div>
@@ -1180,7 +1382,7 @@ function CategorySection({ categories, reload }) {
             <div className="flex items-center justify-between mb-4"><h3 className="font-semibold text-gray-900">{editing === 'new' ? 'Danh mục mới' : 'Sửa danh mục'}</h3><button onClick={() => setEditing(null)}><X size={18} className="text-gray-500" /></button></div>
             <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Tên danh mục" className="w-full bg-gray-100 rounded-xl px-4 py-3 text-sm outline-none mb-3" />
             <input value={form.icon} onChange={(e) => setForm({ ...form, icon: e.target.value })} placeholder="Emoji (vd: 🍜)" className="w-full bg-gray-100 rounded-xl px-4 py-3 text-sm outline-none mb-3" />
-            <input value={form.monthly_limit} onChange={(e) => setForm({ ...form, monthly_limit: e.target.value.replace(/\D/g, '') })} inputMode="numeric" placeholder="Hạn mức tối đa mỗi lần nhập (không bắt buộc)" className="w-full bg-gray-100 rounded-xl px-4 py-3 text-sm outline-none mb-3" />
+            <MoneyInput value={form.monthly_limit} onChange={(v) => setForm({ ...form, monthly_limit: v })} placeholder="Hạn mức tối đa mỗi lần nhập (không bắt buộc)" className="w-full bg-gray-100 rounded-xl px-4 py-3 text-sm outline-none mb-3" />
             {tab === 'expense' && (
               <input value={form.interest_rate} onChange={(e) => setForm({ ...form, interest_rate: e.target.value.replace(/[^0-9.]/g, '') })} inputMode="decimal" placeholder="Tỷ suất lợi nhuận %/năm (không bắt buộc)" className="w-full bg-gray-100 rounded-xl px-4 py-3 text-sm outline-none mb-3" />
             )}
@@ -1252,7 +1454,7 @@ function AccountSection({ accounts, reload }) {
             <select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })} className="w-full bg-gray-100 rounded-xl px-4 py-3 text-sm outline-none mb-3">
               {ACCOUNT_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
             </select>
-            <input value={form.initial_balance} onChange={(e) => setForm({ ...form, initial_balance: e.target.value.replace(/\D/g, '') })} inputMode="numeric" placeholder="Số dư ban đầu" className="w-full bg-gray-100 rounded-xl px-4 py-3 text-sm outline-none mb-4" />
+            <MoneyInput value={form.initial_balance} onChange={(v) => setForm({ ...form, initial_balance: v })} placeholder="Số dư ban đầu" className="w-full bg-gray-100 rounded-xl px-4 py-3 text-sm outline-none mb-4" />
             <button onClick={handleSave} disabled={saving} className="w-full bg-gray-900 text-white rounded-xl py-3 font-semibold flex items-center justify-center gap-2 disabled:opacity-60">{saving ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />} Lưu</button>
           </div>
         </div>
@@ -1377,7 +1579,7 @@ function MainApp({ user, theme, toggleTheme }) {
   if (screen === 'fund-detail') {
     const cat = categories.find((c) => c.id === selectedFundId);
     if (!cat) { setScreen('dashboard'); return null; }
-    return <FundDetail category={cat} transactions={transactions} onBack={() => setScreen(fundReturnScreen)} reload={loadAll} />;
+    return <><FundDetail category={cat} transactions={transactions} onBack={() => setScreen(fundReturnScreen)} reload={loadAll} setScreen={setScreen} onAddClick={() => setShowAdd(true)} displayName={displayName} theme={theme} toggleTheme={toggleTheme} />{showAdd && <AddTransaction onClose={() => setShowAdd(false)} accounts={accounts} categories={categories} onSaved={loadAll} />}</>;
   }
   if (screen === 'funds') return <Funds setScreen={setScreen} categories={categories} transactions={transactions} onOpenFund={openFund} reload={loadAll} onAddClick={() => setShowAdd(true)} displayName={displayName} theme={theme} toggleTheme={toggleTheme} />;
   if (screen === 'report') return <><Report setScreen={setScreen} onAddClick={() => setShowAdd(true)} displayName={displayName} theme={theme} toggleTheme={toggleTheme} />{showAdd && <AddTransaction onClose={() => setShowAdd(false)} accounts={accounts} categories={categories} onSaved={loadAll} />}</>;
