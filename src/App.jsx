@@ -1242,35 +1242,133 @@ function Report({ setScreen, onAddClick, displayName, theme, toggleTheme }) {
 
 /* ---------- Goals ---------- */
 
-function AddGoalForm({ onClose, onSaved }) {
-  const [name, setName] = useState('');
-  const [target, setTarget] = useState('');
+const PRIORITY_TERMS = [
+  { value: '<1 năm - Siêu ngắn hạn', color: '#dc2626', bg: '#fee2e2' },
+  { value: '1-3 năm - Hơi ngắn hạn', color: '#2563eb', bg: '#dbeafe' },
+  { value: '3-5 năm - Ngắn hạn', color: '#ea580c', bg: '#ffedd5' },
+  { value: '5-10 năm - Hơi dài hạn', color: '#7c3aed', bg: '#ede9fe' },
+  { value: '>10 năm - Siêu dài hạn', color: '#be185d', bg: '#fce7f3' },
+];
+
+function priorityStyle(value) {
+  return PRIORITY_TERMS.find((p) => p.value === value) || { color: '#6b7280', bg: '#f3f4f6' };
+}
+
+// Tính "X năm Y tháng Z ngày" giữa 2 ngày
+function durationText(startStr, endStr) {
+  if (!startStr || !endStr) return null;
+  const start = new Date(startStr), end = new Date(endStr);
+  if (end < start) return null;
+  let years = end.getFullYear() - start.getFullYear();
+  let months = end.getMonth() - start.getMonth();
+  let days = end.getDate() - start.getDate();
+  if (days < 0) { months -= 1; days += new Date(end.getFullYear(), end.getMonth(), 0).getDate(); }
+  if (months < 0) { years -= 1; months += 12; }
+  const parts = [];
+  if (years > 0) parts.push(`${years} năm`);
+  if (months > 0) parts.push(`${months} tháng`);
+  if (days > 0 || parts.length === 0) parts.push(`${days} ngày`);
+  return parts.join(' ');
+}
+
+function EditGoalForm({ goal, onClose, onSaved, isNew }) {
+  const [form, setForm] = useState({
+    name: goal?.name || '',
+    priority_term: goal?.priority_term || PRIORITY_TERMS[1].value,
+    target_amount: goal?.target_amount || '',
+    current_amount: goal?.current_amount || '',
+    start_date: goal?.start_date || new Date().toISOString().slice(0, 10),
+    note: goal?.note || '',
+    isDone: goal?.status === 'Hoàn thành',
+    end_date: goal?.end_date || new Date().toISOString().slice(0, 10),
+    actual_amount: goal?.actual_amount || '',
+  });
   const [saving, setSaving] = useState(false);
+
   async function handleSave() {
-    if (!name || !target) { alert('Nhập đủ tên và số tiền mục tiêu'); return; }
+    if (!form.name) { alert('Nhập tên mục tiêu'); return; }
     setSaving(true);
-    const { error } = await supabase.from('goals').insert({ name, target_amount: Number(target), current_amount: 0, status: 'Chưa bắt đầu' });
+    const payload = {
+      name: form.name,
+      priority_term: form.priority_term,
+      target_amount: form.target_amount ? Number(form.target_amount) : null,
+      current_amount: form.current_amount ? Number(form.current_amount) : 0,
+      start_date: form.start_date || null,
+      note: form.note || null,
+      status: form.isDone ? 'Hoàn thành' : 'Đang làm',
+      end_date: form.isDone ? form.end_date : null,
+      actual_amount: form.isDone && form.actual_amount ? Number(form.actual_amount) : null,
+    };
+    const { error } = isNew ? await supabase.from('goals').insert(payload) : await supabase.from('goals').update(payload).eq('id', goal.id);
     setSaving(false);
     if (error) { alert('Lỗi: ' + error.message); return; }
     onSaved(); onClose();
   }
+
+  async function handleDelete() {
+    if (!confirm('Xóa mục tiêu này?')) return;
+    setSaving(true);
+    const { error } = await supabase.from('goals').delete().eq('id', goal.id);
+    setSaving(false);
+    if (error) { alert('Lỗi: ' + error.message); return; }
+    onSaved(); onClose();
+  }
+
   return (
-    <div className="fixed inset-0 bg-black/40 flex items-end z-20" onClick={onClose}>
-      <div className="bg-white w-full rounded-t-3xl p-5 max-w-sm mx-auto" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between mb-4"><h3 className="font-semibold text-gray-900">Mục tiêu mới</h3><button onClick={onClose}><X size={18} className="text-gray-500" /></button></div>
-        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Tên mục tiêu" className="w-full bg-gray-100 rounded-xl px-4 py-3 text-sm outline-none mb-3" />
-        <MoneyInput value={target} onChange={setTarget} placeholder="Số tiền mục tiêu" className="w-full bg-gray-100 rounded-xl px-4 py-3 text-sm outline-none mb-4" />
-        <button onClick={handleSave} disabled={saving} className="w-full bg-gray-900 text-white rounded-xl py-3 font-semibold flex items-center justify-center gap-2 disabled:opacity-60">{saving ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />} Lưu mục tiêu</button>
+    <div className="fixed inset-0 bg-black/40 flex items-end md:items-center md:justify-center z-30" onClick={onClose}>
+      <div className="bg-white w-full md:max-w-md rounded-t-3xl md:rounded-3xl p-5 max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="font-semibold text-gray-900">{isNew ? 'Mục tiêu mới' : 'Sửa mục tiêu'}</h3>
+          <button onClick={onClose}><X size={18} className="text-gray-500" /></button>
+        </div>
+
+        <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Tên mục tiêu" className="w-full bg-gray-100 rounded-xl px-4 py-3 text-sm outline-none mb-3" />
+
+        <p className="text-sm text-gray-600 mb-2">Mức độ ưu tiên</p>
+        <select value={form.priority_term} onChange={(e) => setForm({ ...form, priority_term: e.target.value })} className="w-full bg-gray-100 rounded-xl px-4 py-3 text-sm outline-none mb-3">
+          {PRIORITY_TERMS.map((p) => <option key={p.value} value={p.value}>{p.value}</option>)}
+        </select>
+
+        <MoneyInput value={form.target_amount} onChange={(v) => setForm({ ...form, target_amount: v })} placeholder="Số tiền mục tiêu" className="w-full bg-gray-100 rounded-xl px-4 py-3 text-sm outline-none mb-3" />
+        <MoneyInput value={form.current_amount} onChange={(v) => setForm({ ...form, current_amount: v })} placeholder="Số tiền hiện có" className="w-full bg-gray-100 rounded-xl px-4 py-3 text-sm outline-none mb-3" />
+
+        <p className="text-sm text-gray-600 mb-2">Ngày bắt đầu</p>
+        <input type="date" value={form.start_date} onChange={(e) => setForm({ ...form, start_date: e.target.value })} className="w-full bg-gray-100 rounded-xl px-4 py-3 text-sm outline-none mb-3" />
+
+        <textarea value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} placeholder="Ghi chú (không bắt buộc)" rows={2} className="w-full bg-gray-100 rounded-xl px-4 py-3 text-sm outline-none mb-3 resize-none" />
+
+        <label className="flex items-center gap-2 mb-3 text-sm text-gray-700">
+          <input type="checkbox" checked={form.isDone} onChange={(e) => setForm({ ...form, isDone: e.target.checked })} /> Đã hoàn thành
+        </label>
+
+        {form.isDone && (
+          <>
+            <p className="text-sm text-gray-600 mb-2">Ngày hoàn thành</p>
+            <input type="date" value={form.end_date} onChange={(e) => setForm({ ...form, end_date: e.target.value })} className="w-full bg-gray-100 rounded-xl px-4 py-3 text-sm outline-none mb-3" />
+            <MoneyInput value={form.actual_amount} onChange={(v) => setForm({ ...form, actual_amount: v })} placeholder="Số tiền thực tế khi hoàn thành (không bắt buộc)" className="w-full bg-gray-100 rounded-xl px-4 py-3 text-sm outline-none mb-3" />
+          </>
+        )}
+
+        <button onClick={handleSave} disabled={saving} className="w-full bg-gray-900 text-white rounded-xl py-3 font-semibold flex items-center justify-center gap-2 disabled:opacity-60 mb-2">
+          {saving ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />} Lưu mục tiêu
+        </button>
+        {!isNew && (
+          <button onClick={handleDelete} disabled={saving} className="w-full bg-red-50 text-red-500 rounded-xl py-3 font-semibold flex items-center justify-center gap-2">
+            <Trash2 size={16} /> Xóa mục tiêu
+          </button>
+        )}
       </div>
     </div>
   );
 }
 
 function Goals({ setScreen, goals, loadingGoals, reload, onAddClick, displayName, theme, toggleTheme }) {
-  const [showAddGoal, setShowAddGoal] = useState(false);
+  const [editingGoal, setEditingGoal] = useState(null); // goal object | 'new' | null
+
   return (
-    <div className="min-h-screen bg-gradient-to-b from-violet-400 via-fuchsia-200 to-orange-100 flex justify-center md:pl-64 md:pt-20">
-      <div className="w-full max-w-sm md:max-w-2xl lg:max-w-3xl min-h-screen pb-28 md:pb-10 md:pt-4 relative">
+    <div className="min-h-screen bg-gradient-to-b from-violet-400 via-fuchsia-200 to-orange-100 md:bg-gray-100 flex justify-center md:pl-64 md:pt-20 transition-colors">
+      {/* ============ BẢN ĐIỆN THOẠI ============ */}
+      <div className="w-full max-w-sm md:hidden min-h-screen pb-28 relative">
         <div className="px-5 pt-8 flex items-center gap-3">
           <button onClick={() => setScreen('dashboard')} className="w-9 h-9 rounded-full bg-white/30 backdrop-blur flex items-center justify-center"><ArrowLeft size={18} className="text-white" /></button>
           <h1 className="text-white text-lg font-semibold">Mục tiêu</h1>
@@ -1278,29 +1376,113 @@ function Goals({ setScreen, goals, loadingGoals, reload, onAddClick, displayName
         <div className="mt-6 bg-white rounded-t-[2.5rem] min-h-[80vh] px-5 pt-6 pb-6">
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-gray-900 font-semibold text-lg">Mục tiêu của tôi</h2>
-            <button onClick={() => setShowAddGoal(true)} className="w-7 h-7 rounded-full bg-gray-100 flex items-center justify-center"><Plus size={16} className="text-gray-600" /></button>
+            <button onClick={() => setEditingGoal('new')} className="w-7 h-7 rounded-full bg-gray-100 flex items-center justify-center"><Plus size={16} className="text-gray-600" /></button>
           </div>
           {loadingGoals ? <div className="flex justify-center py-6"><Loader2 size={22} className="animate-spin text-violet-400" /></div>
             : goals.length === 0 ? <p className="text-gray-400 text-sm text-center py-6">Chưa có mục tiêu nào.</p>
             : <div className="flex flex-col gap-5">
                 {goals.map((goal) => {
-                  const pct = goal.target_amount ? (goal.current_amount / goal.target_amount) * 100 : 0;
+                  const pct = goal.target_amount ? Math.min(100, (goal.current_amount / goal.target_amount) * 100) : 0;
+                  const remaining = (goal.target_amount || 0) - (goal.current_amount || 0);
+                  const pStyle = priorityStyle(goal.priority_term);
+                  const isDone = goal.status === 'Hoàn thành';
                   return (
-                    <div key={goal.id}>
+                    <button key={goal.id} onClick={() => setEditingGoal(goal)} className="text-left">
                       <div className="flex items-center gap-3 mb-2">
-                        <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-violet-400 to-fuchsia-500 flex items-center justify-center flex-shrink-0"><Target size={18} className="text-white" /></div>
-                        <div className="flex-1 min-w-0"><p className="text-gray-900 font-medium text-sm">{goal.name}</p><p className="text-gray-900 font-semibold text-sm">{formatMoney(goal.current_amount || 0)}</p></div>
+                        <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${isDone ? 'bg-emerald-500' : 'bg-gradient-to-br from-violet-400 to-fuchsia-500'}`}>
+                          {isDone ? <Check size={18} className="text-white" /> : <Target size={18} className="text-white" />}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-gray-900 font-medium text-sm">{goal.name}</p>
+                          {goal.priority_term && <span className="text-[10px] font-medium px-2 py-0.5 rounded-full" style={{ color: pStyle.color, background: pStyle.bg }}>{goal.priority_term}</span>}
+                        </div>
+                        <p className="text-gray-900 font-semibold text-sm flex-shrink-0">{formatMoney(goal.current_amount || 0)}</p>
                       </div>
-                      <ProgressBar pct={pct} />
-                      <div className="flex justify-between mt-1 text-xs text-gray-400"><span>{formatMoney(goal.current_amount || 0)}</span><span>{formatMoney(goal.target_amount)}</span></div>
-                    </div>
+                      <ProgressBar pct={pct} colorClass={isDone ? 'bg-emerald-500' : 'bg-violet-600'} />
+                      <div className="flex justify-between mt-1 text-xs text-gray-400">
+                        <span>{goal.target_amount ? `Còn thiếu ${formatMoney(Math.max(0, remaining))}` : ''}</span>
+                        <span>{goal.target_amount ? formatMoney(goal.target_amount) : ''}</span>
+                      </div>
+                    </button>
                   );
                 })}
               </div>}
         </div>
-        {showAddGoal && <AddGoalForm onClose={() => setShowAddGoal(false)} onSaved={reload} />}
         <BottomNav screen="goals" setScreen={setScreen} onAddClick={onAddClick} displayName={displayName} theme={theme} toggleTheme={toggleTheme} />
       </div>
+
+      {/* ============ BẢN DESKTOP/TABLET — dạng bảng ============ */}
+      <div className="hidden md:block w-full max-w-[1400px] px-8 py-8">
+        <div className="flex items-center justify-between mb-6">
+          <h1 className="text-gray-900 text-2xl font-semibold">Mục tiêu của tôi</h1>
+          <button onClick={() => setEditingGoal('new')} className="bg-gray-900 text-white rounded-full px-5 py-2.5 text-sm font-medium flex items-center gap-2">
+            <Plus size={16} /> Mục tiêu mới
+          </button>
+        </div>
+
+        {loadingGoals ? <div className="flex justify-center py-10"><Loader2 size={24} className="animate-spin text-violet-400" /></div>
+          : goals.length === 0 ? <p className="text-gray-400 text-sm text-center py-16">Chưa có mục tiêu nào.</p>
+          : (
+            <div className="bg-white rounded-3xl shadow-sm shadow-black/5 border border-gray-100 overflow-x-auto">
+              <table className="w-full text-sm min-w-[900px]">
+                <thead>
+                  <tr className="text-left text-gray-400 border-b border-gray-100">
+                    <th className="p-4 font-medium">Mục tiêu</th>
+                    <th className="p-4 font-medium">Mức ưu tiên</th>
+                    <th className="p-4 font-medium text-right">Mục tiêu</th>
+                    <th className="p-4 font-medium text-right">Hiện có</th>
+                    <th className="p-4 font-medium text-right">Còn thiếu</th>
+                    <th className="p-4 font-medium">Tiến độ</th>
+                    <th className="p-4 font-medium">Bắt đầu</th>
+                    <th className="p-4 font-medium">Hoàn thành</th>
+                    <th className="p-4 font-medium">Ghi chú</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {goals.map((goal) => {
+                    const pct = goal.target_amount ? Math.min(100, (goal.current_amount / goal.target_amount) * 100) : 0;
+                    const remaining = (goal.target_amount || 0) - (goal.current_amount || 0);
+                    const pStyle = priorityStyle(goal.priority_term);
+                    const isDone = goal.status === 'Hoàn thành';
+                    const duration = isDone ? durationText(goal.start_date, goal.end_date) : null;
+                    return (
+                      <tr key={goal.id} onClick={() => setEditingGoal(goal)} className="border-b border-gray-50 last:border-0 hover:bg-gray-50 cursor-pointer">
+                        <td className="p-4">
+                          <p className={`font-medium ${isDone ? 'text-emerald-600' : 'text-gray-900'}`}>{isDone && '✓ '}{goal.name}</p>
+                          {goal.note && <p className="text-gray-400 text-xs mt-0.5 max-w-[220px] truncate">{goal.note}</p>}
+                        </td>
+                        <td className="p-4">
+                          {goal.priority_term && <span className="text-xs font-medium px-2 py-1 rounded-full whitespace-nowrap" style={{ color: pStyle.color, background: pStyle.bg }}>{goal.priority_term}</span>}
+                        </td>
+                        <td className="p-4 text-right text-gray-900">{goal.target_amount ? formatMoney(goal.target_amount) : '—'}</td>
+                        <td className="p-4 text-right text-gray-900">{formatMoney(goal.current_amount || 0)}</td>
+                        <td className="p-4 text-right text-gray-500">{goal.target_amount ? formatMoney(Math.max(0, remaining)) : '—'}</td>
+                        <td className="p-4 w-32">
+                          <ProgressBar pct={pct} colorClass={isDone ? 'bg-emerald-500' : 'bg-violet-600'} />
+                          <p className="text-gray-400 text-xs mt-1">{Math.round(pct)}%</p>
+                        </td>
+                        <td className="p-4 text-gray-500 whitespace-nowrap">{goal.start_date ? new Date(goal.start_date).toLocaleDateString('vi-VN') : '—'}</td>
+                        <td className="p-4 text-gray-500 whitespace-nowrap">
+                          {isDone ? (
+                            <>
+                              <p>{new Date(goal.end_date).toLocaleDateString('vi-VN')}</p>
+                              {duration && <p className="text-xs text-gray-400">{duration}</p>}
+                              {goal.actual_amount && <p className="text-xs text-emerald-600">Thực tế: {formatMoney(goal.actual_amount)}</p>}
+                            </>
+                          ) : <span className="text-gray-300">Chưa xong</span>}
+                        </td>
+                        <td className="p-4 text-gray-400 text-xs max-w-[180px] truncate">{goal.note || '—'}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+      </div>
+
+      {editingGoal && <EditGoalForm goal={editingGoal === 'new' ? null : editingGoal} isNew={editingGoal === 'new'} onClose={() => setEditingGoal(null)} onSaved={reload} />}
+      <BottomNav screen="goals" setScreen={setScreen} onAddClick={onAddClick} displayName={displayName} theme={theme} toggleTheme={toggleTheme} />
     </div>
   );
 }
