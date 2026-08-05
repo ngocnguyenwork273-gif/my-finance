@@ -1592,17 +1592,23 @@ function AddTransaction({ onClose, accounts, categories, onSaved }) {
 
 /* ---------- Tiền trong tài khoản ---------- */
 
-function QuickAdjustBalanceForm({ account, onClose, onSaved }) {
-  const [mode, setMode] = useState('increase'); // 'increase' | 'decrease'
+function QuickAdjustBalanceForm({ account, currentBalance, onClose, onSaved }) {
+  const [mode, setMode] = useState(null); // 'increase' | 'decrease' | null (không chọn = đặt số dư mới)
   const [amount, setAmount] = useState('');
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const [note, setNote] = useState('');
   const [saving, setSaving] = useState(false);
 
   async function handleSave() {
-    if (!amount || Number(amount) === 0) { alert('Nhập số tiền'); return; }
+    if (!amount) { alert('Nhập số tiền'); return; }
     setSaving(true);
-    const signedAmount = mode === 'increase' ? Number(amount) : -Number(amount);
+    let signedAmount;
+    if (mode === 'increase') signedAmount = Number(amount);
+    else if (mode === 'decrease') signedAmount = -Number(amount);
+    else signedAmount = Number(amount) - currentBalance; // đặt số dư mới -> tự tính chênh lệch
+
+    if (signedAmount === 0) { setSaving(false); alert('Số dư không đổi, không cần cập nhật.'); return; }
+
     const { error } = await supabase.from('transactions').insert({
       account_id: account.id, type: 'adjustment', amount: signedAmount,
       note: note || 'Cập nhật số dư', date, created_at: new Date(date + 'T' + new Date().toTimeString().slice(0, 8)).toISOString(),
@@ -1619,15 +1625,16 @@ function QuickAdjustBalanceForm({ account, onClose, onSaved }) {
           <h3 className="font-semibold text-gray-900">Cập nhật số dư — {account.name}</h3>
           <button onClick={onClose}><X size={18} className="text-gray-500" /></button>
         </div>
-        <div className="flex bg-gray-100 rounded-full p-1 mb-3">
-          <button onClick={() => setMode('increase')} className={`flex-1 py-2 rounded-full text-sm font-medium transition ${mode === 'increase' ? 'bg-white text-emerald-600 shadow' : 'text-gray-400'}`}>Tăng số dư</button>
-          <button onClick={() => setMode('decrease')} className={`flex-1 py-2 rounded-full text-sm font-medium transition ${mode === 'decrease' ? 'bg-white text-red-500 shadow' : 'text-gray-400'}`}>Giảm số dư</button>
+        <div className="flex bg-gray-100 rounded-full p-1 mb-2">
+          <button onClick={() => { setMode(mode === 'increase' ? null : 'increase'); setAmount(''); }} className={`flex-1 py-2 rounded-full text-sm font-medium transition ${mode === 'increase' ? 'bg-white text-emerald-600 shadow' : 'text-gray-400'}`}>Tăng số dư</button>
+          <button onClick={() => { setMode(mode === 'decrease' ? null : 'decrease'); setAmount(''); }} className={`flex-1 py-2 rounded-full text-sm font-medium transition ${mode === 'decrease' ? 'bg-white text-red-500 shadow' : 'text-gray-400'}`}>Giảm số dư</button>
         </div>
-        <MoneyInput value={amount} onChange={setAmount} placeholder="Số tiền" className="w-full bg-gray-100 rounded-xl px-4 py-3 text-lg font-semibold outline-none mb-3" />
+        <p className="text-xs text-gray-400 mb-3">{mode ? 'Nhập số tiền muốn tăng/giảm.' : 'Không chọn gì cả — nhập thẳng số dư mới, hệ thống tự tính chênh lệch.'}</p>
+        <MoneyInput value={amount} onChange={setAmount} placeholder={mode ? 'Số tiền' : 'Số dư mới'} className="w-full bg-gray-100 rounded-xl px-4 py-3 text-lg font-semibold outline-none mb-3" />
         <p className="text-sm text-gray-600 mb-2">Ngày</p>
         <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="w-full bg-gray-100 rounded-xl px-4 py-3 text-sm outline-none mb-3" />
         <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Ghi chú (không bắt buộc)" className="w-full bg-gray-100 rounded-xl px-4 py-3 text-sm outline-none mb-4" />
-        <button onClick={handleSave} disabled={saving} className={`w-full text-white rounded-xl py-3 font-semibold flex items-center justify-center gap-2 disabled:opacity-60 ${mode === 'increase' ? 'bg-emerald-600' : 'bg-red-500'}`}>
+        <button onClick={handleSave} disabled={saving} className={`w-full text-white rounded-xl py-3 font-semibold flex items-center justify-center gap-2 disabled:opacity-60 ${mode === 'decrease' ? 'bg-red-500' : mode === 'increase' ? 'bg-emerald-600' : 'bg-gray-900'}`}>
           {saving ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />} Lưu cập nhật
         </button>
       </div>
@@ -1635,15 +1642,15 @@ function QuickAdjustBalanceForm({ account, onClose, onSaved }) {
   );
 }
 
-function EditAccountModal({ account, onClose, onSaved }) {
-  const [form, setForm] = useState({ name: account.name, icon: account.icon || '', type: account.type || 'cash', initial_balance: account.initial_balance || '' });
+function EditAccountModal({ account, onClose, onSaved, isNew }) {
+  const [form, setForm] = useState({ name: account?.name || '', icon: account?.icon || '', type: account?.type || 'cash', initial_balance: account?.initial_balance || '' });
   const [saving, setSaving] = useState(false);
 
   async function handleSave() {
     if (!form.name) { alert('Nhập tên tài khoản'); return; }
     setSaving(true);
-    const payload = { name: form.name, icon: form.icon || '💰', type: form.type, initial_balance: form.initial_balance ? Number(form.initial_balance) : 0 };
-    const { error } = await supabase.from('accounts').update(payload).eq('id', account.id);
+    const payload = { name: form.name, icon: form.icon || '💰', type: form.type, initial_balance: form.initial_balance ? Number(form.initial_balance) : 0, is_active: true };
+    const { error } = isNew ? await supabase.from('accounts').insert(payload) : await supabase.from('accounts').update(payload).eq('id', account.id);
     setSaving(false);
     if (error) { alert('Lỗi: ' + error.message); return; }
     onSaved(); onClose();
@@ -1653,7 +1660,7 @@ function EditAccountModal({ account, onClose, onSaved }) {
     <div className="fixed inset-0 bg-black/40 flex items-end md:items-center md:justify-center z-30" onClick={onClose}>
       <div className="bg-white w-full md:max-w-sm rounded-t-3xl md:rounded-3xl p-5" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-4">
-          <h3 className="font-semibold text-gray-900">Sửa tài khoản</h3>
+          <h3 className="font-semibold text-gray-900">{isNew ? 'Thêm ví mới' : 'Sửa tài khoản'}</h3>
           <button onClick={onClose}><X size={18} className="text-gray-500" /></button>
         </div>
         <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Tên tài khoản" className="w-full bg-gray-100 rounded-xl px-4 py-3 text-sm outline-none mb-3" />
@@ -1742,7 +1749,7 @@ function AccountDetail({ account, transactions, categories, onBack, reload, setS
           )}
         </div>
 
-        {showAdjust && <QuickAdjustBalanceForm account={account} onClose={() => setShowAdjust(false)} onSaved={reload} />}
+        {showAdjust && <QuickAdjustBalanceForm account={account} currentBalance={balance} onClose={() => setShowAdjust(false)} onSaved={reload} />}
         {showEdit && <EditAccountModal account={account} onClose={() => setShowEdit(false)} onSaved={reload} />}
         <BottomNav screen="accounts" setScreen={setScreen} onAddClick={onAddClick} displayName={displayName} theme={theme} toggleTheme={toggleTheme} />
       </div>
@@ -1750,27 +1757,34 @@ function AccountDetail({ account, transactions, categories, onBack, reload, setS
   );
 }
 
-function Accounts({ setScreen, accounts, transactions, onOpenAccount, onAddClick, displayName, theme, toggleTheme }) {
+function Accounts({ setScreen, accounts, transactions, onOpenAccount, reload, onAddClick, displayName, theme, toggleTheme }) {
+  const [showCreate, setShowCreate] = useState(false);
   const totalBalance = accounts.reduce((s, a) => s + accountBalance(a, transactions), 0);
   return (
     <div className="min-h-screen bg-gradient-to-b from-violet-400 via-fuchsia-200 to-orange-100 flex justify-center md:pl-64 md:pt-20">
       <div className="w-full max-w-sm md:max-w-2xl lg:max-w-3xl min-h-screen pb-28 md:pb-10 md:pt-4 relative">
-        <div className="px-5 pt-8 flex items-center gap-3">
-          <button onClick={() => setScreen('dashboard')} className="w-9 h-9 rounded-full bg-white/30 backdrop-blur flex items-center justify-center"><ArrowLeft size={18} className="text-white" /></button>
-          <h1 className="text-white text-lg font-semibold">Quản lý ví</h1>
+        <div className="px-5 pt-8 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <button onClick={() => setScreen('dashboard')} className="w-9 h-9 rounded-full bg-white/30 backdrop-blur flex items-center justify-center"><ArrowLeft size={18} className="text-white" /></button>
+            <h1 className="text-white text-lg font-semibold">Quản lý ví</h1>
+          </div>
+          <button onClick={() => setShowCreate(true)} className="w-9 h-9 rounded-full bg-white/30 backdrop-blur flex items-center justify-center"><Plus size={18} className="text-white" /></button>
         </div>
         <div className="px-5 mt-4 text-center"><p className="text-white/80 text-sm">Tổng tất cả tài khoản</p><p className="text-white text-3xl font-bold">{formatMoney(totalBalance)}</p></div>
         <div className="mt-6 bg-white rounded-t-[2.5rem] min-h-[70vh] px-5 pt-6 pb-6">
-          <div className="flex flex-col gap-3 md:grid md:grid-cols-2">
-            {accounts.map((acc) => (
-              <button key={acc.id} onClick={() => onOpenAccount(acc.id, 'accounts')} className="flex items-center gap-3 bg-gray-50 rounded-2xl p-4 text-left hover:bg-gray-100 transition">
-                <EmojiCircle emoji={acc.icon} size={44} bg="#ede9fe" />
-                <div className="flex-1 min-w-0"><p className="text-gray-900 font-medium text-sm">{acc.name}</p><p className="text-gray-400 text-xs capitalize">{ACCOUNT_TYPES.find((t) => t.value === acc.type)?.label || acc.type}</p></div>
-                <p className="text-gray-900 font-semibold">{formatMoney(accountBalance(acc, transactions))}</p>
-              </button>
-            ))}
-          </div>
+          {accounts.length === 0 ? <p className="text-gray-400 text-sm text-center py-10">Chưa có ví nào. Bấm + để thêm ví đầu tiên.</p> : (
+            <div className="flex flex-col gap-3 md:grid md:grid-cols-2">
+              {accounts.map((acc) => (
+                <button key={acc.id} onClick={() => onOpenAccount(acc.id, 'accounts')} className="flex items-center gap-3 bg-gray-50 rounded-2xl p-4 text-left hover:bg-gray-100 transition">
+                  <EmojiCircle emoji={acc.icon} size={44} bg="#ede9fe" />
+                  <div className="flex-1 min-w-0"><p className="text-gray-900 font-medium text-sm">{acc.name}</p><p className="text-gray-400 text-xs capitalize">{ACCOUNT_TYPES.find((t) => t.value === acc.type)?.label || acc.type}</p></div>
+                  <p className="text-gray-900 font-semibold">{formatMoney(accountBalance(acc, transactions))}</p>
+                </button>
+              ))}
+            </div>
+          )}
         </div>
+        {showCreate && <EditAccountModal onClose={() => setShowCreate(false)} onSaved={reload} isNew={true} />}
         <BottomNav screen="accounts" setScreen={setScreen} onAddClick={onAddClick} displayName={displayName} theme={theme} toggleTheme={toggleTheme} />
       </div>
     </div>
@@ -2049,7 +2063,7 @@ function MainApp({ user, theme, toggleTheme }) {
   if (screen === 'funds') return <Funds setScreen={setScreen} categories={categories} transactions={transactions} onOpenFund={openFund} reload={loadAll} onAddClick={() => setShowAdd(true)} displayName={displayName} theme={theme} toggleTheme={toggleTheme} />;
   if (screen === 'report') return <><Report setScreen={setScreen} onAddClick={() => setShowAdd(true)} displayName={displayName} theme={theme} toggleTheme={toggleTheme} />{showAdd && <AddTransaction onClose={() => setShowAdd(false)} accounts={accounts} categories={categories} onSaved={loadAll} />}</>;
   if (screen === 'goals') return <><Goals setScreen={setScreen} goals={goals} loadingGoals={loadingGoals} reload={loadAll} onAddClick={() => setShowAdd(true)} displayName={displayName} theme={theme} toggleTheme={toggleTheme} />{showAdd && <AddTransaction onClose={() => setShowAdd(false)} accounts={accounts} categories={categories} onSaved={loadAll} />}</>;
-  if (screen === 'accounts') return <><Accounts setScreen={setScreen} accounts={accounts} transactions={transactions} onOpenAccount={openAccount} onAddClick={() => setShowAdd(true)} displayName={displayName} theme={theme} toggleTheme={toggleTheme} />{showAdd && <AddTransaction onClose={() => setShowAdd(false)} accounts={accounts} categories={categories} onSaved={loadAll} />}</>;
+  if (screen === 'accounts') return <><Accounts setScreen={setScreen} accounts={accounts} transactions={transactions} onOpenAccount={openAccount} reload={loadAll} onAddClick={() => setShowAdd(true)} displayName={displayName} theme={theme} toggleTheme={toggleTheme} />{showAdd && <AddTransaction onClose={() => setShowAdd(false)} accounts={accounts} categories={categories} onSaved={loadAll} />}</>;
   if (screen === 'settings') return <><Settings setScreen={setScreen} categories={categories} accounts={accounts} reload={loadAll} user={currentUser} onProfileUpdated={refreshUser} onAddClick={() => setShowAdd(true)} theme={theme} toggleTheme={toggleTheme} />{showAdd && <AddTransaction onClose={() => setShowAdd(false)} accounts={accounts} categories={categories} onSaved={loadAll} />}</>;
   return <><Dashboard setScreen={setScreen} transactions={transactions} categories={categories} accounts={accounts} goals={goals} loading={loading} displayName={displayName} onAddClick={() => setShowAdd(true)} theme={theme} toggleTheme={toggleTheme} onOpenFund={(id) => openFund(id, 'dashboard')} />{showAdd && <AddTransaction onClose={() => setShowAdd(false)} accounts={accounts} categories={categories} onSaved={loadAll} />}</>;
 }
