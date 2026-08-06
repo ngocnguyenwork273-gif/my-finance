@@ -242,10 +242,9 @@ function EmojiCircle({ emoji, size = 36, active = false, activeColor = '#7c3aed'
 
 const NAV_ITEMS = [
   { key: 'dashboard', icon: Home, label: 'Trang chủ' },
-  { key: 'funds', icon: PiggyBank, label: 'Quỹ' },
-  { key: 'accounts', icon: Wallet, label: 'Ví' },
+  { key: 'funds', icon: PiggyBank, label: 'Quản lý quỹ' },
+  { key: 'accounts', icon: Wallet, label: 'Quản lý ví' },
   { key: 'goals', icon: Sparkles, label: 'Mục tiêu' },
-  { key: 'report', icon: BarChart3, label: 'Báo cáo' },
   { key: 'settings', icon: SettingsIcon, label: 'Cài đặt' },
 ];
 
@@ -257,8 +256,8 @@ function BottomNav({ screen, setScreen, onAddClick, displayName, theme, toggleTh
         <button onClick={() => setScreen('dashboard')}><Home size={19} className={screen === 'dashboard' ? 'text-gray-900' : 'text-gray-300'} /></button>
         <button onClick={() => setScreen('funds')}><PiggyBank size={19} className={screen === 'funds' ? 'text-gray-900' : 'text-gray-300'} /></button>
         <button onClick={onAddClick} className="w-11 h-11 rounded-full bg-gray-900 flex items-center justify-center -mt-6 shadow-lg flex-shrink-0"><Plus size={20} className="text-white" /></button>
+        <button onClick={() => setScreen('accounts')}><Wallet size={19} className={screen === 'accounts' ? 'text-gray-900' : 'text-gray-300'} /></button>
         <button onClick={() => setScreen('goals')}><Sparkles size={19} className={screen === 'goals' ? 'text-gray-900' : 'text-gray-300'} /></button>
-        <button onClick={() => setScreen('report')}><BarChart3 size={19} className={screen === 'report' ? 'text-gray-900' : 'text-gray-300'} /></button>
         <button onClick={() => setScreen('settings')}><SettingsIcon size={19} className={screen === 'settings' ? 'text-gray-900' : 'text-gray-300'} /></button>
       </div>
 
@@ -446,7 +445,6 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
         <div className="mt-6 bg-white rounded-t-[2.5rem] min-h-[60vh] px-5 pt-6 pb-6">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-gray-900 font-semibold text-lg">Ngân sách tháng này</h2>
-            <button onClick={() => setScreen('report')} className="text-violet-600 text-sm font-medium">Xem chi tiết</button>
           </div>
           {spentByCat.length === 0 ? <p className="text-gray-400 text-sm text-center py-6">Chưa có chi tiêu nào tháng này.</p> : (
             <div className="flex items-center gap-6">
@@ -695,7 +693,6 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
           <div style={{ gridArea: 'cost' }} className="bg-white dark:bg-gray-900 rounded-3xl p-6 shadow-sm shadow-black/5 border border-gray-100 dark:border-gray-800 transition-colors">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-gray-900 dark:text-white font-semibold">Phân tích chi phí</h3>
-              <button onClick={() => setScreen('report')} className="text-emerald-600 text-xs font-medium">Chi tiết</button>
             </div>
             {spentByCat.length === 0 ? <p className="text-gray-400 dark:text-gray-500 text-sm text-center py-6">Chưa có chi tiêu nào.</p> : (
               <div className="flex flex-col items-center gap-4">
@@ -1204,38 +1201,6 @@ function Funds({ setScreen, categories, transactions, onOpenFund, reload, onAddC
 
       {showCreate && <EditFundForm onClose={() => setShowCreate(false)} onSaved={reload} isNew={true} />}
       <BottomNav screen="funds" setScreen={setScreen} onAddClick={onAddClick} displayName={displayName} theme={theme} toggleTheme={toggleTheme} />
-    </div>
-  );
-}
-
-/* ---------- Financial Report ---------- */
-
-function Report({ setScreen, onAddClick, displayName, theme, toggleTheme }) {
-  const [period, setPeriod] = useState('Monthly');
-  const periods = ['Weekly', 'Monthly', 'Quarterly', 'Yearly'];
-  const periodLabels = { Weekly: 'Tuần', Monthly: 'Tháng', Quarterly: 'Quý', Yearly: 'Năm' };
-  return (
-    <div className="min-h-screen bg-gradient-to-b from-violet-400 via-fuchsia-200 to-orange-100 flex justify-center md:pl-64 md:pt-20">
-      <div className="w-full max-w-sm md:max-w-2xl lg:max-w-3xl min-h-screen pb-28 md:pb-10 md:pt-4 relative">
-        <div className="px-5 pt-8 flex items-center justify-between">
-          <button onClick={() => setScreen('dashboard')} className="w-9 h-9 rounded-full bg-white/30 backdrop-blur flex items-center justify-center"><ArrowLeft size={18} className="text-white" /></button>
-          <h1 className="text-white text-lg font-semibold">Báo cáo tài chính</h1>
-          <button className="w-9 h-9 rounded-full bg-white/30 backdrop-blur flex items-center justify-center"><Download size={16} className="text-white" /></button>
-        </div>
-        <div className="flex flex-col items-center mt-6">
-          <Gauge limit={monthlyLimit} spent={monthlySpent} />
-          <div className="flex bg-white/30 backdrop-blur rounded-full p-1 mt-2">
-            <button className="px-4 py-1.5 rounded-full text-sm text-white/80">Tổng tài sản</button>
-            <button className="px-4 py-1.5 rounded-full text-sm bg-white text-gray-900 font-medium shadow">Chi tiêu</button>
-          </div>
-        </div>
-        <div className="mt-6 bg-white rounded-t-[2.5rem] min-h-[45vh] px-5 pt-6 pb-6">
-          <h2 className="text-gray-900 font-semibold text-lg mb-3">Tài chính</h2>
-          <div className="flex gap-2 overflow-x-auto pb-1">{periods.map((p) => <button key={p} onClick={() => setPeriod(p)} className={`px-4 py-1.5 rounded-full text-sm flex-shrink-0 ${period === p ? 'bg-gray-900 text-white font-medium' : 'bg-gray-100 text-gray-500'}`}>{periodLabels[p]}</button>)}</div>
-          <p className="text-gray-400 text-sm text-center py-8">Phần này sẽ nối dữ liệu thật ở bước tiếp theo.</p>
-        </div>
-        <BottomNav screen="report" setScreen={setScreen} onAddClick={onAddClick} displayName={displayName} theme={theme} toggleTheme={toggleTheme} />
-      </div>
     </div>
   );
 }
@@ -1995,13 +1960,11 @@ function Settings({ setScreen, categories, accounts, reload, user, onProfileUpda
         <div className="px-5 mt-4 flex gap-2">
           <button onClick={() => setSection('profile')} className={`flex-1 py-2 rounded-full text-sm font-medium ${section === 'profile' ? 'bg-white text-gray-900' : 'bg-white/30 text-white'}`}>Hồ sơ</button>
           <button onClick={() => setSection('categories')} className={`flex-1 py-2 rounded-full text-sm font-medium ${section === 'categories' ? 'bg-white text-gray-900' : 'bg-white/30 text-white'}`}>Danh mục</button>
-          <button onClick={() => setSection('accounts')} className={`flex-1 py-2 rounded-full text-sm font-medium ${section === 'accounts' ? 'bg-white text-gray-900' : 'bg-white/30 text-white'}`}>Tài khoản</button>
         </div>
 
         <div className="mt-4 bg-white rounded-t-[2.5rem] min-h-[76vh] px-5 pt-6 pb-6">
           {section === 'profile' && <ProfileSection user={user} onUpdated={onProfileUpdated} />}
           {section === 'categories' && <CategorySection categories={categories} reload={reload} />}
-          {section === 'accounts' && <AccountSection accounts={accounts} reload={reload} />}
         </div>
         <BottomNav screen="settings" setScreen={setScreen} onAddClick={onAddClick} displayName={displayName} theme={theme} toggleTheme={toggleTheme} />
       </div>
@@ -2061,7 +2024,6 @@ function MainApp({ user, theme, toggleTheme }) {
     return <><AccountDetail account={acc} transactions={transactions} categories={categories} onBack={() => setScreen(accountReturnScreen)} reload={loadAll} setScreen={setScreen} onAddClick={() => setShowAdd(true)} displayName={displayName} theme={theme} toggleTheme={toggleTheme} />{showAdd && <AddTransaction onClose={() => setShowAdd(false)} accounts={accounts} categories={categories} onSaved={loadAll} />}</>;
   }
   if (screen === 'funds') return <Funds setScreen={setScreen} categories={categories} transactions={transactions} onOpenFund={openFund} reload={loadAll} onAddClick={() => setShowAdd(true)} displayName={displayName} theme={theme} toggleTheme={toggleTheme} />;
-  if (screen === 'report') return <><Report setScreen={setScreen} onAddClick={() => setShowAdd(true)} displayName={displayName} theme={theme} toggleTheme={toggleTheme} />{showAdd && <AddTransaction onClose={() => setShowAdd(false)} accounts={accounts} categories={categories} onSaved={loadAll} />}</>;
   if (screen === 'goals') return <><Goals setScreen={setScreen} goals={goals} loadingGoals={loadingGoals} reload={loadAll} onAddClick={() => setShowAdd(true)} displayName={displayName} theme={theme} toggleTheme={toggleTheme} />{showAdd && <AddTransaction onClose={() => setShowAdd(false)} accounts={accounts} categories={categories} onSaved={loadAll} />}</>;
   if (screen === 'accounts') return <><Accounts setScreen={setScreen} accounts={accounts} transactions={transactions} onOpenAccount={openAccount} reload={loadAll} onAddClick={() => setShowAdd(true)} displayName={displayName} theme={theme} toggleTheme={toggleTheme} />{showAdd && <AddTransaction onClose={() => setShowAdd(false)} accounts={accounts} categories={categories} onSaved={loadAll} />}</>;
   if (screen === 'settings') return <><Settings setScreen={setScreen} categories={categories} accounts={accounts} reload={loadAll} user={currentUser} onProfileUpdated={refreshUser} onAddClick={() => setShowAdd(true)} theme={theme} toggleTheme={toggleTheme} />{showAdd && <AddTransaction onClose={() => setShowAdd(false)} accounts={accounts} categories={categories} onSaved={loadAll} />}</>;
