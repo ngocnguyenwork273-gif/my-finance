@@ -998,9 +998,12 @@ function FundDetail({ category, transactions, onBack, reload, setScreen, onAddCl
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-violet-400 via-fuchsia-200 to-orange-100 flex justify-center md:pl-64 md:pt-20"
-      style={category.background_url ? { backgroundImage: `linear-gradient(rgba(0,0,0,0.35),rgba(0,0,0,0.35)), url(${category.background_url})`, backgroundSize: 'cover', backgroundPosition: 'center' } : undefined}>
-      <div className="w-full max-w-sm md:max-w-2xl min-h-screen pb-28 md:pb-10 relative">
+    <div className="min-h-screen relative bg-gray-100 flex justify-center md:pl-64 md:pt-20">
+      {/* ============ BẢN ĐIỆN THOẠI (giữ nguyên) ============ */}
+      <div className="w-full max-w-sm md:hidden min-h-screen pb-28 relative"
+        style={{
+          ...(category.background_url ? { backgroundImage: `linear-gradient(rgba(0,0,0,0.35),rgba(0,0,0,0.35)), url(${category.background_url})`, backgroundSize: 'cover', backgroundPosition: 'center' } : { background: 'linear-gradient(180deg,#a78bfa,#f0abfc,#fed7aa)' }),
+        }}>
         <div className="px-5 pt-8 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <button onClick={onBack} className="w-9 h-9 rounded-full bg-white/30 backdrop-blur flex items-center justify-center"><ArrowLeft size={18} className="text-white" /></button>
@@ -1094,6 +1097,106 @@ function FundDetail({ category, transactions, onBack, reload, setScreen, onAddCl
         </div>
       </div>
 
+      {/* ============ BẢN DESKTOP/TABLET ============ */}
+      <div className="hidden md:block w-full max-w-4xl px-8 py-8">
+        <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center gap-3">
+            <button onClick={onBack} className="w-9 h-9 rounded-full bg-white flex items-center justify-center shadow-sm"><ArrowLeft size={18} className="text-gray-700" /></button>
+            <div className="flex items-center gap-3">
+              <EmojiCircle emoji={category.icon} size={40} active activeColor="#10b981" />
+              <div>
+                <h1 className="text-gray-900 text-xl font-semibold leading-tight">{category.name}</h1>
+                {category.description && <p className="text-gray-400 text-sm">{category.description}</p>}
+              </div>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <button onClick={() => setQuickMode('allocation')} className="bg-emerald-600 text-white rounded-full px-4 py-2 text-sm font-medium flex items-center gap-1.5"><TrendingUp size={15} /> Nạp quỹ</button>
+            <button onClick={() => setQuickMode('expense')} className="bg-red-500 text-white rounded-full px-4 py-2 text-sm font-medium flex items-center gap-1.5"><TrendingDown size={15} /> Rút quỹ</button>
+            <button onClick={() => setShowEdit(true)} className="w-9 h-9 rounded-full bg-white flex items-center justify-center shadow-sm"><Pencil size={15} className="text-gray-500" /></button>
+            <button onClick={handleDelete} className="w-9 h-9 rounded-full bg-white flex items-center justify-center shadow-sm"><Trash2 size={15} className="text-red-400" /></button>
+          </div>
+        </div>
+
+        {category.background_url && (
+          <div className="w-full h-40 rounded-3xl overflow-hidden mb-6">
+            <img src={category.background_url} alt="" className="w-full h-full object-cover" />
+          </div>
+        )}
+
+        <div className="grid grid-cols-3 gap-6">
+          <div className="col-span-2 flex flex-col gap-6">
+            <div className="bg-white rounded-3xl p-6 shadow-sm shadow-black/5 border border-gray-100">
+              <p className="text-gray-400 text-sm">Số dư hiện tại</p>
+              <p className="text-gray-900 text-4xl font-bold mt-1">{formatMoney(balance)}</p>
+              {accruedProfit > 1 && <p className="text-emerald-600 text-sm mt-1">Trong đó lãi cộng dồn: {formatMoney(accruedProfit)}</p>}
+              {target > 0 && (
+                <div className="mt-4">
+                  <ProgressBar pct={targetPct} colorClass="bg-emerald-500" />
+                  <p className="text-gray-400 text-xs mt-1">{formatMoney(balance)} / {formatMoney(target)} mục tiêu ({Math.round(targetPct)}%)</p>
+                </div>
+              )}
+              {rate > 0 && <p className="text-emerald-600 text-sm mt-3">Lãi suất {rate}%/năm — ước tính {formatMoney(dailyProfit)}/ngày, cộng dồn tiếp tục sinh lời</p>}
+              <div className="grid grid-cols-2 gap-3 mt-5">
+                <div className="bg-emerald-50 rounded-2xl p-4">
+                  <p className="text-emerald-600 text-xs font-medium mb-1">Tổng đã nạp</p>
+                  <p className="text-emerald-700 font-semibold">{formatMoney(totalIn)}</p>
+                </div>
+                <div className="bg-red-50 rounded-2xl p-4">
+                  <p className="text-red-500 text-xs font-medium mb-1">Tổng đã rút</p>
+                  <p className="text-red-600 font-semibold">{formatMoney(totalOut)}</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-3xl p-6 shadow-sm shadow-black/5 border border-gray-100">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-gray-900 font-semibold text-lg">Lịch sử</h2>
+                <div className="flex gap-2">
+                  {[{ key: 'all', label: 'Tất cả' }, { key: 'allocation', label: 'Nạp (Thu)' }, { key: 'expense', label: 'Chi' }, { key: 'profit', label: 'Lợi nhuận' }].map((f) => (
+                    <button key={f.key} onClick={() => setFilter(f.key)} className={`px-3 py-1.5 rounded-full text-xs flex-shrink-0 ${filter === f.key ? 'bg-gray-900 text-white font-medium' : 'bg-gray-100 text-gray-500'}`}>{f.label}</button>
+                  ))}
+                </div>
+              </div>
+              {filter === 'profit' ? (
+                rate === 0 ? <p className="text-gray-400 text-sm text-center py-8">Chưa đặt tỷ suất lợi nhuận cho quỹ này.</p> : (
+                  <div className="bg-gray-50 rounded-2xl p-5 text-center">
+                    <p className="text-gray-500 text-sm mb-1">Lợi nhuận cộng dồn đến hôm nay</p>
+                    <p className="text-gray-900 text-2xl font-bold">{formatMoney(accruedProfit)}</p>
+                    <p className="text-gray-400 text-sm mt-2">Dự kiến ngày mai: +{formatMoney(dailyProfit)}</p>
+                  </div>
+                )
+              ) : history.length === 0 ? <p className="text-gray-400 text-sm text-center py-8">Chưa có giao dịch nào.</p> : (
+                <div className="flex flex-col divide-y divide-gray-100">
+                  {history.map((tx) => (
+                    <div key={tx.id} className="flex items-center gap-3 py-3">
+                      <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${tx.type === 'allocation' ? 'bg-emerald-50' : 'bg-red-50'}`}>
+                        {tx.type === 'allocation' ? <TrendingUp size={16} className="text-emerald-600" /> : <TrendingDown size={16} className="text-red-500" />}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-gray-900 font-medium text-sm">{tx.type === 'allocation' ? 'Nạp quỹ' : 'Rút quỹ (chi tiêu)'}</p>
+                        <p className="text-gray-400 text-xs">{tx.note || new Date(tx.date || tx.created_at).toLocaleString('vi-VN')}</p>
+                      </div>
+                      <p className={`font-medium text-sm flex-shrink-0 ${tx.type === 'allocation' ? 'text-emerald-600' : 'text-red-500'}`}>{tx.type === 'allocation' ? '+' : '-'}{formatMoney(tx.amount)}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="bg-white rounded-3xl p-6 shadow-sm shadow-black/5 border border-gray-100 h-fit">
+            <h3 className="text-gray-900 font-semibold mb-4">Thông tin quỹ</h3>
+            <div className="flex flex-col gap-3 text-sm">
+              <div className="flex justify-between"><span className="text-gray-400">Mục tiêu</span><span className="text-gray-900 font-medium">{target > 0 ? formatMoney(target) : '—'}</span></div>
+              <div className="flex justify-between"><span className="text-gray-400">Lãi suất</span><span className="text-gray-900 font-medium">{rate > 0 ? `${rate}%/năm` : '—'}</span></div>
+              <div className="flex justify-between"><span className="text-gray-400">Tổng đã nạp</span><span className="text-emerald-600 font-medium">{formatMoney(totalIn)}</span></div>
+              <div className="flex justify-between"><span className="text-gray-400">Tổng đã rút</span><span className="text-red-500 font-medium">{formatMoney(totalOut)}</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       {showEdit && <EditFundForm category={category} onClose={() => setShowEdit(false)} onSaved={reload} isNew={false} />}
       {quickMode && <QuickAllocateWithdrawForm category={category} mode={quickMode} onClose={() => setQuickMode(null)} onSaved={reload} />}
       <BottomNav screen="funds" setScreen={setScreen} onAddClick={onAddClick} displayName={displayName} theme={theme} toggleTheme={toggleTheme} />
@@ -1109,7 +1212,8 @@ function Funds({ setScreen, categories, transactions, onOpenFund, reload, onAddC
   const totalFunds = funds.reduce((s, c) => s + fundBalanceWithProfit(c, transactions), 0);
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-violet-400 via-fuchsia-200 to-orange-100 md:bg-gray-100 relative flex justify-center md:pl-64 md:pt-20 transition-colors">
+    <div className="min-h-screen relative bg-gray-100 flex justify-center md:pl-64 md:pt-20 transition-colors">
+      <div className="absolute inset-0 bg-gradient-to-b from-violet-400 via-fuchsia-200 to-orange-100 md:hidden" />
       {/* ============ BẢN ĐIỆN THOẠI ============ */}
       <div className="w-full max-w-sm md:hidden min-h-screen pb-28 relative">
         <div className="px-5 pt-8 flex items-center justify-between">
@@ -1331,7 +1435,8 @@ function Goals({ setScreen, goals, loadingGoals, reload, onAddClick, displayName
   const [editingGoal, setEditingGoal] = useState(null); // goal object | 'new' | null
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-violet-400 via-fuchsia-200 to-orange-100 md:bg-gray-100 flex justify-center md:pl-64 md:pt-20 transition-colors">
+    <div className="min-h-screen relative bg-gray-100 flex justify-center md:pl-64 md:pt-20 transition-colors">
+      <div className="absolute inset-0 bg-gradient-to-b from-violet-400 via-fuchsia-200 to-orange-100 md:hidden" />
       {/* ============ BẢN ĐIỆN THOẠI ============ */}
       <div className="w-full max-w-sm md:hidden min-h-screen pb-28 relative">
         <div className="px-5 pt-8 flex items-center gap-3">
@@ -1660,8 +1765,9 @@ function AccountDetail({ account, transactions, categories, onBack, reload, setS
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-violet-400 via-fuchsia-200 to-orange-100 flex justify-center md:pl-64 md:pt-20">
-      <div className="w-full max-w-sm md:max-w-2xl min-h-screen pb-28 md:pb-10 relative">
+    <div className="min-h-screen relative bg-gray-100 flex justify-center md:pl-64 md:pt-20">
+      {/* ============ BẢN ĐIỆN THOẠI (giữ nguyên) ============ */}
+      <div className="w-full max-w-sm md:hidden min-h-screen pb-28 relative" style={{ background: 'linear-gradient(180deg,#a78bfa,#f0abfc,#fed7aa)' }}>
         <div className="px-5 pt-8 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <button onClick={onBack} className="w-9 h-9 rounded-full bg-white/30 backdrop-blur flex items-center justify-center"><ArrowLeft size={18} className="text-white" /></button>
@@ -1713,11 +1819,72 @@ function AccountDetail({ account, transactions, categories, onBack, reload, setS
             </div>
           )}
         </div>
-
-        {showAdjust && <QuickAdjustBalanceForm account={account} currentBalance={balance} onClose={() => setShowAdjust(false)} onSaved={reload} />}
-        {showEdit && <EditAccountModal account={account} onClose={() => setShowEdit(false)} onSaved={reload} />}
-        <BottomNav screen="accounts" setScreen={setScreen} onAddClick={onAddClick} displayName={displayName} theme={theme} toggleTheme={toggleTheme} />
       </div>
+
+      {/* ============ BẢN DESKTOP/TABLET ============ */}
+      <div className="hidden md:block w-full max-w-4xl px-8 py-8">
+        <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center gap-3">
+            <button onClick={onBack} className="w-9 h-9 rounded-full bg-white flex items-center justify-center shadow-sm"><ArrowLeft size={18} className="text-gray-700" /></button>
+            <div className="flex items-center gap-3">
+              <EmojiCircle emoji={account.icon} size={40} active activeColor="#10b981" />
+              <div>
+                <h1 className="text-gray-900 text-xl font-semibold leading-tight">{account.name}</h1>
+                <p className="text-gray-400 text-sm">{typeLabel}</p>
+              </div>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <button onClick={() => setShowAdjust(true)} className="bg-emerald-600 text-white rounded-full px-4 py-2 text-sm font-medium flex items-center gap-1.5"><Pencil size={14} /> Cập nhật số dư</button>
+            <button onClick={() => setShowEdit(true)} className="w-9 h-9 rounded-full bg-white flex items-center justify-center shadow-sm"><Pencil size={15} className="text-gray-500" /></button>
+            <button onClick={handleDelete} className="w-9 h-9 rounded-full bg-white flex items-center justify-center shadow-sm"><Trash2 size={15} className="text-red-400" /></button>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-3 gap-6">
+          <div className="col-span-2">
+            <div className="bg-white rounded-3xl p-6 shadow-sm shadow-black/5 border border-gray-100 mb-6">
+              <p className="text-gray-400 text-sm">Số dư hiện tại</p>
+              <p className="text-gray-900 text-4xl font-bold mt-1">{formatMoney(balance)}</p>
+            </div>
+            <div className="bg-white rounded-3xl p-6 shadow-sm shadow-black/5 border border-gray-100">
+              <h2 className="text-gray-900 font-semibold text-lg mb-4">Lịch sử</h2>
+              {history.length === 0 ? <p className="text-gray-400 text-sm text-center py-8">Chưa có giao dịch nào.</p> : (
+                <div className="flex flex-col divide-y divide-gray-100">
+                  {history.map((tx) => {
+                    const cat = categories.find((c) => c.id === tx.category_id);
+                    const isPositive = tx.type === 'income' || (tx.type === 'adjustment' && Number(tx.amount) > 0);
+                    const label = tx.type === 'adjustment' ? 'Cập nhật số dư' : (cat?.name || (tx.type === 'income' ? 'Thu nhập' : 'Chi tiêu'));
+                    return (
+                      <div key={tx.id} className="flex items-center gap-3 py-3">
+                        <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${isPositive ? 'bg-emerald-50' : 'bg-red-50'}`}>
+                          {isPositive ? <TrendingUp size={16} className="text-emerald-600" /> : <TrendingDown size={16} className="text-red-500" />}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-gray-900 font-medium text-sm">{label}</p>
+                          <p className="text-gray-400 text-xs">{tx.note || new Date(tx.date || tx.created_at).toLocaleString('vi-VN')}</p>
+                        </div>
+                        <p className={`font-medium text-sm flex-shrink-0 ${isPositive ? 'text-emerald-600' : 'text-red-500'}`}>{isPositive ? '+' : '-'}{formatMoney(Math.abs(tx.amount))}</p>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+          <div className="bg-white rounded-3xl p-6 shadow-sm shadow-black/5 border border-gray-100 h-fit">
+            <h3 className="text-gray-900 font-semibold mb-4">Thông tin tài khoản</h3>
+            <div className="flex flex-col gap-3 text-sm">
+              <div className="flex justify-between"><span className="text-gray-400">Loại</span><span className="text-gray-900 font-medium">{typeLabel}</span></div>
+              <div className="flex justify-between"><span className="text-gray-400">Số dư ban đầu</span><span className="text-gray-900 font-medium">{formatMoney(account.initial_balance || 0)}</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {showAdjust && <QuickAdjustBalanceForm account={account} currentBalance={balance} onClose={() => setShowAdjust(false)} onSaved={reload} />}
+      {showEdit && <EditAccountModal account={account} onClose={() => setShowEdit(false)} onSaved={reload} />}
+      <BottomNav screen="accounts" setScreen={setScreen} onAddClick={onAddClick} displayName={displayName} theme={theme} toggleTheme={toggleTheme} />
     </div>
   );
 }
@@ -1726,8 +1893,10 @@ function Accounts({ setScreen, accounts, transactions, onOpenAccount, reload, on
   const [showCreate, setShowCreate] = useState(false);
   const totalBalance = accounts.reduce((s, a) => s + accountBalance(a, transactions), 0);
   return (
-    <div className="min-h-screen bg-gradient-to-b from-violet-400 via-fuchsia-200 to-orange-100 flex justify-center md:pl-64 md:pt-20">
-      <div className="w-full max-w-sm md:max-w-2xl lg:max-w-3xl min-h-screen pb-28 md:pb-10 md:pt-4 relative">
+    <div className="min-h-screen relative bg-gray-100 flex justify-center md:pl-64 md:pt-20">
+      {/* ============ BẢN ĐIỆN THOẠI ============ */}
+      <div className="absolute inset-0 bg-gradient-to-b from-violet-400 via-fuchsia-200 to-orange-100 md:hidden" />
+      <div className="w-full max-w-sm md:hidden min-h-screen pb-28 relative">
         <div className="px-5 pt-8 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <button onClick={() => setScreen('dashboard')} className="w-9 h-9 rounded-full bg-white/30 backdrop-blur flex items-center justify-center"><ArrowLeft size={18} className="text-white" /></button>
@@ -1738,7 +1907,7 @@ function Accounts({ setScreen, accounts, transactions, onOpenAccount, reload, on
         <div className="px-5 mt-4 text-center"><p className="text-white/80 text-sm">Tổng tất cả tài khoản</p><p className="text-white text-3xl font-bold">{formatMoney(totalBalance)}</p></div>
         <div className="mt-6 bg-white rounded-t-[2.5rem] min-h-[70vh] px-5 pt-6 pb-6">
           {accounts.length === 0 ? <p className="text-gray-400 text-sm text-center py-10">Chưa có ví nào. Bấm + để thêm ví đầu tiên.</p> : (
-            <div className="flex flex-col gap-3 md:grid md:grid-cols-2">
+            <div className="flex flex-col gap-3">
               {accounts.map((acc) => (
                 <button key={acc.id} onClick={() => onOpenAccount(acc.id, 'accounts')} className="flex items-center gap-3 bg-gray-50 rounded-2xl p-4 text-left hover:bg-gray-100 transition">
                   <EmojiCircle emoji={acc.icon} size={44} bg="#ede9fe" />
@@ -1749,9 +1918,42 @@ function Accounts({ setScreen, accounts, transactions, onOpenAccount, reload, on
             </div>
           )}
         </div>
-        {showCreate && <EditAccountModal onClose={() => setShowCreate(false)} onSaved={reload} isNew={true} />}
-        <BottomNav screen="accounts" setScreen={setScreen} onAddClick={onAddClick} displayName={displayName} theme={theme} toggleTheme={toggleTheme} />
       </div>
+
+      {/* ============ BẢN DESKTOP/TABLET ============ */}
+      <div className="hidden md:block w-full max-w-[1200px] px-8 py-8">
+        <div className="flex items-center justify-between mb-2">
+          <div>
+            <h1 className="text-gray-900 text-2xl font-semibold">Quản lý ví</h1>
+            <p className="text-gray-400 text-sm mt-1">Tổng tất cả tài khoản: <span className="text-gray-900 font-semibold">{formatMoney(totalBalance)}</span></p>
+          </div>
+          <button onClick={() => setShowCreate(true)} className="bg-gray-900 text-white rounded-full px-5 py-2.5 text-sm font-medium flex items-center gap-2">
+            <Plus size={16} /> Thêm ví mới
+          </button>
+        </div>
+
+        {accounts.length === 0 ? (
+          <p className="text-gray-400 text-sm text-center py-16">Chưa có ví nào. Bấm "Thêm ví mới" để bắt đầu.</p>
+        ) : (
+          <div className="grid grid-cols-3 gap-5 mt-6">
+            {accounts.map((acc) => (
+              <button key={acc.id} onClick={() => onOpenAccount(acc.id, 'accounts')} className="text-left bg-white rounded-3xl p-5 shadow-sm shadow-black/5 border border-gray-100 hover:shadow-md transition">
+                <div className="flex items-center gap-3 mb-4">
+                  <EmojiCircle emoji={acc.icon} size={44} active activeColor="#10b981" />
+                  <div className="min-w-0">
+                    <p className="text-gray-900 font-semibold truncate">{acc.name}</p>
+                    <p className="text-gray-400 text-xs">{ACCOUNT_TYPES.find((t) => t.value === acc.type)?.label || acc.type}</p>
+                  </div>
+                </div>
+                <p className="text-gray-900 text-xl font-bold">{formatMoney(accountBalance(acc, transactions))}</p>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {showCreate && <EditAccountModal onClose={() => setShowCreate(false)} onSaved={reload} isNew={true} />}
+      <BottomNav screen="accounts" setScreen={setScreen} onAddClick={onAddClick} displayName={displayName} theme={theme} toggleTheme={toggleTheme} />
     </div>
   );
 }
@@ -1947,8 +2149,10 @@ function Settings({ setScreen, categories, accounts, reload, user, onProfileUpda
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-violet-400 via-fuchsia-200 to-orange-100 flex justify-center md:pl-64 md:pt-20">
-      <div className="w-full max-w-sm md:max-w-2xl lg:max-w-3xl min-h-screen pb-28 md:pb-10 md:pt-4 relative">
+    <div className="min-h-screen relative bg-gray-100 flex justify-center md:pl-64 md:pt-20">
+      {/* ============ BẢN ĐIỆN THOẠI ============ */}
+      <div className="absolute inset-0 bg-gradient-to-b from-violet-400 via-fuchsia-200 to-orange-100 md:hidden" />
+      <div className="w-full max-w-sm md:hidden min-h-screen pb-28 relative">
         <div className="px-5 pt-8 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <button onClick={() => setScreen('dashboard')} className="w-9 h-9 rounded-full bg-white/30 backdrop-blur flex items-center justify-center"><ArrowLeft size={18} className="text-white" /></button>
@@ -1966,8 +2170,27 @@ function Settings({ setScreen, categories, accounts, reload, user, onProfileUpda
           {section === 'profile' && <ProfileSection user={user} onUpdated={onProfileUpdated} />}
           {section === 'categories' && <CategorySection categories={categories} reload={reload} />}
         </div>
-        <BottomNav screen="settings" setScreen={setScreen} onAddClick={onAddClick} displayName={displayName} theme={theme} toggleTheme={toggleTheme} />
       </div>
+
+      {/* ============ BẢN DESKTOP/TABLET ============ */}
+      <div className="hidden md:block w-full max-w-3xl px-8 py-8">
+        <div className="flex items-center justify-between mb-6">
+          <h1 className="text-gray-900 text-2xl font-semibold">Cài đặt</h1>
+          <button onClick={handleLogout} className="flex items-center gap-2 bg-white text-red-500 rounded-full px-4 py-2 text-sm font-medium shadow-sm border border-gray-100"><LogOut size={15} /> Đăng xuất</button>
+        </div>
+
+        <div className="flex gap-2 mb-6">
+          <button onClick={() => setSection('profile')} className={`px-5 py-2 rounded-full text-sm font-medium ${section === 'profile' ? 'bg-gray-900 text-white' : 'bg-white text-gray-500 border border-gray-100'}`}>Hồ sơ</button>
+          <button onClick={() => setSection('categories')} className={`px-5 py-2 rounded-full text-sm font-medium ${section === 'categories' ? 'bg-gray-900 text-white' : 'bg-white text-gray-500 border border-gray-100'}`}>Danh mục</button>
+        </div>
+
+        <div className="bg-white rounded-3xl shadow-sm shadow-black/5 border border-gray-100 p-6">
+          {section === 'profile' && <ProfileSection user={user} onUpdated={onProfileUpdated} />}
+          {section === 'categories' && <CategorySection categories={categories} reload={reload} />}
+        </div>
+      </div>
+
+      <BottomNav screen="settings" setScreen={setScreen} onAddClick={onAddClick} displayName={displayName} theme={theme} toggleTheme={toggleTheme} />
     </div>
   );
 }
