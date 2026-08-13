@@ -219,6 +219,15 @@ function periodPool(transactions, periodKey) {
   const used = transactions.filter((t) => (t.type === 'allocation' || t.type === 'expense') && parsePeriodTag(t.note) === periodKey).reduce((s, t) => s + Number(t.amount), 0);
   return { total, used, remaining: total - used };
 }
+// Chuyển 1 Kỳ (vd '2026-07') thành khoảng ngày thực tế: 21 tháng trước -> 20 tháng đó
+function periodKeyToRange(periodKey) {
+  const [y, m] = periodKey.split('-').map(Number);
+  let startM = m - 1, startY = y;
+  if (startM === 0) { startM = 12; startY = y - 1; }
+  const start = new Date(startY, startM - 1, 21, 0, 0, 0);
+  const end = new Date(y, m - 1, 20, 23, 59, 59);
+  return { start, end };
+}
 
 /* ---------- Màn Đăng nhập / Đăng ký ---------- */
 
@@ -516,6 +525,10 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
   const [search, setSearch] = useState('');
   const [showAccountMenu, setShowAccountMenu] = useState(false);
   const [breakdownPeriod, setBreakdownPeriod] = useState('month'); // 'week' | 'month' | 'year'
+  const [breakdownYear, setBreakdownYear] = useState(new Date().getFullYear());
+  const [breakdownPeriodKey, setBreakdownPeriodKey] = useState(currentPeriodKey());
+  const breakdownYearOptions = Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - 2 + i);
+  const breakdownPeriodOptions = buildPeriods(breakdownYear);
   const fundCategories = categories.filter((c) => c.is_fund);
   const expenseCats = categories.filter((c) => c.type === 'expense');
   const incomeCats = categories.filter((c) => c.type === 'income');
@@ -524,26 +537,116 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
   const radius = 60, circumference = 2 * Math.PI * radius;
   let cumulative = 0;
   const palette = ['#16a34a', '#facc15', '#fb923c', '#4ade80', '#fde047', '#fdba74', '#86efac'];
+  const weekDayLabels = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'];
 
-  // Lọc giao dịch theo khoảng thời gian đã chọn (Tuần / Tháng / Năm)
-  function inBreakdownPeriod(tx) {
-    const d = new Date(tx.date || tx.created_at);
-    const now = new Date();
-    if (breakdownPeriod === 'week') { const diff = (now - d) / (1000 * 60 * 60 * 24); return diff >= 0 && diff < 7; }
-    if (breakdownPeriod === 'year') return d.getFullYear() === now.getFullYear();
-    return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+  // Các mốc thời gian (bucket) để vẽ biểu đồ cột theo danh mục — tuỳ Tuần / Tháng (Kỳ) / Năm đang chọn
+  const breakdownBuckets = (() => {
+    if (breakdownPeriod === 'week') {
+      const todayEnd = new Date(); todayEnd.setHours(23, 59, 59, 999);
+      return Array.from({ length: 7 }, (_, i) => {
+        const end = new Date(todayEnd); end.setDate(end.getDate() - (6 - i));
+        const start = new Date(end); start.setHours(0, 0, 0, 0);
+        return { label: weekDayLabels[start.getDay()], start, end };
+      });
+    }
+    if (breakdownPeriod === 'year') {
+      return Array.from({ length: 12 }, (_, i) => ({
+        label: `Th${i + 1}`,
+        start: new Date(breakdownYear, i, 1, 0, 0, 0),
+        end: new Date(breakdownYear, i + 1, 0, 23, 59, 59),
+      }));
+    }
+    // 'month' -> chia Kỳ đang chọn thành 5 đoạn gần bằng nhau (giống ảnh mẫu: 1-7, 7-14, 14-21...)
+    const { start: periodStart, end: periodEnd } = periodKeyToRange(breakdownPeriodKey);
+    const totalDays = Math.round((periodEnd - periodStart) / 86400000) + 1;
+    const chunks = 5;
+    const base = Math.floor(totalDays / chunks) || 1;
+    const cursor = new Date(periodStart);
+    const buckets = [];
+    for (let i = 0; i < chunks; i++) {
+      const daysInChunk = i === chunks - 1 ? totalDays - base * (chunks - 1) : base;
+      const start = new Date(cursor);
+      const end = new Date(cursor); end.setDate(end.getDate() + daysInChunk - 1); end.setHours(23, 59, 59, 999);
+      buckets.push({ label: `${start.getDate()}-${end.getDate()}`, start, end });
+      cursor.setDate(cursor.getDate() + daysInChunk);
+    }
+    return buckets;
+  })();
+
+  // Tổng theo danh mục, chia theo từng bucket thời gian ở trên — dùng để vẽ biểu đồ cột nhóm
+  function buildCategorySeries(cats, txType) {
+    return cats
+      .map((c) => {
+        const catTx = transactions.filter((t) => t.category_id === c.id && t.type === txType);
+        const values = breakdownBuckets.map((b) => catTx.filter((t) => { const d = new Date(t.date || t.created_at); return d >= b.start && d <= b.end; }).reduce((s, t) => s + Number(t.amount), 0));
+        return { ...c, values, total: values.reduce((s, v) => s + v, 0) };
+      })
+      .filter((c) => c.total > 0)
+      .sort((a, b) => b.total - a.total);
   }
-  const periodTx = transactions.filter(inBreakdownPeriod);
-  const incomeBreakdown = incomeCats
-    .map((c) => ({ ...c, amount: periodTx.filter((t) => t.category_id === c.id && t.type === 'income').reduce((s, t) => s + Number(t.amount), 0) }))
-    .filter((c) => c.amount > 0)
-    .sort((a, b) => b.amount - a.amount);
-  const expenseBreakdown = expenseCats
-    .map((c) => ({ ...c, amount: periodTx.filter((t) => t.category_id === c.id && t.type === 'expense').reduce((s, t) => s + Number(t.amount), 0) }))
-    .filter((c) => c.amount > 0)
-    .sort((a, b) => b.amount - a.amount);
-  const maxIncomeCat = Math.max(...incomeBreakdown.map((c) => c.amount), 1);
-  const maxExpenseCat = Math.max(...expenseBreakdown.map((c) => c.amount), 1);
+  const incomeSeries = buildCategorySeries(incomeCats, 'income');
+  const expenseSeries = buildCategorySeries(expenseCats, 'expense');
+  const maxIncomeBucketVal = Math.max(...incomeSeries.flatMap((c) => c.values), 1);
+  const maxExpenseBucketVal = Math.max(...expenseSeries.flatMap((c) => c.values), 1);
+
+  // Điều khiển chọn Tuần/Tháng/Năm + Năm/Kỳ cụ thể, dùng chung cho cả 2 biểu đồ Thu nhập & Chi tiêu
+  function PeriodControls() {
+    return (
+      <div className="flex items-center gap-2 flex-wrap justify-end">
+        <div className="flex bg-gray-100 dark:bg-gray-800 rounded-full p-0.5">
+          {[{ k: 'week', l: 'Tuần' }, { k: 'month', l: 'Tháng' }, { k: 'year', l: 'Năm' }].map((p) => (
+            <button key={p.k} onClick={() => setBreakdownPeriod(p.k)} className={`px-2.5 py-1 rounded-full text-xs font-medium ${breakdownPeriod === p.k ? 'bg-white dark:bg-gray-700 shadow text-gray-900 dark:text-white' : 'text-gray-400 dark:text-gray-500'}`}>{p.l}</button>
+          ))}
+        </div>
+        {breakdownPeriod === 'year' && (
+          <select value={breakdownYear} onChange={(e) => setBreakdownYear(Number(e.target.value))} className="bg-gray-100 dark:bg-gray-800 rounded-full text-xs font-medium px-2.5 py-1.5 outline-none text-gray-600 dark:text-gray-300">
+            {breakdownYearOptions.map((y) => <option key={y} value={y}>{y}</option>)}
+          </select>
+        )}
+        {breakdownPeriod === 'month' && (
+          <>
+            <select value={breakdownYear} onChange={(e) => { const y = Number(e.target.value); setBreakdownYear(y); setBreakdownPeriodKey(`${y}-${breakdownPeriodKey.split('-')[1]}`); }} className="bg-gray-100 dark:bg-gray-800 rounded-full text-xs font-medium px-2.5 py-1.5 outline-none text-gray-600 dark:text-gray-300">
+              {breakdownYearOptions.map((y) => <option key={y} value={y}>{y}</option>)}
+            </select>
+            <select value={breakdownPeriodKey} onChange={(e) => setBreakdownPeriodKey(e.target.value)} className="bg-gray-100 dark:bg-gray-800 rounded-full text-xs font-medium px-2.5 py-1.5 outline-none text-gray-600 dark:text-gray-300">
+              {breakdownPeriodOptions.map((p) => <option key={p.key} value={p.key}>{`Kỳ ${Number(p.key.split('-')[1])}`}</option>)}
+            </select>
+          </>
+        )}
+      </div>
+    );
+  }
+
+  // Biểu đồ cột nhóm theo danh mục (mỗi danh mục 1 màu), kèm chú giải + tổng bên dưới
+  function CategoryBarChart({ series, maxVal }) {
+    if (series.length === 0) return null;
+    return (
+      <div>
+        <div className="flex items-end gap-3 overflow-x-auto pb-1" style={{ height: 130 }}>
+          {breakdownBuckets.map((b, bi) => (
+            <div key={bi} className="flex flex-col items-center justify-end h-full flex-shrink-0" style={{ minWidth: series.length * 9 + 10 }}>
+              <div className="flex items-end gap-1 h-full">
+                {series.map((c, i) => {
+                  const v = c.values[bi];
+                  return <div key={c.id} title={`${c.name}: ${formatMoney(v)}`} className="rounded-t-sm" style={{ width: 8, height: `${(v / maxVal) * 100}%`, minHeight: v > 0 ? 3 : 0, background: palette[i % palette.length] }} />;
+                })}
+              </div>
+              <span className="text-[10px] text-gray-400 dark:text-gray-500 mt-1.5 whitespace-nowrap">{b.label}</span>
+            </div>
+          ))}
+        </div>
+        <div className="flex flex-col gap-1.5 mt-4">
+          {series.map((c, i) => (
+            <div key={c.id} className="flex items-center gap-2">
+              <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: palette[i % palette.length] }} />
+              <span className="text-gray-600 dark:text-gray-300 text-xs truncate flex-1 min-w-0">{c.name}</span>
+              <span className="text-gray-900 dark:text-white text-xs font-medium flex-shrink-0">{formatMoney(c.total)}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
 
   // Tổng tài sản = tổng số dư mọi quỹ (mọi danh mục chi tiêu) + tổng số dư mọi tài khoản
   const totalFunds = expenseCats.reduce((s, c) => s + fundBalanceWithProfit(c, transactions), 0);
@@ -590,7 +693,6 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
 
   // 7 ngày gần nhất, cho biểu đồ "Số dư theo ngày"
   const last7 = Array.from({ length: 7 }, (_, i) => daysInMonth - 6 + i).filter((d) => d >= 1);
-  const weekDayLabels = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'];
 
   // Giới hạn chi tiêu tổng (tổng hạn mức các danh mục đã đặt) so với đã chi tháng này
   const totalMonthlyLimit = categories.filter((c) => c.type === 'expense' && c.monthly_limit).reduce((s, c) => s + Number(c.monthly_limit), 0);
@@ -724,41 +826,17 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
 
           {/* Thu nhập & Chi tiêu theo danh mục */}
           <div className="mt-6">
-            <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
               <h2 className="text-gray-900 dark:text-white font-semibold text-lg">Thu/chi theo danh mục</h2>
-              <div className="flex bg-gray-100 dark:bg-gray-800 rounded-full p-0.5">
-                {[{ k: 'week', l: 'Tuần' }, { k: 'month', l: 'Tháng' }, { k: 'year', l: 'Năm' }].map((p) => (
-                  <button key={p.k} onClick={() => setBreakdownPeriod(p.k)} className={`px-2.5 py-1 rounded-full text-xs font-medium ${breakdownPeriod === p.k ? 'bg-white dark:bg-gray-700 shadow text-gray-900 dark:text-white' : 'text-gray-400 dark:text-gray-500'}`}>{p.l}</button>
-                ))}
-              </div>
+              <PeriodControls />
             </div>
             <p className="text-gray-500 dark:text-gray-400 text-xs font-medium mb-2">Thu nhập</p>
-            {incomeBreakdown.length === 0 ? <p className="text-gray-400 dark:text-gray-500 text-xs mb-4">Chưa có thu nhập trong khoảng này.</p> : (
-              <div className="flex flex-col gap-2 mb-4">
-                {incomeBreakdown.map((c) => (
-                  <div key={c.id} className="flex items-center gap-2">
-                    <span className="text-base flex-shrink-0">{c.icon}</span>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center justify-between text-xs mb-0.5"><span className="text-gray-600 dark:text-gray-300 truncate">{c.name}</span><span className="text-gray-900 dark:text-white font-medium flex-shrink-0 ml-2">{formatMoney(c.amount)}</span></div>
-                      <div className="w-full h-1.5 bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden"><div className="h-full bg-emerald-500 rounded-full" style={{ width: `${(c.amount / maxIncomeCat) * 100}%` }} /></div>
-                    </div>
-                  </div>
-                ))}
-              </div>
+            {incomeSeries.length === 0 ? <p className="text-gray-400 dark:text-gray-500 text-xs mb-4">Chưa có thu nhập trong khoảng này.</p> : (
+              <div className="mb-5"><CategoryBarChart series={incomeSeries} maxVal={maxIncomeBucketVal} /></div>
             )}
             <p className="text-gray-500 dark:text-gray-400 text-xs font-medium mb-2">Chi tiêu</p>
-            {expenseBreakdown.length === 0 ? <p className="text-gray-400 dark:text-gray-500 text-xs">Chưa có chi tiêu trong khoảng này.</p> : (
-              <div className="flex flex-col gap-2">
-                {expenseBreakdown.map((c) => (
-                  <div key={c.id} className="flex items-center gap-2">
-                    <span className="text-base flex-shrink-0">{c.icon}</span>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center justify-between text-xs mb-0.5"><span className="text-gray-600 dark:text-gray-300 truncate">{c.name}</span><span className="text-gray-900 dark:text-white font-medium flex-shrink-0 ml-2">{formatMoney(c.amount)}</span></div>
-                      <div className="w-full h-1.5 bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden"><div className="h-full bg-orange-400 rounded-full" style={{ width: `${(c.amount / maxExpenseCat) * 100}%` }} /></div>
-                    </div>
-                  </div>
-                ))}
-              </div>
+            {expenseSeries.length === 0 ? <p className="text-gray-400 dark:text-gray-500 text-xs">Chưa có chi tiêu trong khoảng này.</p> : (
+              <CategoryBarChart series={expenseSeries} maxVal={maxExpenseBucketVal} />
             )}
           </div>
 
@@ -997,43 +1075,19 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
         {/* Thu nhập & Chi tiêu theo danh mục — hàng riêng bên dưới lưới chính */}
         <div className="grid grid-cols-2 gap-6 mt-6">
           <div className="bg-white dark:bg-gray-900 rounded-3xl p-6 shadow-sm shadow-black/5 border border-gray-100 dark:border-gray-800 transition-colors">
-            <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
               <h3 className="text-gray-900 dark:text-white font-semibold">Thu nhập theo danh mục</h3>
-              <div className="flex bg-gray-100 dark:bg-gray-800 rounded-full p-0.5">
-                {[{ k: 'week', l: 'Tuần' }, { k: 'month', l: 'Tháng' }, { k: 'year', l: 'Năm' }].map((p) => (
-                  <button key={p.k} onClick={() => setBreakdownPeriod(p.k)} className={`px-3 py-1 rounded-full text-xs font-medium ${breakdownPeriod === p.k ? 'bg-white dark:bg-gray-700 shadow text-gray-900 dark:text-white' : 'text-gray-400 dark:text-gray-500'}`}>{p.l}</button>
-                ))}
-              </div>
+              <PeriodControls />
             </div>
-            {incomeBreakdown.length === 0 ? <p className="text-gray-400 dark:text-gray-500 text-sm text-center py-6">Chưa có thu nhập trong khoảng này.</p> : (
-              <div className="flex flex-col gap-2.5">
-                {incomeBreakdown.map((c) => (
-                  <div key={c.id} className="flex items-center gap-2">
-                    <span className="text-base flex-shrink-0">{c.icon}</span>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center justify-between text-xs mb-1"><span className="text-gray-600 dark:text-gray-300 truncate">{c.name}</span><span className="text-gray-900 dark:text-white font-medium flex-shrink-0 ml-2">{formatMoney(c.amount)}</span></div>
-                      <div className="w-full h-2 bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden"><div className="h-full bg-emerald-500 rounded-full" style={{ width: `${(c.amount / maxIncomeCat) * 100}%` }} /></div>
-                    </div>
-                  </div>
-                ))}
-              </div>
+            {incomeSeries.length === 0 ? <p className="text-gray-400 dark:text-gray-500 text-sm text-center py-6">Chưa có thu nhập trong khoảng này.</p> : (
+              <CategoryBarChart series={incomeSeries} maxVal={maxIncomeBucketVal} />
             )}
           </div>
 
           <div className="bg-white dark:bg-gray-900 rounded-3xl p-6 shadow-sm shadow-black/5 border border-gray-100 dark:border-gray-800 transition-colors">
             <h3 className="text-gray-900 dark:text-white font-semibold mb-4">Chi tiêu theo danh mục</h3>
-            {expenseBreakdown.length === 0 ? <p className="text-gray-400 dark:text-gray-500 text-sm text-center py-6">Chưa có chi tiêu trong khoảng này.</p> : (
-              <div className="flex flex-col gap-2.5">
-                {expenseBreakdown.map((c) => (
-                  <div key={c.id} className="flex items-center gap-2">
-                    <span className="text-base flex-shrink-0">{c.icon}</span>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center justify-between text-xs mb-1"><span className="text-gray-600 dark:text-gray-300 truncate">{c.name}</span><span className="text-gray-900 dark:text-white font-medium flex-shrink-0 ml-2">{formatMoney(c.amount)}</span></div>
-                      <div className="w-full h-2 bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden"><div className="h-full bg-orange-400 rounded-full" style={{ width: `${(c.amount / maxExpenseCat) * 100}%` }} /></div>
-                    </div>
-                  </div>
-                ))}
-              </div>
+            {expenseSeries.length === 0 ? <p className="text-gray-400 dark:text-gray-500 text-sm text-center py-6">Chưa có chi tiêu trong khoảng này.</p> : (
+              <CategoryBarChart series={expenseSeries} maxVal={maxExpenseBucketVal} />
             )}
           </div>
         </div>
@@ -2550,7 +2604,7 @@ function AddTransaction({ onClose, accounts, categories, transactions, onSaved }
 
         {/* Nguồn tiền — hiện ngay dưới Quỹ/Danh mục ở mục Chi tiêu; gồm "Thu nhập" + các ví trong Quản lý ví, chỉ được chọn 1.
             Khi rút quỹ (isFundCategory), lựa chọn này cho biết tiền rút ra đi vào ví nào — nhờ đó chi tiết từng ví sẽ hiển thị đúng lịch sử rút tiền. */}
-        {type === 'expense' && selectedCategory && (
+        {type === 'expense' && (
           <div className="px-5 mt-8">
             <p className="text-gray-900 dark:text-white font-semibold text-sm mb-3">Nguồn tiền <span className="text-red-500">*</span></p>
             {isFundCategory && <p className="text-gray-400 dark:text-gray-500 text-xs mb-3">Rút từ quỹ "{activeCat.name}" — chọn thêm nơi nhận tiền để lưu vào lịch sử ví.</p>}
