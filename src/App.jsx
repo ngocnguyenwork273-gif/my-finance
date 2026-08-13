@@ -3,7 +3,8 @@ import { supabase } from './supabaseClient';
 import {
   Home, Sparkles, Plus, BarChart3, Settings as SettingsIcon, TrendingUp, TrendingDown, PiggyBank, HeartPulse,
   ArrowLeft, Download, X, Check, Loader2, Target, Wallet, Trash2, Pencil, LogOut, Mail, Lock, Search, Bell, Sun, Moon,
-  Filter, MoreHorizontal, Eye, LayoutGrid, List, ArrowUpDown, Calendar, Clock,
+  Filter, MoreHorizontal, Eye, LayoutGrid, List, ArrowUpDown, Calendar, Clock, Star,
+  ChevronDown, ChevronRight, ChevronLeft, Camera, KeyRound, UserCog, SlidersHorizontal,
 } from 'lucide-react';
 
 const monthlyLimit = 5000000;
@@ -11,6 +12,32 @@ const monthlySpent = 3420000;
 
 function formatMoney(n) {
   return Math.abs(n).toLocaleString('en-US') + 'đ';
+}
+// Bảng màu mặc định cho thẻ quỹ khi chưa có ảnh nền riêng — mỗi quỹ 1 màu xoay vòng, giống kiểu MoMo
+const FUND_CARD_GRADIENTS = [
+  'linear-gradient(135deg, #fbcfe8, #fde68a)',
+  'linear-gradient(135deg, #38bdf8, #0369a1)',
+  'linear-gradient(135deg, #fb923c, #ea580c)',
+  'linear-gradient(135deg, #a78bfa, #db2777)',
+  'linear-gradient(135deg, #34d399, #059669)',
+  'linear-gradient(135deg, #f87171, #b91c1c)',
+];
+function fundCardBackground(f, index) {
+  if (f.background_url) return `linear-gradient(rgba(0,0,0,0.18),rgba(0,0,0,0.18)), url(${f.background_url})`;
+  return FUND_CARD_GRADIENTS[index % FUND_CARD_GRADIENTS.length];
+}
+// "2 ngày trước" — dùng cho mục Hoạt động gần đây kiểu MoMo
+function relativeTime(dateStr) {
+  if (!dateStr) return '';
+  const diffMs = Date.now() - new Date(dateStr).getTime();
+  const hours = Math.floor(diffMs / 3600000);
+  if (hours < 1) return 'Vừa xong';
+  if (hours < 24) return `${hours} giờ trước`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `${days} ngày trước`;
+  const months = Math.floor(days / 30);
+  if (months < 12) return `${months} tháng trước`;
+  return `${Math.floor(months / 12)} năm trước`;
 }
 function nowForInput() {
   const d = new Date();
@@ -68,6 +95,47 @@ function fundBalanceWithProfit(category, transactions) {
   return balance;
 }
 
+// Trả về các giao dịch nạp/rút kèm "số dư sau giao dịch" tại đúng thời điểm đó
+// (đã cộng dồn lãi kép của các ngày trước đó), dùng cùng công thức với fundBalanceWithProfit
+function fundTransactionsWithBalance(category, transactions) {
+  const rate = Number(category.interest_rate || 0);
+  const dailyRate = rate / 100 / 365;
+  const txs = transactions
+    .filter((t) => t.category_id === category.id && (t.type === 'allocation' || t.type === 'expense'))
+    .sort((a, b) => new Date(a.date || a.created_at) - new Date(b.date || b.created_at));
+  if (txs.length === 0) return [];
+
+  const toDay = (d) => { const x = new Date(d); x.setHours(0, 0, 0, 0); return x; };
+  const startDate = toDay(txs[0].date || txs[0].created_at);
+  const today = toDay(new Date());
+  const yesterday = new Date(today); yesterday.setDate(yesterday.getDate() - 1);
+
+  const txsByDay = {};
+  txs.forEach((t) => {
+    const key = toDay(t.date || t.created_at).getTime();
+    (txsByDay[key] = txsByDay[key] || []).push(t);
+  });
+
+  const result = [];
+  let balance = 0;
+  const cursor = new Date(startDate);
+  while (cursor <= yesterday) {
+    (txsByDay[cursor.getTime()] || []).forEach((t) => {
+      balance += t.type === 'allocation' ? Number(t.amount) : -Number(t.amount);
+      result.push({ ...t, balanceAfter: balance });
+    });
+    if (balance > 0 && dailyRate > 0) balance *= 1 + dailyRate;
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  // Giao dịch hôm nay: cộng vào số dư, chưa tính lãi hôm nay (lãi hôm nay chỉ hiện từ ngày mai)
+  (txsByDay[today.getTime()] || []).forEach((t) => {
+    balance += t.type === 'allocation' ? Number(t.amount) : -Number(t.amount);
+    result.push({ ...t, balanceAfter: balance });
+  });
+
+  return result;
+}
+
 // Lịch sử lợi nhuận từng ngày của quỹ (mỗi ngày 1 dòng) — dùng cùng công thức lãi kép với fundBalanceWithProfit
 function fundDailyProfitHistory(category, transactions) {
   const rate = Number(category.interest_rate || 0);
@@ -116,6 +184,40 @@ function accountBalance(acc, transactions) {
       return s + Number(t.amount); // adjustment: số dương = tăng, số âm = giảm
     }, 0);
   return Number(acc.initial_balance || 0) + delta;
+}
+
+/* ---------- Kỳ thu nhập (chu kỳ 21 tháng trước -> 20 tháng này) ---------- */
+// Mọi khoản Thu nhập được gán vào 1 "Kỳ". Nạp quỹ / Chi tiêu có thể chọn rút thẳng từ
+// bể thu nhập của 1 Kỳ thay vì từ ví. Vì bảng transactions chưa có cột riêng cho Kỳ,
+// ta gắn thẻ ẩn `[KY:YYYY-MM] ` vào đầu note để lưu và truy vấn lại.
+const PERIOD_TAG_RE = /^\[KY:(\d{4}-\d{2})\]\s?/;
+function tagPeriodNote(periodKey, note) { return periodKey ? `[KY:${periodKey}] ${note || ''}`.trim() : (note || null); }
+function parsePeriodTag(note) { const m = (note || '').match(PERIOD_TAG_RE); return m ? m[1] : null; }
+function stripPeriodTag(note) { return (note || '').replace(PERIOD_TAG_RE, ''); }
+
+// Danh sách 12 Kỳ (Tháng 1 -> Tháng 12) của 1 năm, mỗi kỳ chạy từ 21 tháng trước đến 20 tháng đó
+function buildPeriods(year) {
+  return Array.from({ length: 12 }, (_, i) => {
+    const m = i + 1;
+    let startM = m - 1, startY = year;
+    if (startM === 0) { startM = 12; startY = year - 1; }
+    return {
+      key: `${year}-${String(m).padStart(2, '0')}`,
+      label: `Tháng ${m} (21/${startM} - 20/${m})`,
+    };
+  });
+}
+// Kỳ chứa ngày hôm nay (dùng làm giá trị mặc định)
+function currentPeriodKey(today = new Date()) {
+  let m = today.getMonth() + 1, y = today.getFullYear();
+  if (today.getDate() > 20) { m += 1; if (m > 12) { m = 1; y += 1; } }
+  return `${y}-${String(m).padStart(2, '0')}`;
+}
+// Tổng thu nhập đã gom, đã dùng (nạp quỹ/chi tiêu rút từ kỳ) và còn lại của 1 Kỳ
+function periodPool(transactions, periodKey) {
+  const total = transactions.filter((t) => t.type === 'income' && parsePeriodTag(t.note) === periodKey).reduce((s, t) => s + Number(t.amount), 0);
+  const used = transactions.filter((t) => (t.type === 'allocation' || t.type === 'expense') && parsePeriodTag(t.note) === periodKey).reduce((s, t) => s + Number(t.amount), 0);
+  return { total, used, remaining: total - used };
 }
 
 /* ---------- Màn Đăng nhập / Đăng ký ---------- */
@@ -287,40 +389,26 @@ const NAV_ITEMS = [
   { key: 'settings', icon: SettingsIcon, label: 'Cài đặt' },
 ];
 
-function BottomNav({ screen, setScreen, onAddClick, displayName, theme, toggleTheme }) {
-  const [showAvatarMenu, setShowAvatarMenu] = useState(false);
+function BottomNav({ screen, setScreen, onAddClick, displayName, avatarUrl, theme, toggleTheme, openSettings, sidebarCollapsed, toggleSidebar }) {
+  const [showDesktopMenu, setShowDesktopMenu] = useState(false);
 
   async function handleLogout() {
-    setShowAvatarMenu(false);
+    setShowDesktopMenu(false);
     await supabase.auth.signOut();
   }
 
   return (
     <>
-      {/* Thanh dưới cùng — chỉ hiện trên điện thoại */}
-      <div className="fixed bottom-4 left-1/2 -translate-x-1/2 w-[calc(100%-1.5rem)] max-w-sm bg-white dark:bg-gray-900 rounded-full shadow-xl shadow-black/10 px-4 py-3 flex items-center justify-between z-10 md:hidden">
-        <button onClick={() => setScreen('dashboard')}><Home size={19} className={screen === 'dashboard' ? 'text-gray-900 dark:text-white' : 'text-gray-300'} /></button>
-        <button onClick={() => setScreen('funds')}><PiggyBank size={19} className={screen === 'funds' ? 'text-gray-900 dark:text-white' : 'text-gray-300'} /></button>
+      {/* Thanh dưới cùng — chỉ hiện trên điện thoại. Chia đều 2 bên nút Thêm ở giữa. */}
+      <div className="fixed bottom-4 left-1/2 -translate-x-1/2 w-[calc(100%-1.5rem)] max-w-sm bg-white dark:bg-gray-900 rounded-full shadow-xl shadow-black/10 px-6 py-3 flex items-center justify-between z-10 md:hidden">
+        <div className="flex items-center gap-7">
+          <button onClick={() => setScreen('dashboard')}><Home size={19} className={screen === 'dashboard' ? 'text-gray-900 dark:text-white' : 'text-gray-300'} /></button>
+          <button onClick={() => setScreen('funds')}><PiggyBank size={19} className={screen === 'funds' ? 'text-gray-900 dark:text-white' : 'text-gray-300'} /></button>
+        </div>
         <button onClick={onAddClick} className="w-11 h-11 rounded-full bg-gray-900 flex items-center justify-center -mt-6 shadow-lg flex-shrink-0"><Plus size={20} className="text-white" /></button>
-        <button onClick={() => setScreen('accounts')}><Wallet size={19} className={screen === 'accounts' ? 'text-gray-900 dark:text-white' : 'text-gray-300'} /></button>
-        <button onClick={() => setScreen('goals')}><Sparkles size={19} className={screen === 'goals' ? 'text-gray-900 dark:text-white' : 'text-gray-300'} /></button>
-        <div className="relative">
-          <button onClick={() => setShowAvatarMenu((v) => !v)} className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-semibold flex-shrink-0 ${screen === 'settings' ? 'bg-gray-900 dark:bg-emerald-500 text-white' : 'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-300'}`}>
-            {(displayName || 'B')[0].toUpperCase()}
-          </button>
-          {showAvatarMenu && (
-            <>
-              <div className="fixed inset-0 z-30" onClick={() => setShowAvatarMenu(false)} />
-              <div className="absolute bottom-11 right-0 bg-white dark:bg-gray-800 rounded-2xl shadow-xl shadow-black/10 border border-gray-100 dark:border-gray-700 py-1.5 w-40 z-40">
-                <button onClick={() => { setShowAvatarMenu(false); setScreen('settings'); }} className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700">
-                  <SettingsIcon size={15} /> Cài đặt
-                </button>
-                <button onClick={handleLogout} className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-red-500 hover:bg-red-50 dark:hover:bg-gray-700">
-                  <LogOut size={15} /> Đăng xuất
-                </button>
-              </div>
-            </>
-          )}
+        <div className="flex items-center gap-7">
+          <button onClick={() => setScreen('accounts')}><Wallet size={19} className={screen === 'accounts' ? 'text-gray-900 dark:text-white' : 'text-gray-300'} /></button>
+          <button onClick={() => setScreen('goals')}><Sparkles size={19} className={screen === 'goals' ? 'text-gray-900 dark:text-white' : 'text-gray-300'} /></button>
         </div>
       </div>
 
@@ -330,41 +418,53 @@ function BottomNav({ screen, setScreen, onAddClick, displayName, theme, toggleTh
       </button>
 
       {/* Sidebar bên trái — chỉ hiện trên tablet/PC (từ md trở lên) */}
-      <div className="hidden md:flex flex-col fixed left-0 top-0 h-screen w-64 bg-white dark:bg-gray-950 border-r border-gray-100 dark:border-gray-800 px-5 py-6 z-20 transition-colors">
-        <div className="flex items-center gap-2 mb-8 px-1">
+      <div className={`hidden md:flex flex-col fixed left-0 top-0 h-screen ${sidebarCollapsed ? 'w-20 px-2' : 'w-64 px-5'} bg-white dark:bg-gray-950 border-r border-gray-100 dark:border-gray-800 py-6 z-20 transition-all duration-200`}>
+        <div className={`flex items-center mb-8 ${sidebarCollapsed ? 'justify-center px-0' : 'gap-2 px-1'}`}>
           <div className="w-9 h-9 rounded-xl bg-emerald-500 flex items-center justify-center flex-shrink-0">
             <Wallet size={17} className="text-white" />
           </div>
-          <span className="font-semibold text-gray-900 dark:text-white">MyFinance</span>
+          {!sidebarCollapsed && <span className="font-semibold text-gray-900 dark:text-white">MyFinance</span>}
         </div>
 
         <div className="flex flex-col gap-1">
           {NAV_ITEMS.map(({ key, icon: Icon, label }) => (
-            <button key={key} onClick={() => setScreen(key)}
-              className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition ${screen === key ? 'bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-400' : 'text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-900'}`}>
-              <Icon size={17} />{label}
+            <button key={key} onClick={() => setScreen(key)} title={sidebarCollapsed ? label : undefined}
+              className={`flex items-center rounded-xl text-sm font-medium transition ${sidebarCollapsed ? 'justify-center px-0 py-2.5' : 'gap-3 px-3 py-2.5'} ${screen === key ? 'bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-400' : 'text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-900'}`}>
+              <Icon size={17} />{!sidebarCollapsed && label}
             </button>
           ))}
         </div>
 
-        <div className="mt-auto flex flex-col gap-3">
-          <div className="flex items-center gap-1 bg-gray-50 dark:bg-gray-900 rounded-full p-1 self-start">
-            <button onClick={() => theme !== 'light' && toggleTheme()} className={`w-8 h-8 rounded-full flex items-center justify-center transition ${theme === 'light' ? 'bg-white dark:bg-gray-700 shadow text-gray-900 dark:text-white' : 'text-gray-400 dark:text-gray-500'}`}>
-              <Sun size={15} />
+        <div className={`mt-auto flex flex-col gap-3 ${sidebarCollapsed ? 'items-center' : ''}`}>
+          <button onClick={toggleSidebar} title={sidebarCollapsed ? 'Mở rộng menu' : 'Thu gọn menu'}
+            className={`flex items-center rounded-xl text-sm font-medium text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-900 transition ${sidebarCollapsed ? 'justify-center px-0 py-2.5 w-10' : 'gap-3 px-3 py-2.5'}`}>
+            {sidebarCollapsed ? <ChevronRight size={17} /> : <><ChevronLeft size={17} />Thu gọn</>}
+          </button>
+          {sidebarCollapsed ? (
+            <button onClick={toggleTheme} className="w-8 h-8 rounded-full flex items-center justify-center bg-gray-50 dark:bg-gray-900 text-gray-500 dark:text-gray-400">
+              {theme === 'dark' ? <Sun size={15} /> : <Moon size={15} />}
             </button>
-            <button onClick={() => theme !== 'dark' && toggleTheme()} className={`w-8 h-8 rounded-full flex items-center justify-center transition ${theme === 'dark' ? 'bg-gray-800 shadow text-white' : 'text-gray-400 dark:text-gray-500'}`}>
-              <Moon size={15} />
-            </button>
-          </div>
-          <div className="bg-gray-900 dark:bg-emerald-500/10 rounded-2xl p-4">
-            <p className="text-white dark:text-emerald-300 text-sm font-semibold mb-1">💡 Mẹo hôm nay</p>
-            <p className="text-gray-300 dark:text-emerald-200/70 text-xs">Nạp quỹ ngay khi có thu nhập để kiểm soát chi tiêu tốt hơn.</p>
-          </div>
+          ) : (
+            <div className="flex items-center gap-1 bg-gray-50 dark:bg-gray-900 rounded-full p-1 self-start">
+              <button onClick={() => theme !== 'light' && toggleTheme()} className={`w-8 h-8 rounded-full flex items-center justify-center transition ${theme === 'light' ? 'bg-white dark:bg-gray-700 shadow text-gray-900 dark:text-white' : 'text-gray-400 dark:text-gray-500'}`}>
+                <Sun size={15} />
+              </button>
+              <button onClick={() => theme !== 'dark' && toggleTheme()} className={`w-8 h-8 rounded-full flex items-center justify-center transition ${theme === 'dark' ? 'bg-gray-800 shadow text-white' : 'text-gray-400 dark:text-gray-500'}`}>
+                <Moon size={15} />
+              </button>
+            </div>
+          )}
+          {!sidebarCollapsed && (
+            <div className="bg-gray-900 dark:bg-emerald-500/10 rounded-2xl p-4">
+              <p className="text-white dark:text-emerald-300 text-sm font-semibold mb-1">💡 Mẹo hôm nay</p>
+              <p className="text-gray-300 dark:text-emerald-200/70 text-xs">Nạp quỹ ngay khi có thu nhập để kiểm soát chi tiêu tốt hơn.</p>
+            </div>
+          )}
         </div>
       </div>
 
       {/* Top bar bên trong nội dung — chỉ hiện trên tablet/PC */}
-      <div className="hidden md:flex fixed top-0 left-64 right-0 h-20 bg-white dark:bg-gray-950 border-b border-gray-100 dark:border-gray-800 items-center px-8 z-10 transition-colors">
+      <div className={`hidden md:flex fixed top-0 ${sidebarCollapsed ? 'left-20' : 'left-64'} right-0 h-20 bg-white dark:bg-gray-950 border-b border-gray-100 dark:border-gray-800 items-center px-8 z-10 transition-all duration-200`}>
         <div className="flex items-center gap-2 bg-gray-50 dark:bg-gray-900 rounded-full px-4 py-2.5 w-72">
           <Search size={16} className="text-gray-400 dark:text-gray-500" />
           <input placeholder="Tìm kiếm nhanh" className="bg-transparent outline-none text-sm flex-1" />
@@ -374,12 +474,35 @@ function BottomNav({ screen, setScreen, onAddClick, displayName, theme, toggleTh
             <Plus size={16} /> Thêm giao dịch
           </button>
           <button className="w-9 h-9 rounded-full bg-gray-50 dark:bg-gray-900 flex items-center justify-center text-gray-500 dark:text-gray-400"><Bell size={16} /></button>
-          <button onClick={() => setScreen('settings')} className="w-9 h-9 rounded-full bg-gray-50 dark:bg-gray-900 flex items-center justify-center text-gray-500 dark:text-gray-400"><SettingsIcon size={16} /></button>
-          <div className="flex items-center gap-2 pl-2">
-            <div className="w-9 h-9 rounded-full bg-emerald-50 dark:bg-emerald-500/20 flex items-center justify-center text-emerald-700 dark:text-emerald-300 font-semibold text-sm">
-              {(displayName || 'B')[0].toUpperCase()}
-            </div>
-            <span className="text-sm font-medium text-gray-900 dark:text-white">{displayName || 'Bạn'}</span>
+          <div className="relative">
+            <button onClick={() => setShowDesktopMenu((v) => !v)} className="flex items-center gap-2 pl-2 pr-2.5 py-1.5 rounded-full hover:bg-gray-50 dark:hover:bg-gray-900 transition">
+              {avatarUrl ? (
+                <img src={avatarUrl} alt="" className="w-9 h-9 rounded-full object-cover flex-shrink-0" />
+              ) : (
+                <div className="w-9 h-9 rounded-full bg-emerald-50 dark:bg-emerald-500/20 flex items-center justify-center text-emerald-700 dark:text-emerald-300 font-semibold text-sm flex-shrink-0">
+                  {(displayName || 'B')[0].toUpperCase()}
+                </div>
+              )}
+              <span className="text-sm font-medium text-gray-900 dark:text-white">{displayName || 'Bạn'}</span>
+              <ChevronDown size={14} className="text-gray-400 dark:text-gray-500" />
+            </button>
+            {showDesktopMenu && (
+              <>
+                <div className="fixed inset-0 z-30" onClick={() => setShowDesktopMenu(false)} />
+                <div className="absolute top-12 right-0 bg-white dark:bg-gray-800 rounded-2xl shadow-xl shadow-black/10 border border-gray-100 dark:border-gray-700 py-1.5 w-56 z-40">
+                  <button onClick={() => { setShowDesktopMenu(false); openSettings ? openSettings('profile') : setScreen('settings'); }} className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700">
+                    <UserCog size={15} /> Cài đặt tài khoản
+                  </button>
+                  <button onClick={() => { setShowDesktopMenu(false); openSettings ? openSettings('categories') : setScreen('settings'); }} className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700">
+                    <SlidersHorizontal size={15} /> Cài đặt hệ thống
+                  </button>
+                  <div className="h-px bg-gray-100 dark:bg-gray-700 my-1.5" />
+                  <button onClick={handleLogout} className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-red-500 hover:bg-red-50 dark:hover:bg-gray-700">
+                    <LogOut size={15} /> Đăng xuất
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       </div>
@@ -389,8 +512,9 @@ function BottomNav({ screen, setScreen, onAddClick, displayName, theme, toggleTh
 
 /* ---------- Dashboard ---------- */
 
-function Dashboard({ setScreen, transactions, categories, accounts, goals, loading, displayName, onAddClick, theme, toggleTheme, onOpenFund }) {
+function Dashboard({ setScreen, transactions, categories, accounts, goals, loading, displayName, avatarUrl, onAddClick, theme, toggleTheme, onOpenFund, openSettings, sidebarCollapsed, toggleSidebar }) {
   const [search, setSearch] = useState('');
+  const [showAccountMenu, setShowAccountMenu] = useState(false);
   const [breakdownPeriod, setBreakdownPeriod] = useState('month'); // 'week' | 'month' | 'year'
   const fundCategories = categories.filter((c) => c.is_fund);
   const expenseCats = categories.filter((c) => c.type === 'expense');
@@ -482,14 +606,35 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
   });
 
   return (
-    <div className="min-h-screen relative bg-gray-100 dark:bg-gray-950 flex justify-center md:pl-64 md:pt-20 transition-colors">
+    <div className={`min-h-screen relative bg-gray-100 dark:bg-gray-950 flex justify-center ${sidebarCollapsed ? 'md:pl-20' : 'md:pl-64'} md:pt-20 transition-colors`}>
       {/* Lớp nền gradient — chỉ hiện trên điện thoại, tách riêng để không xung đột với nền desktop */}
       <div className="absolute inset-0 bg-gradient-to-b from-violet-400 via-fuchsia-300 to-orange-100 md:hidden" />
       {/* ============ BẢN ĐIỆN THOẠI (giữ nguyên) ============ */}
       <div className="w-full max-w-sm md:hidden min-h-screen pb-28 relative">
         <div className="px-5 pt-8 flex items-center justify-between">
           <div><p className="text-white/80 text-sm">Chào bạn!</p><h1 className="text-white text-2xl font-semibold">{displayName || 'Bạn'}</h1></div>
-          <button onClick={() => setScreen('accounts')} className="w-11 h-11 rounded-full bg-white/30 backdrop-blur flex items-center justify-center text-white border border-white/40"><Wallet size={18} /></button>
+          <div className="relative">
+            <button onClick={() => setShowAccountMenu((v) => !v)} className="w-11 h-11 rounded-full bg-white/30 backdrop-blur flex items-center justify-center text-white border border-white/40 overflow-hidden">
+              {avatarUrl ? <img src={avatarUrl} alt="" className="w-full h-full object-cover" /> : <span className="font-semibold">{(displayName || 'B')[0].toUpperCase()}</span>}
+            </button>
+            {showAccountMenu && (
+              <>
+                <div className="fixed inset-0 z-30" onClick={() => setShowAccountMenu(false)} />
+                <div className="absolute top-14 right-0 bg-white dark:bg-gray-800 rounded-2xl shadow-xl shadow-black/10 border border-gray-100 dark:border-gray-700 py-1.5 w-52 z-40">
+                  <button onClick={() => { setShowAccountMenu(false); openSettings ? openSettings('profile') : setScreen('settings'); }} className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700">
+                    <UserCog size={15} /> Cài đặt tài khoản
+                  </button>
+                  <button onClick={() => { setShowAccountMenu(false); openSettings ? openSettings('categories') : setScreen('settings'); }} className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700">
+                    <SlidersHorizontal size={15} /> Cài đặt hệ thống
+                  </button>
+                  <div className="h-px bg-gray-100 dark:bg-gray-700 my-1.5" />
+                  <button onClick={async () => { setShowAccountMenu(false); await supabase.auth.signOut(); }} className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-red-500 hover:bg-red-50 dark:hover:bg-gray-700">
+                    <LogOut size={15} /> Đăng xuất
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
         </div>
         <div className="px-5 mt-4">
           <p className="text-white/70 text-xs">Tổng tài sản</p>
@@ -626,7 +771,7 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
                   return (
                     <div key={tx.id} className="flex items-center gap-3 py-3">
                       <EmojiCircle emoji={cat?.icon} size={40} bg={tx.type === 'income' ? '#ecfdf5' : '#f5f3ff'} />
-                      <div className="flex-1 min-w-0"><p className="text-gray-900 dark:text-white font-medium text-sm">{cat?.name || 'Khác'}</p><p className="text-gray-400 dark:text-gray-500 text-xs">{tx.note || new Date(tx.date || tx.created_at).toLocaleString('vi-VN')}</p></div>
+                      <div className="flex-1 min-w-0"><p className="text-gray-900 dark:text-white font-medium text-sm">{cat?.name || 'Khác'}</p><p className="text-gray-400 dark:text-gray-500 text-xs">{stripPeriodTag(tx.note) || new Date(tx.date || tx.created_at).toLocaleString('vi-VN')}</p></div>
                       <p className={`font-medium text-sm flex-shrink-0 ${tx.type === 'income' ? 'text-emerald-600' : 'text-gray-900 dark:text-white'}`}>{tx.type === 'income' ? '+' : '-'}{formatMoney(tx.amount)}</p>
                     </div>
                   );
@@ -894,7 +1039,7 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
         </div>
       </div>
 
-      <BottomNav screen="dashboard" setScreen={setScreen} onAddClick={onAddClick} displayName={displayName} theme={theme} toggleTheme={toggleTheme} />
+      <BottomNav screen="dashboard" setScreen={setScreen} onAddClick={onAddClick} displayName={displayName} avatarUrl={avatarUrl} theme={theme} toggleTheme={toggleTheme} openSettings={openSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} />
     </div>
   );
 }
@@ -1046,7 +1191,7 @@ function QuickAllocateWithdrawForm({ category, mode, onClose, onSaved }) {
   );
 }
 
-function FundDetail({ category, transactions, onBack, reload, setScreen, onAddClick, displayName, theme, toggleTheme }) {
+function FundDetail({ category, transactions, onBack, reload, setScreen, onAddClick, displayName, avatarUrl, theme, toggleTheme, openSettings, sidebarCollapsed, toggleSidebar }) {
   const [filter, setFilter] = useState('all'); // 'all' | 'allocation' | 'expense' | 'profit'
   const [showEdit, setShowEdit] = useState(false);
   const [quickMode, setQuickMode] = useState(null); // 'allocation' | 'expense' | null
@@ -1054,7 +1199,16 @@ function FundDetail({ category, transactions, onBack, reload, setScreen, onAddCl
   const allHistory = transactions
     .filter((t) => t.category_id === category.id && (t.type === 'allocation' || t.type === 'expense'))
     .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-  const history = filter === 'all' ? allHistory : filter === 'profit' ? [] : allHistory.filter((t) => t.type === filter);
+  const dailyProfitHistory = fundDailyProfitHistory(category, transactions);
+  // Giao dịch nạp/rút kèm số dư cuối tại thời điểm biến động (mới nhất trước)
+  const txsWithBalance = [...fundTransactionsWithBalance(category, transactions)]
+    .sort((a, b) => new Date(b.date || b.created_at) - new Date(a.date || a.created_at));
+  // "Tất cả" gộp chung Nạp + Rút + Lợi nhuận từng ngày, sắp theo thời gian gần nhất
+  const combinedAll = [
+    ...txsWithBalance,
+    ...dailyProfitHistory.map((d) => ({ id: `profit-${d.date.getTime()}`, type: 'profit', amount: d.profit, date: d.date.toISOString(), created_at: d.date.toISOString(), balanceAfter: d.balance })),
+  ].sort((a, b) => new Date(b.date || b.created_at) - new Date(a.date || a.created_at));
+  const history = filter === 'all' ? combinedAll : filter === 'profit' ? [] : txsWithBalance.filter((t) => t.type === filter);
 
   const balance = fundBalanceWithProfit(category, transactions);
   const principalBalance = fundBalance(category.id, transactions);
@@ -1070,7 +1224,6 @@ function FundDetail({ category, transactions, onBack, reload, setScreen, onAddCl
     .filter((t) => t.type === 'allocation')
     .sort((a, b) => new Date(a.date || a.created_at) - new Date(b.date || b.created_at))[0];
   const initialAmount = firstAllocation ? Number(firstAllocation.amount) : 0;
-  const dailyProfitHistory = fundDailyProfitHistory(category, transactions);
 
   async function handleDelete() {
     if (!confirm('Xóa quỹ này? Các giao dịch cũ vẫn giữ nguyên số tiền.')) return;
@@ -1080,79 +1233,84 @@ function FundDetail({ category, transactions, onBack, reload, setScreen, onAddCl
   }
 
   return (
-    <div className="min-h-screen relative bg-gray-100 dark:bg-gray-950 flex justify-center md:pl-64 md:pt-20 transition-colors">
-      {/* ============ BẢN ĐIỆN THOẠI (giữ nguyên) ============ */}
-      <div className="w-full max-w-sm md:hidden min-h-screen pb-28 relative"
-        style={{
-          ...(category.background_url ? { backgroundImage: `linear-gradient(rgba(0,0,0,0.35),rgba(0,0,0,0.35)), url(${category.background_url})`, backgroundSize: 'cover', backgroundPosition: 'center' } : { background: 'linear-gradient(180deg,#a78bfa,#f0abfc,#fed7aa)' }),
-        }}>
-        <div className="px-5 pt-8 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <button onClick={onBack} className="w-9 h-9 rounded-full bg-white/30 backdrop-blur flex items-center justify-center"><ArrowLeft size={18} className="text-white" /></button>
+    <div className={`min-h-screen relative bg-gray-100 dark:bg-gray-950 flex justify-center ${sidebarCollapsed ? 'md:pl-20' : 'md:pl-64'} md:pt-20 transition-colors`}>
+      {/* ============ BẢN ĐIỆN THOẠI — bố cục kiểu thẻ nổi (MoMo) ============ */}
+      <div className="w-full max-w-sm md:hidden min-h-screen pb-28 relative bg-gray-100 dark:bg-gray-950">
+        <div className="h-56 relative"
+          style={{
+            ...(category.background_url ? { backgroundImage: `linear-gradient(rgba(0,0,0,0.35),rgba(0,0,0,0.35)), url(${category.background_url})`, backgroundSize: 'cover', backgroundPosition: 'center' } : { background: 'linear-gradient(180deg,#a78bfa,#f0abfc,#fed7aa)' }),
+          }}>
+          <div className="px-5 pt-8 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <button onClick={onBack} className="w-10 h-10 rounded-full bg-black/25 backdrop-blur flex items-center justify-center"><ArrowLeft size={18} className="text-white" /></button>
+              <div className="flex items-center gap-2">
+                <EmojiCircle emoji={category.icon} size={26} active activeColor="rgba(255,255,255,0.3)" bg="rgba(255,255,255,0.3)" />
+                <h1 className="text-white text-base font-semibold">{category.name}</h1>
+              </div>
+            </div>
             <div className="flex items-center gap-2">
-              <EmojiCircle emoji={category.icon} size={28} active activeColor="rgba(255,255,255,0.3)" bg="rgba(255,255,255,0.3)" />
-              <h1 className="text-white text-lg font-semibold">{category.name}</h1>
+              <button onClick={() => setShowEdit(true)} className="w-9 h-9 rounded-full bg-black/25 backdrop-blur flex items-center justify-center"><Pencil size={15} className="text-white" /></button>
+              <button onClick={handleDelete} className="w-9 h-9 rounded-full bg-black/25 backdrop-blur flex items-center justify-center"><Trash2 size={15} className="text-white" /></button>
             </div>
           </div>
-          <div className="flex items-center gap-2">
-            <button onClick={() => setShowEdit(true)} className="w-9 h-9 rounded-full bg-white/30 backdrop-blur flex items-center justify-center"><Pencil size={15} className="text-white" /></button>
-            <button onClick={handleDelete} className="w-9 h-9 rounded-full bg-white/30 backdrop-blur flex items-center justify-center"><Trash2 size={15} className="text-white" /></button>
+          {category.description && <p className="px-5 mt-3 text-white/85 text-sm text-center">{category.description}</p>}
+        </div>
+
+        {/* Thẻ trắng nổi đè lên ảnh nền, kiểu MoMo */}
+        <div className="px-4 -mt-14 relative z-10">
+          <div className="bg-white dark:bg-gray-900 rounded-3xl shadow-xl shadow-black/10 p-5">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-gray-400 dark:text-gray-500 text-sm">Số dư quỹ</p>
+                <p className="text-gray-900 dark:text-white text-[26px] font-bold leading-tight mt-0.5 truncate">
+                  {formatMoney(balance)}
+                  {target > 0 && <span className="text-gray-300 dark:text-gray-600 text-base font-normal"> /{formatMoney(target)}</span>}
+                </p>
+              </div>
+              <div className="w-12 h-12 rounded-full ring-4 ring-amber-200 dark:ring-amber-500/20 bg-amber-50 dark:bg-amber-500/10 flex items-center justify-center text-2xl flex-shrink-0">
+                {category.icon || '🐷'}
+              </div>
+            </div>
+
+            {rate > 0 && (
+              <button onClick={() => setFilter('profit')} className="mt-3 w-full flex items-center gap-1.5 bg-pink-50 dark:bg-pink-500/10 text-pink-600 dark:text-pink-400 text-xs font-medium rounded-full pl-3 pr-2 py-2">
+                <Sparkles size={13} className="flex-shrink-0" />
+                <span className="flex-1 text-left truncate">Tổng lợi nhuận: {formatMoney(accruedProfit)} | Hôm nay: +{formatMoney(dailyProfit)}</span>
+                <ChevronRight size={14} className="flex-shrink-0" />
+              </button>
+            )}
+
+            {target > 0 && (
+              <div className="mt-3">
+                <ProgressBar pct={targetPct} colorClass="bg-pink-500" />
+                <p className="text-gray-400 dark:text-gray-500 text-xs mt-1">{Math.round(targetPct)}% mục tiêu</p>
+              </div>
+            )}
+
+            <div className="flex items-center gap-3 mt-4">
+              <button onClick={() => setQuickMode('allocation')} className="flex-1 flex items-center justify-center gap-1.5 bg-pink-50 dark:bg-pink-500/10 text-pink-600 dark:text-pink-400 rounded-2xl py-3 text-sm font-semibold">
+                <TrendingUp size={16} /> Góp quỹ
+              </button>
+              <button onClick={() => setQuickMode('expense')} className="flex-1 flex items-center justify-center gap-1.5 bg-pink-50 dark:bg-pink-500/10 text-pink-600 dark:text-pink-400 rounded-2xl py-3 text-sm font-semibold">
+                <Wallet size={16} /> Rút quỹ
+              </button>
+            </div>
           </div>
         </div>
 
-        {category.description && <p className="px-5 mt-3 text-white/80 text-sm text-center">{category.description}</p>}
-
-        <div className="px-5 mt-4 text-center">
-          <p className="text-white/70 text-sm">Số dư hiện tại</p>
-          <p className="text-white text-4xl font-bold">{formatMoney(balance)}</p>
-          {accruedProfit > 1 && <p className="text-white/70 text-xs mt-1">Trong đó lãi cộng dồn: {formatMoney(accruedProfit)}</p>}
-          {target > 0 && (
-            <div className="max-w-xs mx-auto mt-3">
-              <ProgressBar pct={targetPct} colorClass="bg-white" />
-              <p className="text-white/80 text-xs mt-1">{formatMoney(balance)} / {formatMoney(target)} mục tiêu ({Math.round(targetPct)}%)</p>
-            </div>
-          )}
-          {rate > 0 && (
-            <p className="text-white/80 text-sm mt-2">
-              Lãi suất {rate}%/năm — ước tính <span className="font-semibold">{formatMoney(dailyProfit)}</span>/ngày, cộng dồn tiếp tục sinh lời
-            </p>
-          )}
-
-          <div className="flex items-center justify-center gap-3 mt-4">
-            <button onClick={() => setQuickMode('allocation')} className="bg-white text-emerald-600 rounded-full px-5 py-2.5 text-sm font-semibold flex items-center gap-1.5 shadow-lg">
-              <TrendingUp size={15} /> Nạp quỹ
-            </button>
-            <button onClick={() => setQuickMode('expense')} className="bg-white text-red-500 rounded-full px-5 py-2.5 text-sm font-semibold flex items-center gap-1.5 shadow-lg">
-              <TrendingDown size={15} /> Rút quỹ
-            </button>
-          </div>
-        </div>
-
-        <div className="mt-6 bg-white dark:bg-gray-900 rounded-t-[2.5rem] min-h-[65vh] px-5 pt-6 pb-6">
-          <div className="bg-gray-50 dark:bg-gray-800 rounded-2xl p-4 mb-3">
-            <p className="text-gray-400 dark:text-gray-500 text-xs font-medium mb-1">Số tiền ban đầu</p>
-            <p className="text-gray-900 dark:text-white font-semibold">{initialAmount > 0 ? formatMoney(initialAmount) : '—'}</p>
-          </div>
-          <div className="grid grid-cols-2 gap-3 mb-4">
-            <div className="bg-emerald-50 rounded-2xl p-4">
-              <p className="text-emerald-600 text-xs font-medium mb-1">Tổng đã nạp</p>
-              <p className="text-emerald-700 font-semibold">{formatMoney(totalIn)}</p>
-            </div>
-            <div className="bg-red-50 rounded-2xl p-4">
-              <p className="text-red-500 text-xs font-medium mb-1">Tổng đã rút</p>
-              <p className="text-red-600 font-semibold">{formatMoney(totalOut)}</p>
-            </div>
-          </div>
+        {/* Hoạt động gần đây */}
+        <div className="px-5 mt-6">
+          <h2 className="text-gray-900 dark:text-white font-semibold text-lg mb-3">Hoạt động gần đây</h2>
 
           <div className="flex gap-2 overflow-x-auto pb-1 mb-4">
-            {[{ key: 'all', label: 'Tất cả' }, { key: 'allocation', label: 'Nạp (Thu)' }, { key: 'expense', label: 'Chi' }, { key: 'profit', label: 'Lợi nhuận' }].map((f) => (
-              <button key={f.key} onClick={() => setFilter(f.key)} className={`px-4 py-1.5 rounded-full text-sm flex-shrink-0 ${filter === f.key ? 'bg-gray-900 text-white font-medium' : 'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400'}`}>{f.label}</button>
+            {[{ key: 'all', label: 'Tất cả' }, { key: 'allocation', label: 'Góp quỹ' }, { key: 'expense', label: 'Rút quỹ' }, { key: 'profit', label: 'Lợi nhuận' }].map((f) => (
+              <button key={f.key} onClick={() => setFilter(f.key)} className={`px-4 py-1.5 rounded-full text-sm flex-shrink-0 ${filter === f.key ? 'bg-gray-900 dark:bg-pink-600 text-white font-medium' : 'bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400 shadow-sm shadow-black/5'}`}>{f.label}</button>
             ))}
           </div>
 
           {filter === 'profit' ? (
             rate === 0 ? <p className="text-gray-400 dark:text-gray-500 text-sm text-center py-8">Chưa đặt tỷ suất lợi nhuận cho quỹ này. Bấm ✏️ để đặt.</p> : (
-              <div className="bg-gray-50 dark:bg-gray-800 rounded-2xl p-5 text-center">
+              <div className="bg-white dark:bg-gray-900 rounded-2xl p-5 text-center shadow-sm shadow-black/5">
                 <p className="text-gray-500 dark:text-gray-400 text-sm mb-1">Lợi nhuận cộng dồn đến hôm nay</p>
                 <p className="text-gray-900 dark:text-white text-2xl font-bold">{formatMoney(accruedProfit)}</p>
                 <p className="text-gray-400 dark:text-gray-500 text-sm mt-2">Dự kiến ngày mai: +{formatMoney(dailyProfit)}</p>
@@ -1163,8 +1321,8 @@ function FundDetail({ category, transactions, onBack, reload, setScreen, onAddCl
                     <div className="flex flex-col divide-y divide-gray-100 dark:divide-gray-800 max-h-72 overflow-y-auto">
                       {dailyProfitHistory.map((d) => (
                         <div key={d.date.getTime()} className="flex items-center gap-3 py-2.5">
-                          <div className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 bg-emerald-100 dark:bg-emerald-500/10">
-                            <TrendingUp size={14} className="text-emerald-600" />
+                          <div className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 bg-amber-50 dark:bg-amber-500/10">
+                            <Sparkles size={14} className="text-amber-500" />
                           </div>
                           <div className="flex-1 min-w-0 text-left">
                             <p className="text-gray-900 dark:text-white font-medium text-sm">{d.date.toLocaleDateString('vi-VN')}</p>
@@ -1178,27 +1336,49 @@ function FundDetail({ category, transactions, onBack, reload, setScreen, onAddCl
                 )}
               </div>
             )
-          ) : (
-            <>
-              <h2 className="text-gray-900 dark:text-white font-semibold text-lg mb-3">Lịch sử</h2>
-              {history.length === 0 ? <p className="text-gray-400 dark:text-gray-500 text-sm text-center py-8">Chưa có giao dịch nào.</p> : (
-                <div className="flex flex-col divide-y divide-gray-100 dark:divide-gray-800">
-                  {history.map((tx) => (
-                    <div key={tx.id} className="flex items-center gap-3 py-3">
-                      <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${tx.type === 'allocation' ? 'bg-emerald-50' : 'bg-red-50'}`}>
-                        {tx.type === 'allocation' ? <TrendingUp size={16} className="text-emerald-600" /> : <TrendingDown size={16} className="text-red-500" />}
+          ) : history.length === 0 ? <p className="text-gray-400 dark:text-gray-500 text-sm text-center py-8">Chưa có giao dịch nào.</p> : (
+            <div className="flex flex-col gap-2.5">
+              {history.map((tx) => {
+                const isProfit = tx.type === 'profit';
+                const isAlloc = tx.type === 'allocation';
+                const label = isAlloc ? 'Góp quỹ' : isProfit ? 'Lợi nhuận' : 'Rút quỹ';
+                const iconBg = isAlloc ? 'bg-emerald-50 dark:bg-emerald-500/10' : isProfit ? 'bg-amber-50 dark:bg-amber-500/10' : 'bg-red-50 dark:bg-red-500/10';
+                const amountColor = tx.type === 'expense' ? 'text-red-500' : 'text-emerald-600';
+                return (
+                  <div key={tx.id} className="bg-white dark:bg-gray-900 rounded-2xl p-4 shadow-sm shadow-black/5">
+                    <div className="flex items-center gap-3">
+                      <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${iconBg}`}>
+                        {isAlloc ? <TrendingUp size={16} className="text-emerald-600" /> : isProfit ? <Sparkles size={16} className="text-amber-500" /> : <TrendingDown size={16} className="text-red-500" />}
                       </div>
                       <div className="flex-1 min-w-0">
-                        <p className="text-gray-900 dark:text-white font-medium text-sm">{tx.type === 'allocation' ? 'Nạp quỹ' : 'Rút quỹ (chi tiêu)'}</p>
-                        <p className="text-gray-400 dark:text-gray-500 text-xs">{tx.note || new Date(tx.date || tx.created_at).toLocaleString('vi-VN')}</p>
+                        <p className="text-gray-400 dark:text-gray-500 text-xs">{relativeTime(tx.date || tx.created_at)}</p>
+                        <p className="text-gray-900 dark:text-white font-medium text-sm">{label}</p>
                       </div>
-                      <p className={`font-medium text-sm flex-shrink-0 ${tx.type === 'allocation' ? 'text-emerald-600' : 'text-red-500'}`}>{tx.type === 'allocation' ? '+' : '-'}{formatMoney(tx.amount)}</p>
+                      <p className={`font-semibold text-sm flex-shrink-0 ${amountColor}`}>{tx.type === 'expense' ? '-' : '+'}{formatMoney(tx.amount)}</p>
                     </div>
-                  ))}
-                </div>
-              )}
-            </>
+                    {stripPeriodTag(tx.note) && <p className="text-gray-400 dark:text-gray-500 text-xs mt-2 pl-[52px] truncate">{stripPeriodTag(tx.note)}</p>}
+                    {tx.balanceAfter !== undefined && <p className="text-gray-400 dark:text-gray-500 text-xs mt-1 pl-[52px]">Số dư: {formatMoney(tx.balanceAfter)}</p>}
+                  </div>
+                );
+              })}
+            </div>
           )}
+
+          {/* Thông tin bổ sung */}
+          <div className="bg-white dark:bg-gray-900 rounded-2xl p-4 mt-5 shadow-sm shadow-black/5">
+            <p className="text-gray-400 dark:text-gray-500 text-xs font-medium mb-1">Số tiền ban đầu</p>
+            <p className="text-gray-900 dark:text-white font-semibold">{initialAmount > 0 ? formatMoney(initialAmount) : '—'}</p>
+          </div>
+          <div className="grid grid-cols-2 gap-3 mt-3">
+            <div className="bg-emerald-50 rounded-2xl p-4">
+              <p className="text-emerald-600 text-xs font-medium mb-1">Tổng đã nạp</p>
+              <p className="text-emerald-700 font-semibold">{formatMoney(totalIn)}</p>
+            </div>
+            <div className="bg-red-50 rounded-2xl p-4">
+              <p className="text-red-500 text-xs font-medium mb-1">Tổng đã rút</p>
+              <p className="text-red-600 font-semibold">{formatMoney(totalOut)}</p>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -1294,14 +1474,15 @@ function FundDetail({ category, transactions, onBack, reload, setScreen, onAddCl
                 <div className="flex flex-col divide-y divide-gray-100 dark:divide-gray-800">
                   {history.map((tx) => (
                     <div key={tx.id} className="flex items-center gap-3 py-3">
-                      <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${tx.type === 'allocation' ? 'bg-emerald-50' : 'bg-red-50'}`}>
-                        {tx.type === 'allocation' ? <TrendingUp size={16} className="text-emerald-600" /> : <TrendingDown size={16} className="text-red-500" />}
+                      <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${tx.type === 'allocation' ? 'bg-emerald-50' : tx.type === 'profit' ? 'bg-amber-50 dark:bg-amber-500/10' : 'bg-red-50'}`}>
+                        {tx.type === 'allocation' ? <TrendingUp size={16} className="text-emerald-600" /> : tx.type === 'profit' ? <Sparkles size={16} className="text-amber-500" /> : <TrendingDown size={16} className="text-red-500" />}
                       </div>
                       <div className="flex-1 min-w-0">
-                        <p className="text-gray-900 dark:text-white font-medium text-sm">{tx.type === 'allocation' ? 'Nạp quỹ' : 'Rút quỹ (chi tiêu)'}</p>
-                        <p className="text-gray-400 dark:text-gray-500 text-xs">{tx.note || new Date(tx.date || tx.created_at).toLocaleString('vi-VN')}</p>
+                        <p className="text-gray-900 dark:text-white font-medium text-sm">{tx.type === 'allocation' ? 'Nạp quỹ' : tx.type === 'profit' ? 'Lợi nhuận' : 'Rút quỹ (chi tiêu)'}</p>
+                        <p className="text-gray-400 dark:text-gray-500 text-xs">{stripPeriodTag(tx.note) || new Date(tx.date || tx.created_at).toLocaleString('vi-VN')}</p>
+                        {tx.balanceAfter !== undefined && <p className="text-gray-400 dark:text-gray-500 text-xs">Số dư: {formatMoney(tx.balanceAfter)}</p>}
                       </div>
-                      <p className={`font-medium text-sm flex-shrink-0 ${tx.type === 'allocation' ? 'text-emerald-600' : 'text-red-500'}`}>{tx.type === 'allocation' ? '+' : '-'}{formatMoney(tx.amount)}</p>
+                      <p className={`font-medium text-sm flex-shrink-0 ${tx.type === 'expense' ? 'text-red-500' : 'text-emerald-600'}`}>{tx.type === 'expense' ? '-' : '+'}{formatMoney(tx.amount)}</p>
                     </div>
                   ))}
                 </div>
@@ -1324,112 +1505,393 @@ function FundDetail({ category, transactions, onBack, reload, setScreen, onAddCl
 
       {showEdit && <EditFundForm category={category} onClose={() => setShowEdit(false)} onSaved={reload} isNew={false} initialAmount={initialAmount} firstAllocation={firstAllocation} />}
       {quickMode && <QuickAllocateWithdrawForm category={category} mode={quickMode} onClose={() => setQuickMode(null)} onSaved={reload} />}
-      <BottomNav screen="funds" setScreen={setScreen} onAddClick={onAddClick} displayName={displayName} theme={theme} toggleTheme={toggleTheme} />
+      <BottomNav screen="funds" setScreen={setScreen} onAddClick={onAddClick} displayName={displayName} avatarUrl={avatarUrl} theme={theme} toggleTheme={toggleTheme} openSettings={openSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} />
     </div>
   );
 }
 
 /* ---------- Danh sách Quỹ ---------- */
 
-function Funds({ setScreen, categories, transactions, onOpenFund, reload, onAddClick, displayName, theme, toggleTheme }) {
+// Phân nhóm lãi suất quỹ (tương tự PRIORITY_TERMS của Goals) — dùng để tô màu badge & lọc
+const FUND_RATE_TIERS = [
+  { value: 'Không lãi suất', color: '#6b7280', bg: '#f3f4f6' },
+  { value: '<5%/năm', color: '#2563eb', bg: '#dbeafe' },
+  { value: '5-10%/năm', color: '#7c3aed', bg: '#ede9fe' },
+  { value: '>10%/năm', color: '#be185d', bg: '#fce7f3' },
+];
+
+function fundRateStyle(cat) {
+  const rate = Number(cat.interest_rate || 0);
+  if (rate <= 0) return FUND_RATE_TIERS[0];
+  if (rate < 5) return FUND_RATE_TIERS[1];
+  if (rate < 10) return FUND_RATE_TIERS[2];
+  return FUND_RATE_TIERS[3];
+}
+
+// Các trường có thể sắp xếp trong dropdown "Ngày tạo" trên trang Quản lý quỹ
+const FUND_SORT_FIELDS = [
+  { key: 'created', label: 'Ngày tạo', get: (c) => new Date(c.created_at || 0).getTime() },
+  { key: 'name', label: 'Tên (A-Z)', get: (c) => (c.name || '').toLowerCase() },
+  { key: 'balance', label: 'Số dư', get: (c, tx) => fundBalanceWithProfit(c, tx) },
+  { key: 'target', label: 'Số tiền mục tiêu', get: (c) => Number(c.target_amount || 0) },
+  { key: 'progress', label: 'Tiến độ mục tiêu', get: (c, tx) => (c.target_amount ? Math.min(100, (fundBalanceWithProfit(c, tx) / c.target_amount) * 100) : 0) },
+  { key: 'interest', label: 'Lãi suất', get: (c) => Number(c.interest_rate || 0) },
+];
+
+function Funds({ setScreen, categories, transactions, onOpenFund, reload, onAddClick, displayName, avatarUrl, theme, toggleTheme, openSettings, sidebarCollapsed, toggleSidebar }) {
   const [showCreate, setShowCreate] = useState(false);
+  const [editingFund, setEditingFund] = useState(null); // sửa nhanh từ menu "..."
+  const [searchTerm, setSearchTerm] = useState('');
+  const [page, setPage] = useState(1);
+  const [openMenuId, setOpenMenuId] = useState(null);
+  const [showFilterMenu, setShowFilterMenu] = useState(false);
+  const [filterTarget, setFilterTarget] = useState('all'); // 'all' | 'none' | 'set' | 'done'
+  const [filterRate, setFilterRate] = useState('all');
+  const [viewMode, setViewMode] = useState('card'); // 'card' | 'list'
+  const [sortField, setSortField] = useState('created');
+  const [sortDir, setSortDir] = useState('desc');
+  const [showSortMenu, setShowSortMenu] = useState(false);
+
   const funds = categories.filter((c) => c.type === 'expense');
   const totalFunds = funds.reduce((s, c) => s + fundBalanceWithProfit(c, transactions), 0);
+  const totalIn = funds.reduce((s, c) => s + transactions.filter((t) => t.category_id === c.id && t.type === 'allocation').reduce((a, t) => a + Number(t.amount), 0), 0);
+  const totalOut = funds.reduce((s, c) => s + transactions.filter((t) => t.category_id === c.id && t.type === 'expense').reduce((a, t) => a + Number(t.amount), 0), 0);
+
+  function fundStatus(c) {
+    const balance = fundBalanceWithProfit(c, transactions);
+    const target = Number(c.target_amount || 0);
+    if (target > 0 && balance >= target) return 'done';
+    if (target > 0) return 'set';
+    return 'none';
+  }
+  const doneCount = funds.filter((c) => fundStatus(c) === 'done').length;
+
+  const filteredFunds = funds.filter((c) => {
+    const matchesSearch = (c.name || '').toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesTarget = filterTarget === 'all' || filterTarget === fundStatus(c);
+    const rStyle = fundRateStyle(c);
+    const matchesRate = filterRate === 'all' || filterRate === rStyle.value;
+    return matchesSearch && matchesTarget && matchesRate;
+  });
+
+  const activeSortField = FUND_SORT_FIELDS.find((f) => f.key === sortField) || FUND_SORT_FIELDS[0];
+  const displayFunds = [...filteredFunds].sort((a, b) => {
+    const av = activeSortField.get(a, transactions), bv = activeSortField.get(b, transactions);
+    if (av < bv) return sortDir === 'asc' ? -1 : 1;
+    if (av > bv) return sortDir === 'asc' ? 1 : -1;
+    return 0;
+  });
+
+  const pageSize = viewMode === 'card' ? 9 : 8;
+  const totalPages = Math.max(1, Math.ceil(displayFunds.length / pageSize));
+  const currentPage = Math.min(page, totalPages);
+  const pagedFunds = displayFunds.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+
+  const editingFirstAllocation = editingFund
+    ? transactions.filter((t) => t.category_id === editingFund.id && t.type === 'allocation').sort((a, b) => new Date(a.date || a.created_at) - new Date(b.date || b.created_at))[0]
+    : null;
+  const editingInitialAmount = editingFirstAllocation ? Number(editingFirstAllocation.amount) : 0;
 
   return (
-    <div className="min-h-screen relative bg-gray-100 dark:bg-gray-950 flex justify-center md:pl-64 md:pt-20 transition-colors">
-      <div className="absolute inset-0 bg-gradient-to-b from-violet-400 via-fuchsia-200 to-orange-100 md:hidden" />
-      {/* ============ BẢN ĐIỆN THOẠI ============ */}
+    <div className={`min-h-screen relative bg-gray-100 dark:bg-gray-950 flex justify-center ${sidebarCollapsed ? 'md:pl-20' : 'md:pl-64'} md:pt-20 transition-colors`}>
+      {/* ============ BẢN ĐIỆN THOẠI — kiểu thẻ quỹ đầy màu sắc (MoMo) ============ */}
+      <div className="absolute inset-0 bg-gradient-to-b from-pink-100 via-fuchsia-50 to-white md:hidden" />
       <div className="w-full max-w-sm md:hidden min-h-screen pb-28 relative">
-        <div className="px-5 pt-8 flex items-center justify-between">
-          <h1 className="text-white text-xl font-semibold">Quản lý quỹ</h1>
-          <button onClick={() => setShowCreate(true)} className="w-10 h-10 rounded-full bg-white/30 backdrop-blur flex items-center justify-center"><Plus size={20} className="text-white" /></button>
-        </div>
-        <div className="px-5 mt-3">
-          <p className="text-white/70 text-sm">Tổng số dư mọi quỹ</p>
-          <p className="text-white text-3xl font-bold">{formatMoney(totalFunds)}</p>
+        <div className="px-5 pt-8">
+          <div className="flex items-center gap-2 bg-white rounded-2xl shadow-sm shadow-black/5 px-4 py-3">
+            <Search size={16} className="text-gray-400" />
+            <input value={searchTerm} onChange={(e) => { setSearchTerm(e.target.value); setPage(1); }} placeholder="Tìm quỹ..." className="bg-transparent outline-none text-sm flex-1 text-gray-700" />
+          </div>
         </div>
 
-        <div className="mt-6 bg-white dark:bg-gray-900 rounded-t-[2.5rem] min-h-[70vh] px-5 pt-6 pb-6">
-          {funds.length === 0 ? (
-            <p className="text-gray-400 dark:text-gray-500 text-sm text-center py-10">Chưa có quỹ nào. Bấm + để tạo quỹ đầu tiên.</p>
+        <div className="px-5 mt-5 flex items-center justify-between">
+          <h1 className="text-gray-900 text-lg font-bold">Danh sách quỹ</h1>
+          <div className="flex items-center gap-1 bg-white rounded-full shadow-sm shadow-black/5 px-1 py-1">
+            <button onClick={() => setViewMode((v) => (v === 'card' ? 'list' : 'card'))} className="flex items-center gap-1 px-2.5 py-1.5 rounded-full text-xs font-medium text-gray-600">
+              <List size={13} /> Quản lý
+            </button>
+            <span className="w-px h-4 bg-gray-200" />
+            <button onClick={() => setShowCreate(true)} className="flex items-center gap-1 px-2.5 py-1.5 rounded-full text-xs font-medium text-pink-600">
+              <Plus size={13} /> Tạo quỹ
+            </button>
+          </div>
+        </div>
+
+        <div className="px-5 mt-3 mb-4 bg-white/70 backdrop-blur rounded-2xl px-4 py-3 flex items-center justify-between">
+          <p className="text-gray-500 text-xs">Tổng số dư mọi quỹ</p>
+          <p className="text-gray-900 font-bold">{formatMoney(totalFunds)}</p>
+        </div>
+
+        <div className="px-5 flex flex-col gap-4">
+          {filteredFunds.length === 0 ? (
+            <p className="text-gray-400 text-sm text-center py-10">{funds.length === 0 ? 'Chưa có quỹ nào. Bấm "Tạo quỹ" để tạo quỹ đầu tiên.' : 'Không tìm thấy quỹ nào.'}</p>
           ) : (
-            <div className="flex flex-col gap-2">
-              {funds.map((f) => {
-                const balance = fundBalanceWithProfit(f, transactions);
-                const target = Number(f.target_amount || 0);
-                const pct = target > 0 ? Math.min(100, (balance / target) * 100) : null;
-                return (
-                  <button key={f.id} onClick={() => onOpenFund(f.id, 'funds')} className="flex items-center gap-3 bg-gray-50 dark:bg-gray-800 rounded-2xl p-3 text-left hover:bg-gray-100 dark:hover:bg-gray-800 transition">
-                    <EmojiCircle emoji={f.icon} size={40} bg="#ede9fe" />
-                    <div className="flex-1 min-w-0">
-                      <p className="text-gray-900 dark:text-white font-medium text-sm truncate">{f.name}</p>
-                      {pct !== null ? (
-                        <div className="mt-1"><ProgressBar pct={pct} /></div>
-                      ) : (
-                        <p className="text-gray-400 dark:text-gray-500 text-xs truncate">{f.description || ' '}</p>
-                      )}
+            filteredFunds.map((f, i) => {
+              const balance = fundBalanceWithProfit(f, transactions);
+              const target = Number(f.target_amount || 0);
+              return (
+                <button key={f.id} onClick={() => onOpenFund(f.id, 'funds')} className="relative w-full h-44 rounded-3xl overflow-hidden text-left shadow-sm shadow-black/10"
+                  style={{ background: fundCardBackground(f, i), backgroundSize: 'cover', backgroundPosition: 'center' }}>
+                  <span className="absolute top-3 right-3 flex items-center gap-1 bg-black/25 backdrop-blur text-white text-[11px] font-medium px-2.5 py-1 rounded-full">
+                    <Star size={11} className="fill-white" /> Chủ quỹ
+                  </span>
+                  <span className="absolute top-3 left-4 flex items-center gap-1.5 text-white font-semibold text-base drop-shadow">
+                    <span>{f.icon || '💰'}</span> {f.name}
+                  </span>
+                  <span className="absolute bottom-3 left-4 flex items-center gap-1.5">
+                    <span className="w-5 h-5 rounded bg-white/90 flex items-center justify-center text-[11px]">{f.icon || '💰'}</span>
+                    <span className="text-white font-bold text-lg drop-shadow">
+                      {formatMoney(balance)}{target > 0 && <span className="font-medium text-sm"> / {formatMoney(target)}</span>}
+                    </span>
+                  </span>
+                </button>
+              );
+            })
+          )}
+        </div>
+      </div>
+
+      {/* ============ BẢN DESKTOP/TABLET — kiểu CRM giống trang Mục tiêu ============ */}
+      <div className="hidden md:block w-full max-w-[1400px] px-8 py-8" onClick={() => { setOpenMenuId(null); setShowFilterMenu(false); setShowSortMenu(false); }}>
+        <h1 className="text-gray-900 dark:text-white text-2xl font-semibold mb-6">Quản lý quỹ</h1>
+
+        {/* 4 thẻ tổng quan */}
+        <div className="grid grid-cols-4 gap-4 mb-6">
+          <SummaryCard icon={PiggyBank} iconBg="bg-violet-500" label="Tổng số dư mọi quỹ" value={formatMoney(totalFunds)} />
+          <SummaryCard icon={TrendingUp} iconBg="bg-emerald-500" label="Tổng đã nạp" value={formatMoney(totalIn)} />
+          <SummaryCard icon={TrendingDown} iconBg="bg-rose-500" label="Tổng đã rút" value={formatMoney(totalOut)} />
+          <SummaryCard icon={Sparkles} iconBg="bg-blue-500" label="Tổng số lượng quỹ" value={funds.length} sub={`${doneCount} đã đạt mục tiêu`} />
+        </div>
+
+        <div className="bg-white dark:bg-gray-900 rounded-3xl shadow-sm shadow-black/5 border border-gray-100 dark:border-gray-800 overflow-hidden">
+          {/* Hàng 1: bộ lọc + sắp xếp + chuyển kiểu xem */}
+          <div className="flex items-center justify-between p-5 pb-3 flex-wrap gap-3">
+            <div className="flex items-center gap-2 flex-wrap">
+              {filterTarget !== 'all' && (
+                <span className="flex items-center gap-1.5 bg-violet-50 dark:bg-violet-500/10 text-violet-600 dark:text-violet-400 text-xs font-medium pl-3 pr-1.5 py-1.5 rounded-full">
+                  {filterTarget === 'done' ? 'Đã đạt mục tiêu' : filterTarget === 'set' ? 'Đang tích lũy' : 'Chưa đặt mục tiêu'}
+                  <button onClick={() => { setFilterTarget('all'); setPage(1); }} className="w-4 h-4 rounded-full hover:bg-violet-100 dark:hover:bg-violet-500/20 flex items-center justify-center"><X size={11} /></button>
+                </span>
+              )}
+              {filterRate !== 'all' && (
+                <span className="flex items-center gap-1.5 bg-violet-50 dark:bg-violet-500/10 text-violet-600 dark:text-violet-400 text-xs font-medium pl-3 pr-1.5 py-1.5 rounded-full">
+                  {filterRate}
+                  <button onClick={() => { setFilterRate('all'); setPage(1); }} className="w-4 h-4 rounded-full hover:bg-violet-100 dark:hover:bg-violet-500/20 flex items-center justify-center"><X size={11} /></button>
+                </span>
+              )}
+              {(filterTarget !== 'all' || filterRate !== 'all') && (
+                <button onClick={() => { setFilterTarget('all'); setFilterRate('all'); setPage(1); }} className="text-xs font-medium text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 underline">Reset</button>
+              )}
+              <div className="relative">
+                <button onClick={(e) => { e.stopPropagation(); setShowFilterMenu((v) => !v); setShowSortMenu(false); }} className="flex items-center gap-1.5 border border-dashed border-gray-300 dark:border-gray-700 rounded-full px-3 py-1.5 text-xs font-medium text-gray-500 dark:text-gray-400 hover:border-gray-400 dark:hover:border-gray-600">
+                  <Filter size={13} /> Thêm bộ lọc
+                </button>
+                {showFilterMenu && (
+                  <div onClick={(e) => e.stopPropagation()} className="absolute left-0 top-9 z-20 bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-800 rounded-2xl shadow-lg p-4 w-64">
+                    <p className="text-xs font-medium text-gray-400 dark:text-gray-500 mb-2">Mục tiêu quỹ</p>
+                    <div className="flex flex-wrap gap-2 mb-4">
+                      {[['all', 'Tất cả'], ['none', 'Chưa đặt'], ['set', 'Đang tích lũy'], ['done', 'Đã đạt']].map(([k, l]) => (
+                        <button key={k} onClick={() => { setFilterTarget(k); setPage(1); }} className={`px-3 py-1.5 rounded-full text-xs font-medium ${filterTarget === k ? 'bg-gray-900 dark:bg-emerald-500 text-white' : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300'}`}>{l}</button>
+                      ))}
                     </div>
-                    <p className="text-gray-900 dark:text-white font-semibold text-sm flex-shrink-0">{formatMoney(balance)}</p>
-                  </button>
-                );
-              })}
+                    <p className="text-xs font-medium text-gray-400 dark:text-gray-500 mb-2">Lãi suất</p>
+                    <div className="flex flex-col gap-1">
+                      <button onClick={() => { setFilterRate('all'); setPage(1); }} className={`text-left px-3 py-1.5 rounded-lg text-xs font-medium ${filterRate === 'all' ? 'bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-white' : 'text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'}`}>Tất cả</button>
+                      {FUND_RATE_TIERS.map((t) => (
+                        <button key={t.value} onClick={() => { setFilterRate(t.value); setPage(1); }} className={`text-left px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-2 ${filterRate === t.value ? 'bg-gray-100 dark:bg-gray-700' : 'hover:bg-gray-50 dark:hover:bg-gray-800'}`}>
+                          <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: t.color }} /> <span className="text-gray-700 dark:text-gray-300 truncate">{t.value}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <div className="relative">
+                <button onClick={(e) => { e.stopPropagation(); setShowSortMenu((v) => !v); setShowFilterMenu(false); }} className="flex items-center gap-2 border border-gray-200 dark:border-gray-700 rounded-full px-4 py-2 text-sm text-gray-600 dark:text-gray-300">
+                  <ArrowUpDown size={14} /> {activeSortField.label}
+                </button>
+                {showSortMenu && (
+                  <div onClick={(e) => e.stopPropagation()} className="absolute right-0 top-10 z-20 bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-800 rounded-2xl shadow-lg p-2 w-56">
+                    <p className="text-xs font-medium text-gray-400 dark:text-gray-500 px-2 py-1.5">Sắp xếp theo</p>
+                    {FUND_SORT_FIELDS.map((f) => (
+                      <button key={f.key} onClick={() => { setSortField((cur) => { if (cur === f.key) { setSortDir((d) => (d === 'asc' ? 'desc' : 'asc')); return cur; } setSortDir(f.key === 'created' ? 'desc' : 'asc'); return f.key; }); }}
+                        className={`w-full flex items-center justify-between px-2 py-2 rounded-lg text-sm ${sortField === f.key ? 'bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-white font-medium' : 'text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'}`}>
+                        {f.label}
+                        {sortField === f.key && <span className="text-xs">{sortDir === 'asc' ? '↑' : '↓'}</span>}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div className="flex items-center gap-1 bg-gray-100 dark:bg-gray-800 rounded-full p-1">
+                <button onClick={() => { setViewMode('card'); setPage(1); }} className={`w-8 h-8 rounded-full flex items-center justify-center ${viewMode === 'card' ? 'bg-gray-900 dark:bg-emerald-500 text-white' : 'text-gray-400 dark:text-gray-500'}`}><LayoutGrid size={15} /></button>
+                <button onClick={() => { setViewMode('list'); setPage(1); }} className={`w-8 h-8 rounded-full flex items-center justify-center ${viewMode === 'list' ? 'bg-gray-900 dark:bg-emerald-500 text-white' : 'text-gray-400 dark:text-gray-500'}`}><List size={15} /></button>
+              </div>
+            </div>
+          </div>
+
+          {/* Hàng 2: số lượng + tìm kiếm + nút thêm */}
+          <div className="flex items-center justify-between px-5 pb-4 flex-wrap gap-3">
+            <p className="text-gray-500 dark:text-gray-400 text-sm">{displayFunds.length} quỹ</p>
+            <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 bg-gray-50 dark:bg-gray-800 rounded-full px-4 py-2.5 w-56">
+                <Search size={15} className="text-gray-400 dark:text-gray-500" />
+                <input value={searchTerm} onChange={(e) => { setSearchTerm(e.target.value); setPage(1); }} placeholder="Tìm quỹ..." className="bg-transparent outline-none text-sm flex-1 dark:text-white" />
+              </div>
+              <button onClick={() => setShowCreate(true)} className="bg-violet-600 text-white rounded-full px-5 py-2.5 text-sm font-medium flex items-center gap-2 whitespace-nowrap">
+                <Plus size={16} /> Tạo quỹ mới
+              </button>
+            </div>
+          </div>
+
+          <div className="border-t border-gray-100 dark:border-gray-800">
+            {funds.length === 0 ? (
+              <p className="text-gray-400 dark:text-gray-500 text-sm text-center py-16">Chưa có quỹ nào. Bấm "Tạo quỹ mới" để bắt đầu.</p>
+            ) : displayFunds.length === 0 ? (
+              <p className="text-gray-400 dark:text-gray-500 text-sm text-center py-16">Không tìm thấy quỹ nào.</p>
+            ) : viewMode === 'card' ? (
+              /* ============ DẠNG Ô VUÔNG (thẻ) ============ */
+              <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-5 p-5">
+                {pagedFunds.map((f) => {
+                  const balance = fundBalanceWithProfit(f, transactions);
+                  const target = Number(f.target_amount || 0);
+                  const pct = target > 0 ? Math.min(100, (balance / target) * 100) : 0;
+                  const isDone = target > 0 && balance >= target;
+                  const rStyle = fundRateStyle(f);
+                  return (
+                    <div key={f.id} onClick={() => onOpenFund(f.id, 'funds')} className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-100 dark:border-gray-800 overflow-hidden shadow-sm shadow-black/5 hover:shadow-md transition cursor-pointer">
+                      <div
+                        className="relative h-24 flex items-end p-4"
+                        style={f.background_url
+                          ? { backgroundImage: `linear-gradient(rgba(0,0,0,0.15),rgba(0,0,0,0.45)), url(${f.background_url})`, backgroundSize: 'cover', backgroundPosition: 'center' }
+                          : { background: 'linear-gradient(135deg,#a78bfa,#7c3aed)' }}
+                      >
+                        <span className="text-2xl">{f.icon}</span>
+                        {isDone && (
+                          <span className="absolute top-2.5 left-2.5 flex items-center gap-1 bg-white/80 dark:bg-gray-900/80 backdrop-blur text-[11px] font-semibold px-2 py-1 rounded-full text-emerald-600">
+                            <Check size={11} /> Đã đạt mục tiêu
+                          </span>
+                        )}
+                        <button onClick={(e) => { e.stopPropagation(); setOpenMenuId(openMenuId === f.id ? null : f.id); }} className="absolute top-2.5 right-2.5 w-7 h-7 rounded-full bg-white/80 dark:bg-gray-900/80 backdrop-blur flex items-center justify-center text-gray-600 dark:text-gray-300">
+                          <MoreHorizontal size={14} />
+                        </button>
+                        {openMenuId === f.id && (
+                          <div onClick={(e) => e.stopPropagation()} className="absolute top-10 right-2.5 z-20 bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-800 rounded-xl shadow-lg py-1 w-40 text-left">
+                            <button onClick={() => { onOpenFund(f.id, 'funds'); setOpenMenuId(null); }} className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800">
+                              <Eye size={14} /> Xem chi tiết
+                            </button>
+                            <button onClick={() => { setEditingFund(f); setOpenMenuId(null); }} className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800">
+                              <Pencil size={14} /> Chỉnh sửa
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                      <div className="p-4">
+                        <h3 className="text-gray-900 dark:text-white font-semibold text-sm mb-3 line-clamp-2 min-h-[2.5rem]">{f.name}</h3>
+                        <div className="flex items-center gap-4 mb-3">
+                          <MiniRing pct={pct} color={isDone ? '#10b981' : '#7c3aed'} label="Tiến độ mục tiêu" />
+                          <div className="leading-tight">
+                            <p className="text-gray-900 dark:text-white text-sm font-semibold">{formatMoney(balance)}</p>
+                            <p className="text-gray-400 dark:text-gray-500 text-[10px]">Số dư hiện tại</p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-1.5 mb-3 flex-wrap">
+                          <span className="text-[10px] font-medium px-2 py-1 rounded-full" style={{ color: rStyle.color, background: rStyle.bg }}>{rStyle.value}</span>
+                          <span className={`text-[10px] font-medium px-2 py-1 rounded-full ${isDone ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400' : 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400'}`}>{target > 0 ? (isDone ? 'Đã đạt' : 'Đang tích lũy') : 'Chưa đặt mục tiêu'}</span>
+                        </div>
+                        <div className="flex items-center justify-between text-xs text-gray-400 dark:text-gray-500 pt-3 border-t border-gray-50 dark:border-gray-800">
+                          <span className="flex items-center gap-1"><Calendar size={12} /> {f.created_at ? new Date(f.created_at).toLocaleDateString('vi-VN') : '—'}</span>
+                          <span>{target > 0 ? formatMoney(target) : '—'}</span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              /* ============ DẠNG LƯỚI (bảng) ============ */
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm min-w-[1000px]">
+                  <thead>
+                    <tr className="text-left text-gray-400 dark:text-gray-500 border-b border-gray-100 dark:border-gray-800">
+                      <th className="p-4 font-medium">Tên quỹ</th>
+                      <th className="p-4 font-medium">Lãi suất</th>
+                      <th className="p-4 font-medium text-right">Số dư hiện tại</th>
+                      <th className="p-4 font-medium text-right">Mục tiêu</th>
+                      <th className="p-4 font-medium">Tiến độ</th>
+                      <th className="p-4 font-medium">Trạng thái</th>
+                      <th className="p-4 font-medium text-right">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {pagedFunds.map((f) => {
+                      const balance = fundBalanceWithProfit(f, transactions);
+                      const target = Number(f.target_amount || 0);
+                      const pct = target > 0 ? Math.min(100, (balance / target) * 100) : 0;
+                      const isDone = target > 0 && balance >= target;
+                      const rStyle = fundRateStyle(f);
+                      return (
+                        <tr key={f.id} onClick={() => onOpenFund(f.id, 'funds')} className="border-b border-gray-50 dark:border-gray-800 last:border-0 hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer">
+                          <td className="p-4">
+                            <div className="flex items-center gap-3">
+                              <EmojiCircle emoji={f.icon} size={36} bg="#ede9fe" />
+                              <p className="font-medium text-gray-900 dark:text-white">{f.name}</p>
+                            </div>
+                          </td>
+                          <td className="p-4">
+                            <span className="text-xs font-medium px-2 py-1 rounded-full whitespace-nowrap" style={{ color: rStyle.color, background: rStyle.bg }}>{rStyle.value}</span>
+                          </td>
+                          <td className="p-4 text-right text-gray-900 dark:text-white">{formatMoney(balance)}</td>
+                          <td className="p-4 text-right text-gray-500 dark:text-gray-400">{target > 0 ? formatMoney(target) : '—'}</td>
+                          <td className="p-4 w-32">
+                            {target > 0 ? (<><ProgressBar pct={pct} colorClass={isDone ? 'bg-emerald-500' : 'bg-violet-600'} /><p className="text-gray-400 dark:text-gray-500 text-xs mt-1">{Math.round(pct)}%</p></>) : <span className="text-gray-300">—</span>}
+                          </td>
+                          <td className="p-4">
+                            <span className={`text-xs font-medium px-2 py-1 rounded-full ${isDone ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400' : 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400'}`}>{target > 0 ? (isDone ? 'Đã đạt' : 'Đang tích lũy') : 'Chưa đặt mục tiêu'}</span>
+                          </td>
+                          <td className="p-4 text-right relative">
+                            <button onClick={(e) => { e.stopPropagation(); setOpenMenuId(openMenuId === f.id ? null : f.id); }} className="w-8 h-8 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 inline-flex items-center justify-center text-gray-400 dark:text-gray-500">
+                              <MoreHorizontal size={18} />
+                            </button>
+                            {openMenuId === f.id && (
+                              <div onClick={(e) => e.stopPropagation()} className="absolute right-4 top-12 z-20 bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-800 rounded-xl shadow-lg py-1 w-40 text-left">
+                                <button onClick={() => { onOpenFund(f.id, 'funds'); setOpenMenuId(null); }} className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800">
+                                  <Eye size={14} /> Xem chi tiết
+                                </button>
+                                <button onClick={() => { setEditingFund(f); setOpenMenuId(null); }} className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800">
+                                  <Pencil size={14} /> Chỉnh sửa
+                                </button>
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          {/* Phân trang */}
+          {displayFunds.length > 0 && (
+            <div className="flex items-center justify-between p-5 border-t border-gray-100 dark:border-gray-800">
+              <p className="text-gray-400 dark:text-gray-500 text-xs">Trang {currentPage} / {totalPages}</p>
+              <div className="flex gap-2">
+                <button disabled={currentPage <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))} className="px-4 py-2 rounded-full border border-gray-200 dark:border-gray-700 text-sm text-gray-600 dark:text-gray-300 disabled:opacity-40">Previous</button>
+                <button disabled={currentPage >= totalPages} onClick={() => setPage((p) => Math.min(totalPages, p + 1))} className="px-4 py-2 rounded-full bg-gray-900 text-white text-sm disabled:opacity-40">Next</button>
+              </div>
             </div>
           )}
         </div>
       </div>
 
-      {/* ============ BẢN DESKTOP/TABLET — dạng thẻ lớn, khác điện thoại ============ */}
-      <div className="hidden md:block w-full max-w-[1400px] px-8 py-8">
-        <div className="flex items-center justify-between mb-2">
-          <div>
-            <h1 className="text-gray-900 dark:text-white text-2xl font-semibold">Quản lý quỹ</h1>
-            <p className="text-gray-400 dark:text-gray-500 text-sm mt-1">Tổng số dư mọi quỹ: <span className="text-gray-900 dark:text-white font-semibold">{formatMoney(totalFunds)}</span></p>
-          </div>
-          <button onClick={() => setShowCreate(true)} className="bg-gray-900 text-white rounded-full px-5 py-2.5 text-sm font-medium flex items-center gap-2">
-            <Plus size={16} /> Tạo quỹ mới
-          </button>
-        </div>
-
-        {funds.length === 0 ? (
-          <p className="text-gray-400 dark:text-gray-500 text-sm text-center py-16">Chưa có quỹ nào. Bấm "Tạo quỹ mới" để bắt đầu.</p>
-        ) : (
-          <div className="grid grid-cols-3 gap-5 mt-6">
-            {funds.map((f) => {
-              const balance = fundBalanceWithProfit(f, transactions);
-              const target = Number(f.target_amount || 0);
-              const pct = target > 0 ? Math.min(100, (balance / target) * 100) : null;
-              return (
-                <button key={f.id} onClick={() => onOpenFund(f.id, 'funds')} className="text-left bg-white dark:bg-gray-900 rounded-3xl overflow-hidden shadow-sm shadow-black/5 border border-gray-100 dark:border-gray-800 hover:shadow-md transition">
-                  <div
-                    className="h-24 flex items-end p-4"
-                    style={f.background_url
-                      ? { backgroundImage: `linear-gradient(rgba(0,0,0,0.15),rgba(0,0,0,0.45)), url(${f.background_url})`, backgroundSize: 'cover', backgroundPosition: 'center' }
-                      : { background: 'linear-gradient(135deg,#a78bfa,#7c3aed)' }}
-                  >
-                    <span className="text-2xl">{f.icon}</span>
-                  </div>
-                  <div className="p-4">
-                    <p className="text-gray-900 dark:text-white font-semibold truncate">{f.name}</p>
-                    {f.description && <p className="text-gray-400 dark:text-gray-500 text-xs mt-0.5 truncate">{f.description}</p>}
-                    <p className="text-gray-900 dark:text-white text-xl font-bold mt-2">{formatMoney(balance)}</p>
-                    {pct !== null && (
-                      <div className="mt-2">
-                        <ProgressBar pct={pct} colorClass="bg-violet-500" />
-                        <p className="text-gray-400 dark:text-gray-500 text-xs mt-1">{Math.round(pct)}% / mục tiêu {formatMoney(target)}</p>
-                      </div>
-                    )}
-                    {f.interest_rate > 0 && <p className="text-emerald-600 text-xs font-medium mt-2">Lãi {f.interest_rate}%/năm</p>}
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-        )}
-      </div>
-
       {showCreate && <EditFundForm onClose={() => setShowCreate(false)} onSaved={reload} isNew={true} />}
-      <BottomNav screen="funds" setScreen={setScreen} onAddClick={onAddClick} displayName={displayName} theme={theme} toggleTheme={toggleTheme} />
+      {editingFund && <EditFundForm category={editingFund} onClose={() => setEditingFund(null)} onSaved={reload} isNew={false} initialAmount={editingInitialAmount} firstAllocation={editingFirstAllocation} />}
+      <BottomNav screen="funds" setScreen={setScreen} onAddClick={onAddClick} displayName={displayName} avatarUrl={avatarUrl} theme={theme} toggleTheme={toggleTheme} openSettings={openSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} />
     </div>
   );
 }
@@ -1613,7 +2075,7 @@ function MiniRing({ pct, color, label }) {
   );
 }
 
-function Goals({ setScreen, goals, loadingGoals, reload, onAddClick, displayName, theme, toggleTheme }) {
+function Goals({ setScreen, goals, loadingGoals, reload, onAddClick, displayName, avatarUrl, theme, toggleTheme, openSettings, sidebarCollapsed, toggleSidebar }) {
   const [editingGoal, setEditingGoal] = useState(null); // goal object | 'new' | null
   const [searchTerm, setSearchTerm] = useState('');
   const [page, setPage] = useState(1);
@@ -1657,7 +2119,7 @@ function Goals({ setScreen, goals, loadingGoals, reload, onAddClick, displayName
   const pagedGoals = displayGoals.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
   return (
-    <div className="min-h-screen relative bg-gray-100 dark:bg-gray-950 flex justify-center md:pl-64 md:pt-20 transition-colors">
+    <div className={`min-h-screen relative bg-gray-100 dark:bg-gray-950 flex justify-center ${sidebarCollapsed ? 'md:pl-20' : 'md:pl-64'} md:pt-20 transition-colors`}>
       <div className="absolute inset-0 bg-gradient-to-b from-violet-400 via-fuchsia-200 to-orange-100 md:hidden" />
       {/* ============ BẢN ĐIỆN THOẠI ============ */}
       <div className="w-full max-w-sm md:hidden min-h-screen pb-28 relative">
@@ -1700,7 +2162,7 @@ function Goals({ setScreen, goals, loadingGoals, reload, onAddClick, displayName
                 })}
               </div>}
         </div>
-        <BottomNav screen="goals" setScreen={setScreen} onAddClick={onAddClick} displayName={displayName} theme={theme} toggleTheme={toggleTheme} />
+        <BottomNav screen="goals" setScreen={setScreen} onAddClick={onAddClick} displayName={displayName} avatarUrl={avatarUrl} theme={theme} toggleTheme={toggleTheme} openSettings={openSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} />
       </div>
 
       {/* ============ BẢN DESKTOP/TABLET — dạng bảng kiểu CRM ============ */}
@@ -1948,44 +2410,98 @@ function Goals({ setScreen, goals, loadingGoals, reload, onAddClick, displayName
       </div>
 
       {editingGoal && <EditGoalForm goal={editingGoal === 'new' ? null : editingGoal} isNew={editingGoal === 'new'} onClose={() => setEditingGoal(null)} onSaved={reload} />}
-      <BottomNav screen="goals" setScreen={setScreen} onAddClick={onAddClick} displayName={displayName} theme={theme} toggleTheme={toggleTheme} />
+      <BottomNav screen="goals" setScreen={setScreen} onAddClick={onAddClick} displayName={displayName} avatarUrl={avatarUrl} theme={theme} toggleTheme={toggleTheme} openSettings={openSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} />
     </div>
   );
 }
 
 /* ---------- Thêm giao dịch ---------- */
 
-function AddTransaction({ onClose, accounts, categories, onSaved }) {
+function AddTransaction({ onClose, accounts, categories, transactions, onSaved }) {
   const [type, setType] = useState('expense'); // 'income' | 'allocation' | 'expense'
   const [amount, setAmount] = useState('');
   const [selectedCategory, setSelectedCategory] = useState(null);
-  const [selectedAccount, setSelectedAccount] = useState(null);
+  const [selectedYear, setSelectedYear] = useState(Number(currentPeriodKey().split('-')[0]));
+  const [selectedPeriod, setSelectedPeriod] = useState(currentPeriodKey());
+  const [expenseSource, setExpenseSource] = useState(null); // 'income' | <account id> — Nguồn tiền, dùng cho mọi giao dịch Chi tiêu (kể cả rút quỹ)
   const [note, setNote] = useState('');
   const [dateTime, setDateTime] = useState(nowForInput());
   const [saving, setSaving] = useState(false);
+  const [savedMsg, setSavedMsg] = useState(false);
 
-  useEffect(() => { if (accounts.length > 0 && !selectedAccount) setSelectedAccount(accounts[0].id); }, [accounts]);
+  const yearNow = new Date().getFullYear();
+  const years = Array.from({ length: 5 }, (_, i) => yearNow - 2 + i); // 2 năm trước -> 2 năm sau
+  const periods = buildPeriods(selectedYear);
 
   // Nạp quỹ dùng chung danh mục "chi tiêu" (vì mọi danh mục chi tiêu đều là 1 quỹ)
   const categoryType = type === 'income' ? 'income' : 'expense';
   const categoryList = categories.filter((c) => c.type === categoryType);
   const activeCat = categories.find((c) => c.id === selectedCategory);
+  const isFundCategory = type === 'expense' && !!activeCat?.is_fund;
   const overLimit = type === 'expense' && activeCat?.monthly_limit && Number(amount) > Number(activeCat.monthly_limit);
-  const needsAccount = type !== 'allocation';
+
+  // Bể thu nhập của Kỳ đang chọn — dùng để cảnh báo khi Nạp quỹ / Chi tiêu vượt quá số tiền còn lại của kỳ
+  const usesPeriod = type === 'income' || type === 'allocation' || (type === 'expense' && expenseSource === 'income');
+  const pool = usesPeriod ? periodPool(transactions || [], selectedPeriod) : null;
+  const periodOverLimit = (type === 'allocation' || (type === 'expense' && expenseSource === 'income')) && pool && Number(amount) > pool.remaining;
 
   function handleAmountChange(e) { setAmount(e.target.value.replace(/\D/g, '')); }
+
+  function handleYearChange(y) {
+    setSelectedYear(y);
+    const month = selectedPeriod.split('-')[1];
+    setSelectedPeriod(`${y}-${month}`);
+  }
+
+  function handleTypeChange(t) {
+    setType(t); setSelectedCategory(null); setExpenseSource(null);
+    setSelectedYear(Number(currentPeriodKey().split('-')[0]));
+    setSelectedPeriod(currentPeriodKey());
+  }
+  function handleCategoryChange(id) { setSelectedCategory(id); setExpenseSource(null); }
+
+  // Sau khi lưu thành công, đưa form về trạng thái trống ban đầu để nhập giao dịch tiếp theo — KHÔNG tự đóng
+  function resetForm() {
+    setAmount(''); setSelectedCategory(null); setExpenseSource(null); setNote('');
+    setDateTime(nowForInput());
+    setSelectedYear(Number(currentPeriodKey().split('-')[0]));
+    setSelectedPeriod(currentPeriodKey());
+  }
 
   async function handleSave() {
     if (!amount || Number(amount) === 0) { alert('Vui lòng nhập số tiền'); return; }
     if (!selectedCategory) { alert('Vui lòng chọn danh mục'); return; }
+
+    let accountIdToSave = null;
+    let noteToSave = note || null;
+
+    if (type === 'income') {
+      if (!selectedPeriod) { alert('Vui lòng chọn Kỳ'); return; }
+      noteToSave = tagPeriodNote(selectedPeriod, note);
+    } else if (type === 'allocation') {
+      if (!selectedPeriod) { alert('Vui lòng chọn Kỳ (nguồn thu nhập để nạp quỹ)'); return; }
+      noteToSave = tagPeriodNote(selectedPeriod, note);
+    } else if (type === 'expense') {
+      if (!expenseSource) { alert('Vui lòng chọn Nguồn tiền: Thu nhập hoặc 1 ví'); return; }
+      if (expenseSource === 'income') {
+        if (!selectedPeriod) { alert('Vui lòng chọn Kỳ'); return; }
+        noteToSave = tagPeriodNote(selectedPeriod, note);
+      } else {
+        accountIdToSave = expenseSource;
+      }
+    }
+
     setSaving(true);
     const { error } = await supabase.from('transactions').insert({
-      account_id: needsAccount ? selectedAccount : null, category_id: selectedCategory, type, amount: Number(amount),
-      note: note || null, date: dateTime.slice(0, 10), created_at: new Date(dateTime).toISOString(),
+      account_id: accountIdToSave, category_id: selectedCategory, type, amount: Number(amount),
+      note: noteToSave, date: dateTime.slice(0, 10), created_at: new Date(dateTime).toISOString(),
     });
     setSaving(false);
     if (error) { alert('Lỗi khi lưu: ' + error.message); return; }
-    onSaved(); onClose();
+    onSaved();
+    resetForm();
+    setSavedMsg(true);
+    setTimeout(() => setSavedMsg(false), 2000);
   }
 
   return (
@@ -1998,29 +2514,31 @@ function AddTransaction({ onClose, accounts, categories, onSaved }) {
         </div>
         <div className="px-5 mt-6">
           <div className="flex bg-gray-100 dark:bg-gray-800 rounded-full p-1">
-            <button onClick={() => { setType('income'); setSelectedCategory(null); }} className={`flex-1 py-2 rounded-full text-xs sm:text-sm font-medium transition ${type === 'income' ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow' : 'text-gray-400 dark:text-gray-500'}`}>Thu nhập</button>
-            <button onClick={() => { setType('allocation'); setSelectedCategory(null); }} className={`flex-1 py-2 rounded-full text-xs sm:text-sm font-medium transition ${type === 'allocation' ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow' : 'text-gray-400 dark:text-gray-500'}`}>Nạp quỹ</button>
-            <button onClick={() => { setType('expense'); setSelectedCategory(null); }} className={`flex-1 py-2 rounded-full text-xs sm:text-sm font-medium transition ${type === 'expense' ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow' : 'text-gray-400 dark:text-gray-500'}`}>Chi tiêu</button>
+            <button onClick={() => handleTypeChange('income')} className={`flex-1 py-2 rounded-full text-xs sm:text-sm font-medium transition ${type === 'income' ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow' : 'text-gray-400 dark:text-gray-500'}`}>Thu nhập</button>
+            <button onClick={() => handleTypeChange('allocation')} className={`flex-1 py-2 rounded-full text-xs sm:text-sm font-medium transition ${type === 'allocation' ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow' : 'text-gray-400 dark:text-gray-500'}`}>Nạp quỹ</button>
+            <button onClick={() => handleTypeChange('expense')} className={`flex-1 py-2 rounded-full text-xs sm:text-sm font-medium transition ${type === 'expense' ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow' : 'text-gray-400 dark:text-gray-500'}`}>Chi tiêu</button>
           </div>
-          {type === 'allocation' && <p className="text-gray-400 dark:text-gray-500 text-xs mt-2 text-center">Chuyển 1 phần thu nhập vào quỹ để dành, chưa tính là tiền rời khỏi tài khoản.</p>}
+          {type === 'allocation' && <p className="text-gray-400 dark:text-gray-500 text-xs mt-2 text-center">Rút từ thu nhập của 1 Kỳ để chuyển vào quỹ, chưa tính là tiền rời khỏi ví.</p>}
+          {type === 'income' && <p className="text-gray-400 dark:text-gray-500 text-xs mt-2 text-center">Thu nhập được gom theo Kỳ — nhiều khoản thu trong cùng 1 Kỳ sẽ được cộng dồn lại.</p>}
         </div>
         <div className="px-5 mt-8 text-center">
           <p className="text-gray-400 dark:text-gray-500 text-sm mb-1">Số tiền</p>
           <div className="flex items-center justify-center gap-1">
-            <input type="text" inputMode="numeric" value={amount ? Number(amount).toLocaleString('en-US') : ''} onChange={handleAmountChange} placeholder="0" className={`text-4xl font-bold text-center bg-transparent outline-none w-full ${overLimit ? 'text-red-500' : type === 'income' || type === 'allocation' ? 'text-emerald-600' : 'text-gray-900 dark:text-white'}`} />
+            <input type="text" inputMode="numeric" value={amount ? Number(amount).toLocaleString('en-US') : ''} onChange={handleAmountChange} placeholder="0" className={`text-4xl font-bold text-center bg-transparent outline-none w-full ${overLimit || periodOverLimit ? 'text-red-500' : type === 'income' || type === 'allocation' ? 'text-emerald-600' : 'text-gray-900 dark:text-white'}`} />
             <span className="text-4xl font-bold text-gray-300">đ</span>
           </div>
           {overLimit && <p className="text-red-500 text-xs mt-2">⚠️ Vượt hạn mức {formatMoney(activeCat.monthly_limit)} của danh mục này!</p>}
+          {periodOverLimit && <p className="text-red-500 text-xs mt-2">⚠️ Vượt số tiền còn lại của Kỳ này ({formatMoney(pool.remaining)})!</p>}
         </div>
         <div className="px-5 mt-8">
-          <p className="text-gray-900 dark:text-white font-semibold text-sm mb-3">{type === 'income' ? 'Danh mục thu nhập' : 'Quỹ / Danh mục'}</p>
+          <p className="text-gray-900 dark:text-white font-semibold text-sm mb-3">{type === 'income' ? 'Danh mục thu nhập' : 'Quỹ / Danh mục'} <span className="text-red-500">*</span></p>
           {categoryList.length === 0 ? <p className="text-gray-400 dark:text-gray-500 text-sm">Chưa có danh mục. Vào Cài đặt để thêm.</p> : (
             <div className="grid grid-cols-4 sm:grid-cols-5 gap-3">
               {categoryList.map((cat) => {
                 const active = selectedCategory === cat.id;
                 const willExceed = type === 'expense' && cat.monthly_limit && Number(amount) > Number(cat.monthly_limit);
                 return (
-                  <button key={cat.id} onClick={() => setSelectedCategory(cat.id)} className="flex flex-col items-center gap-1.5">
+                  <button key={cat.id} onClick={() => handleCategoryChange(cat.id)} className="flex flex-col items-center gap-1.5">
                     <EmojiCircle emoji={cat.icon} size={48} active={active} activeColor={willExceed ? '#ef4444' : '#7c3aed'} />
                     <span className={`text-[11px] text-center leading-tight ${active ? 'text-gray-900 dark:text-white font-medium' : 'text-gray-400 dark:text-gray-500'}`}>{cat.name}</span>
                   </button>
@@ -2029,17 +2547,51 @@ function AddTransaction({ onClose, accounts, categories, onSaved }) {
             </div>
           )}
         </div>
-        {needsAccount && (
+
+        {/* Nguồn tiền — hiện ngay dưới Quỹ/Danh mục ở mục Chi tiêu; gồm "Thu nhập" + các ví trong Quản lý ví, chỉ được chọn 1.
+            Khi rút quỹ (isFundCategory), lựa chọn này cho biết tiền rút ra đi vào ví nào — nhờ đó chi tiết từng ví sẽ hiển thị đúng lịch sử rút tiền. */}
+        {type === 'expense' && selectedCategory && (
           <div className="px-5 mt-8">
-            <p className="text-gray-900 dark:text-white font-semibold text-sm mb-3">Tài khoản</p>
-            <div className="flex gap-2 overflow-x-auto pb-1">
+            <p className="text-gray-900 dark:text-white font-semibold text-sm mb-3">Nguồn tiền <span className="text-red-500">*</span></p>
+            {isFundCategory && <p className="text-gray-400 dark:text-gray-500 text-xs mb-3">Rút từ quỹ "{activeCat.name}" — chọn thêm nơi nhận tiền để lưu vào lịch sử ví.</p>}
+            <div className="grid grid-cols-4 sm:grid-cols-5 gap-3">
+              <button onClick={() => setExpenseSource('income')} className="flex flex-col items-center gap-1.5">
+                <EmojiCircle emoji="💵" size={48} active={expenseSource === 'income'} activeColor="#7c3aed" />
+                <span className={`text-[11px] text-center leading-tight ${expenseSource === 'income' ? 'text-gray-900 dark:text-white font-medium' : 'text-gray-400 dark:text-gray-500'}`}>Thu nhập</span>
+              </button>
               {accounts.map((acc) => {
-                const active = selectedAccount === acc.id;
-                return <button key={acc.id} onClick={() => setSelectedAccount(acc.id)} className={`flex items-center gap-2 px-3 py-2 rounded-full flex-shrink-0 border transition ${active ? 'bg-gray-900 border-gray-900 text-white' : 'bg-white border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300'}`}><span>{acc.icon}</span><span className="text-sm">{acc.name}</span></button>;
+                const active = expenseSource === acc.id;
+                return (
+                  <button key={acc.id} onClick={() => setExpenseSource(acc.id)} className="flex flex-col items-center gap-1.5">
+                    <EmojiCircle emoji={acc.icon} size={48} active={active} activeColor="#7c3aed" />
+                    <span className={`text-[11px] text-center leading-tight ${active ? 'text-gray-900 dark:text-white font-medium' : 'text-gray-400 dark:text-gray-500'}`}>{acc.name}</span>
+                  </button>
+                );
               })}
             </div>
+            <p className="text-gray-400 dark:text-gray-500 text-xs mt-2">Chỉ được chọn 1 nguồn tiền cho khoản chi này.</p>
           </div>
         )}
+
+        {/* Năm + Kỳ — bắt buộc chọn khi Thu nhập, hoặc khi Nạp quỹ / Chi tiêu rút từ thu nhập của kỳ */}
+        {(type === 'income' || type === 'allocation' || (type === 'expense' && expenseSource === 'income')) && (
+          <div className="px-5 mt-8">
+            <p className="text-gray-900 dark:text-white font-semibold text-sm mb-3">Năm <span className="text-red-500">*</span></p>
+            <select value={selectedYear} onChange={(e) => handleYearChange(Number(e.target.value))} className="w-full bg-gray-100 dark:bg-gray-800 rounded-xl px-4 py-3 text-sm outline-none mb-3 dark:text-white">
+              {years.map((y) => <option key={y} value={y}>{y}</option>)}
+            </select>
+            <p className="text-gray-900 dark:text-white font-semibold text-sm mb-3">Kỳ <span className="text-red-500">*</span></p>
+            <select value={selectedPeriod} onChange={(e) => setSelectedPeriod(e.target.value)} className="w-full bg-gray-100 dark:bg-gray-800 rounded-xl px-4 py-3 text-sm outline-none dark:text-white">
+              {periods.map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
+            </select>
+            {pool && (
+              <p className="text-gray-400 dark:text-gray-500 text-xs mt-2">
+                Thu nhập kỳ này: <span className="text-gray-700 dark:text-gray-300 font-medium">{formatMoney(pool.total)}</span> — Còn lại: <span className={`font-medium ${pool.remaining < 0 ? 'text-red-500' : 'text-emerald-600'}`}>{formatMoney(pool.remaining)}</span>
+              </p>
+            )}
+          </div>
+        )}
+
         <div className="px-5 mt-8">
           <p className="text-gray-900 dark:text-white font-semibold text-sm mb-3">Ngày giờ</p>
           <input type="datetime-local" value={dateTime} onChange={(e) => setDateTime(e.target.value)} className="w-full bg-gray-100 dark:bg-gray-800 rounded-2xl px-4 py-3 text-sm outline-none dark:text-white dark:placeholder:text-gray-500" />
@@ -2049,6 +2601,7 @@ function AddTransaction({ onClose, accounts, categories, onSaved }) {
           <input type="text" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Không bắt buộc" className="w-full bg-gray-100 dark:bg-gray-800 rounded-2xl px-4 py-3 text-sm outline-none dark:text-white dark:placeholder:text-gray-500" />
         </div>
         <div className="px-5 mt-10 pb-10">
+          {savedMsg && <p className="text-emerald-600 text-sm text-center mb-3 bg-emerald-50 dark:bg-emerald-500/10 rounded-xl py-2">✓ Đã lưu giao dịch. Bạn có thể thêm giao dịch tiếp theo.</p>}
           <button onClick={handleSave} disabled={saving} className="w-full bg-gray-900 text-white rounded-2xl py-4 font-semibold flex items-center justify-center gap-2 disabled:opacity-60">{saving ? <Loader2 size={18} className="animate-spin" /> : <Check size={18} />}{saving ? 'Đang lưu...' : 'Lưu giao dịch'}</button>
         </div>
       </div>
@@ -2146,7 +2699,7 @@ function EditAccountModal({ account, onClose, onSaved, isNew }) {
   );
 }
 
-function AccountDetail({ account, transactions, categories, onBack, reload, setScreen, onAddClick, displayName, theme, toggleTheme }) {
+function AccountDetail({ account, transactions, categories, onBack, reload, setScreen, onAddClick, displayName, avatarUrl, theme, toggleTheme, openSettings, sidebarCollapsed, toggleSidebar }) {
   const [showAdjust, setShowAdjust] = useState(false);
   const [showEdit, setShowEdit] = useState(false);
 
@@ -2164,7 +2717,7 @@ function AccountDetail({ account, transactions, categories, onBack, reload, setS
   }
 
   return (
-    <div className="min-h-screen relative bg-gray-100 dark:bg-gray-950 flex justify-center md:pl-64 md:pt-20 transition-colors">
+    <div className={`min-h-screen relative bg-gray-100 dark:bg-gray-950 flex justify-center ${sidebarCollapsed ? 'md:pl-20' : 'md:pl-64'} md:pt-20 transition-colors`}>
       {/* ============ BẢN ĐIỆN THOẠI (giữ nguyên) ============ */}
       <div className="w-full max-w-sm md:hidden min-h-screen pb-28 relative" style={{ background: 'linear-gradient(180deg,#a78bfa,#f0abfc,#fed7aa)' }}>
         <div className="px-5 pt-8 flex items-center justify-between">
@@ -2289,16 +2842,16 @@ function AccountDetail({ account, transactions, categories, onBack, reload, setS
 
       {showAdjust && <QuickAdjustBalanceForm account={account} currentBalance={balance} onClose={() => setShowAdjust(false)} onSaved={reload} />}
       {showEdit && <EditAccountModal account={account} onClose={() => setShowEdit(false)} onSaved={reload} />}
-      <BottomNav screen="accounts" setScreen={setScreen} onAddClick={onAddClick} displayName={displayName} theme={theme} toggleTheme={toggleTheme} />
+      <BottomNav screen="accounts" setScreen={setScreen} onAddClick={onAddClick} displayName={displayName} avatarUrl={avatarUrl} theme={theme} toggleTheme={toggleTheme} openSettings={openSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} />
     </div>
   );
 }
 
-function Accounts({ setScreen, accounts, transactions, onOpenAccount, reload, onAddClick, displayName, theme, toggleTheme }) {
+function Accounts({ setScreen, accounts, transactions, onOpenAccount, reload, onAddClick, displayName, avatarUrl, theme, toggleTheme, openSettings, sidebarCollapsed, toggleSidebar }) {
   const [showCreate, setShowCreate] = useState(false);
   const totalBalance = accounts.reduce((s, a) => s + accountBalance(a, transactions), 0);
   return (
-    <div className="min-h-screen relative bg-gray-100 dark:bg-gray-950 flex justify-center md:pl-64 md:pt-20 transition-colors">
+    <div className={`min-h-screen relative bg-gray-100 dark:bg-gray-950 flex justify-center ${sidebarCollapsed ? 'md:pl-20' : 'md:pl-64'} md:pt-20 transition-colors`}>
       {/* ============ BẢN ĐIỆN THOẠI ============ */}
       <div className="absolute inset-0 bg-gradient-to-b from-violet-400 via-fuchsia-200 to-orange-100 md:hidden" />
       <div className="w-full max-w-sm md:hidden min-h-screen pb-28 relative">
@@ -2358,7 +2911,7 @@ function Accounts({ setScreen, accounts, transactions, onOpenAccount, reload, on
       </div>
 
       {showCreate && <EditAccountModal onClose={() => setShowCreate(false)} onSaved={reload} isNew={true} />}
-      <BottomNav screen="accounts" setScreen={setScreen} onAddClick={onAddClick} displayName={displayName} theme={theme} toggleTheme={toggleTheme} />
+      <BottomNav screen="accounts" setScreen={setScreen} onAddClick={onAddClick} displayName={displayName} avatarUrl={avatarUrl} theme={theme} toggleTheme={toggleTheme} openSettings={openSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} />
     </div>
   );
 }
@@ -2509,15 +3062,37 @@ function AccountSection({ accounts, reload }) {
 function ProfileSection({ user, onUpdated }) {
   const [firstName, setFirstName] = useState(user?.user_metadata?.first_name || '');
   const [lastName, setLastName] = useState('');
+  const [avatarUrl, setAvatarUrl] = useState(user?.user_metadata?.avatar_url || '');
+  const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [savingPassword, setSavingPassword] = useState(false);
+  const [passwordMessage, setPasswordMessage] = useState('');
 
   useEffect(() => {
     const full = user?.user_metadata?.full_name || '';
     const first = user?.user_metadata?.first_name || '';
     setFirstName(first);
     setLastName(full.replace(first, '').trim());
+    setAvatarUrl(user?.user_metadata?.avatar_url || '');
   }, [user]);
+
+  async function handleAvatarUpload(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    const fileName = `${user.id}-${Date.now()}-${file.name}`;
+    const { error: uploadError } = await supabase.storage.from('avatars').upload(fileName, file, { upsert: true });
+    if (uploadError) { alert('Lỗi tải ảnh lên: ' + uploadError.message); setUploading(false); return; }
+    const { data } = supabase.storage.from('avatars').getPublicUrl(fileName);
+    const { error } = await supabase.auth.updateUser({ data: { avatar_url: data.publicUrl } });
+    setUploading(false);
+    if (error) { alert('Lỗi: ' + error.message); return; }
+    setAvatarUrl(data.publicUrl);
+    onUpdated();
+  }
 
   async function handleSave() {
     setSaving(true);
@@ -2530,31 +3105,75 @@ function ProfileSection({ user, onUpdated }) {
     onUpdated();
   }
 
+  async function handleChangePassword() {
+    if (!newPassword || newPassword.length < 6) { setPasswordMessage('Mật khẩu cần tối thiểu 6 ký tự'); return; }
+    if (newPassword !== confirmPassword) { setPasswordMessage('Mật khẩu nhập lại không khớp'); return; }
+    setSavingPassword(true);
+    setPasswordMessage('');
+    const { error } = await supabase.auth.updateUser({ password: newPassword });
+    setSavingPassword(false);
+    if (error) { setPasswordMessage('Lỗi: ' + error.message); return; }
+    setPasswordMessage('Đã đổi mật khẩu!');
+    setNewPassword(''); setConfirmPassword('');
+  }
+
   return (
-    <div>
-      <p className="text-gray-400 dark:text-gray-500 text-sm mb-4">{user?.email}</p>
-      <div className="flex gap-3 mb-3">
-        <input value={firstName} onChange={(e) => setFirstName(e.target.value)} placeholder="Tên" className="w-1/2 bg-gray-100 dark:bg-gray-800 rounded-xl px-4 py-3 text-sm outline-none dark:text-white dark:placeholder:text-gray-500" />
-        <input value={lastName} onChange={(e) => setLastName(e.target.value)} placeholder="Họ" className="w-1/2 bg-gray-100 dark:bg-gray-800 rounded-xl px-4 py-3 text-sm outline-none dark:text-white dark:placeholder:text-gray-500" />
+    <div className="flex flex-col gap-8">
+      {/* Ảnh đại diện */}
+      <div>
+        <p className="text-gray-900 dark:text-white font-semibold text-sm mb-3">Ảnh đại diện</p>
+        <div className="flex items-center gap-4">
+          <div className="w-16 h-16 rounded-full overflow-hidden bg-gray-100 dark:bg-gray-800 flex items-center justify-center flex-shrink-0">
+            {avatarUrl ? <img src={avatarUrl} alt="" className="w-full h-full object-cover" /> : <span className="text-xl font-semibold text-gray-400 dark:text-gray-500">{(firstName || user?.email || 'B')[0].toUpperCase()}</span>}
+          </div>
+          <label className="bg-gray-100 dark:bg-gray-800 rounded-xl px-4 py-2.5 text-sm text-gray-600 dark:text-gray-300 cursor-pointer hover:bg-gray-200 dark:hover:bg-gray-700 transition flex items-center gap-2">
+            {uploading ? <Loader2 size={14} className="animate-spin" /> : <Camera size={14} />} {uploading ? 'Đang tải...' : 'Đổi ảnh đại diện'}
+            <input type="file" accept="image/*" onChange={handleAvatarUpload} className="hidden" disabled={uploading} />
+          </label>
+        </div>
       </div>
-      {message && <p className="text-sm text-violet-600 mb-3">{message}</p>}
-      <button onClick={handleSave} disabled={saving} className="w-full bg-gray-900 text-white rounded-xl py-3 font-semibold flex items-center justify-center gap-2 disabled:opacity-60">
-        {saving ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />} Lưu thay đổi
-      </button>
+
+      {/* Thông tin cá nhân */}
+      <div>
+        <p className="text-gray-900 dark:text-white font-semibold text-sm mb-3">Thông tin cá nhân</p>
+        <p className="text-gray-400 dark:text-gray-500 text-sm mb-3">{user?.email}</p>
+        <div className="flex gap-3 mb-3">
+          <input value={firstName} onChange={(e) => setFirstName(e.target.value)} placeholder="Tên" className="w-1/2 bg-gray-100 dark:bg-gray-800 rounded-xl px-4 py-3 text-sm outline-none dark:text-white dark:placeholder:text-gray-500" />
+          <input value={lastName} onChange={(e) => setLastName(e.target.value)} placeholder="Họ" className="w-1/2 bg-gray-100 dark:bg-gray-800 rounded-xl px-4 py-3 text-sm outline-none dark:text-white dark:placeholder:text-gray-500" />
+        </div>
+        {message && <p className="text-sm text-violet-600 mb-3">{message}</p>}
+        <button onClick={handleSave} disabled={saving} className="bg-gray-900 text-white rounded-xl px-6 py-3 font-semibold flex items-center justify-center gap-2 disabled:opacity-60">
+          {saving ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />} Lưu thay đổi
+        </button>
+      </div>
+
+      {/* Đổi mật khẩu */}
+      <div>
+        <p className="text-gray-900 dark:text-white font-semibold text-sm mb-3 flex items-center gap-2"><KeyRound size={15} /> Đổi mật khẩu</p>
+        <div className="flex flex-col gap-3 max-w-sm">
+          <input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} placeholder="Mật khẩu mới (tối thiểu 6 ký tự)" className="bg-gray-100 dark:bg-gray-800 rounded-xl px-4 py-3 text-sm outline-none dark:text-white dark:placeholder:text-gray-500" />
+          <input type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} placeholder="Nhập lại mật khẩu mới" className="bg-gray-100 dark:bg-gray-800 rounded-xl px-4 py-3 text-sm outline-none dark:text-white dark:placeholder:text-gray-500" />
+        </div>
+        {passwordMessage && <p className="text-sm text-violet-600 mt-3">{passwordMessage}</p>}
+        <button onClick={handleChangePassword} disabled={savingPassword} className="mt-3 bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-white rounded-xl px-6 py-3 font-semibold flex items-center justify-center gap-2 disabled:opacity-60">
+          {savingPassword ? <Loader2 size={16} className="animate-spin" /> : <KeyRound size={16} />} Đổi mật khẩu
+        </button>
+      </div>
     </div>
   );
 }
 
-function Settings({ setScreen, categories, accounts, reload, user, onProfileUpdated, onAddClick, theme, toggleTheme }) {
+function Settings({ setScreen, categories, accounts, reload, user, onProfileUpdated, onAddClick, theme, toggleTheme, initialSection, openSettings, sidebarCollapsed, toggleSidebar }) {
   const displayName = user?.user_metadata?.first_name || user?.user_metadata?.full_name;
-  const [section, setSection] = useState('profile'); // 'profile' | 'categories' | 'accounts'
+  const avatarUrl = user?.user_metadata?.avatar_url;
+  const [section, setSection] = useState(initialSection || 'profile'); // 'profile' | 'categories' | 'accounts'
 
   async function handleLogout() {
     await supabase.auth.signOut();
   }
 
   return (
-    <div className="min-h-screen relative bg-gray-100 dark:bg-gray-950 flex justify-center md:pl-64 md:pt-20 transition-colors">
+    <div className={`min-h-screen relative bg-gray-100 dark:bg-gray-950 flex justify-center ${sidebarCollapsed ? 'md:pl-20' : 'md:pl-64'} md:pt-20 transition-colors`}>
       {/* ============ BẢN ĐIỆN THOẠI ============ */}
       <div className="absolute inset-0 bg-gradient-to-b from-violet-400 via-fuchsia-200 to-orange-100 md:hidden" />
       <div className="w-full max-w-sm md:hidden min-h-screen pb-28 relative">
@@ -2592,7 +3211,7 @@ function Settings({ setScreen, categories, accounts, reload, user, onProfileUpda
         </div>
       </div>
 
-      <BottomNav screen="settings" setScreen={setScreen} onAddClick={onAddClick} displayName={displayName} theme={theme} toggleTheme={toggleTheme} />
+      <BottomNav screen="settings" setScreen={setScreen} onAddClick={onAddClick} displayName={displayName} avatarUrl={avatarUrl} theme={theme} toggleTheme={toggleTheme} openSettings={openSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} />
     </div>
   );
 }
@@ -2608,8 +3227,19 @@ function MainApp({ user, theme, toggleTheme }) {
   const [loading, setLoading] = useState(true);
   const [loadingGoals, setLoadingGoals] = useState(true);
   const [currentUser, setCurrentUser] = useState(user);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => (typeof window !== 'undefined' && localStorage.getItem('sidebarCollapsed') === '1'));
+  function toggleSidebar() {
+    setSidebarCollapsed((v) => {
+      const next = !v;
+      if (typeof window !== 'undefined') localStorage.setItem('sidebarCollapsed', next ? '1' : '0');
+      return next;
+    });
+  }
 
   const displayName = currentUser?.user_metadata?.first_name || currentUser?.user_metadata?.full_name || currentUser?.email?.split('@')[0];
+  const avatarUrl = currentUser?.user_metadata?.avatar_url;
+  const [settingsSection, setSettingsSection] = useState('profile');
+  function goToSettings(section) { setSettingsSection(section || 'profile'); setScreen('settings'); }
 
   async function refreshUser() {
     const { data } = await supabase.auth.getUser();
@@ -2641,18 +3271,18 @@ function MainApp({ user, theme, toggleTheme }) {
   if (screen === 'fund-detail') {
     const cat = categories.find((c) => c.id === selectedFundId);
     if (!cat) { setScreen('dashboard'); return null; }
-    return <><FundDetail category={cat} transactions={transactions} onBack={() => setScreen(fundReturnScreen)} reload={loadAll} setScreen={setScreen} onAddClick={() => setShowAdd(true)} displayName={displayName} theme={theme} toggleTheme={toggleTheme} />{showAdd && <AddTransaction onClose={() => setShowAdd(false)} accounts={accounts} categories={categories} onSaved={loadAll} />}</>;
+    return <><FundDetail category={cat} transactions={transactions} onBack={() => setScreen(fundReturnScreen)} reload={loadAll} setScreen={setScreen} onAddClick={() => setShowAdd(true)} displayName={displayName} avatarUrl={avatarUrl} theme={theme} toggleTheme={toggleTheme} openSettings={goToSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} />{showAdd && <AddTransaction onClose={() => setShowAdd(false)} accounts={accounts} categories={categories} transactions={transactions} onSaved={loadAll} />}</>;
   }
   if (screen === 'account-detail') {
     const acc = accounts.find((a) => a.id === selectedAccountId);
     if (!acc) { setScreen('accounts'); return null; }
-    return <><AccountDetail account={acc} transactions={transactions} categories={categories} onBack={() => setScreen(accountReturnScreen)} reload={loadAll} setScreen={setScreen} onAddClick={() => setShowAdd(true)} displayName={displayName} theme={theme} toggleTheme={toggleTheme} />{showAdd && <AddTransaction onClose={() => setShowAdd(false)} accounts={accounts} categories={categories} onSaved={loadAll} />}</>;
+    return <><AccountDetail account={acc} transactions={transactions} categories={categories} onBack={() => setScreen(accountReturnScreen)} reload={loadAll} setScreen={setScreen} onAddClick={() => setShowAdd(true)} displayName={displayName} avatarUrl={avatarUrl} theme={theme} toggleTheme={toggleTheme} openSettings={goToSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} />{showAdd && <AddTransaction onClose={() => setShowAdd(false)} accounts={accounts} categories={categories} transactions={transactions} onSaved={loadAll} />}</>;
   }
-  if (screen === 'funds') return <Funds setScreen={setScreen} categories={categories} transactions={transactions} onOpenFund={openFund} reload={loadAll} onAddClick={() => setShowAdd(true)} displayName={displayName} theme={theme} toggleTheme={toggleTheme} />;
-  if (screen === 'goals') return <><Goals setScreen={setScreen} goals={goals} loadingGoals={loadingGoals} reload={loadAll} onAddClick={() => setShowAdd(true)} displayName={displayName} theme={theme} toggleTheme={toggleTheme} />{showAdd && <AddTransaction onClose={() => setShowAdd(false)} accounts={accounts} categories={categories} onSaved={loadAll} />}</>;
-  if (screen === 'accounts') return <><Accounts setScreen={setScreen} accounts={accounts} transactions={transactions} onOpenAccount={openAccount} reload={loadAll} onAddClick={() => setShowAdd(true)} displayName={displayName} theme={theme} toggleTheme={toggleTheme} />{showAdd && <AddTransaction onClose={() => setShowAdd(false)} accounts={accounts} categories={categories} onSaved={loadAll} />}</>;
-  if (screen === 'settings') return <><Settings setScreen={setScreen} categories={categories} accounts={accounts} reload={loadAll} user={currentUser} onProfileUpdated={refreshUser} onAddClick={() => setShowAdd(true)} theme={theme} toggleTheme={toggleTheme} />{showAdd && <AddTransaction onClose={() => setShowAdd(false)} accounts={accounts} categories={categories} onSaved={loadAll} />}</>;
-  return <><Dashboard setScreen={setScreen} transactions={transactions} categories={categories} accounts={accounts} goals={goals} loading={loading} displayName={displayName} onAddClick={() => setShowAdd(true)} theme={theme} toggleTheme={toggleTheme} onOpenFund={(id) => openFund(id, 'dashboard')} />{showAdd && <AddTransaction onClose={() => setShowAdd(false)} accounts={accounts} categories={categories} onSaved={loadAll} />}</>;
+  if (screen === 'funds') return <><Funds setScreen={setScreen} categories={categories} transactions={transactions} onOpenFund={openFund} reload={loadAll} onAddClick={() => setShowAdd(true)} displayName={displayName} avatarUrl={avatarUrl} theme={theme} toggleTheme={toggleTheme} openSettings={goToSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} />{showAdd && <AddTransaction onClose={() => setShowAdd(false)} accounts={accounts} categories={categories} transactions={transactions} onSaved={loadAll} />}</>;
+  if (screen === 'goals') return <><Goals setScreen={setScreen} goals={goals} loadingGoals={loadingGoals} reload={loadAll} onAddClick={() => setShowAdd(true)} displayName={displayName} avatarUrl={avatarUrl} theme={theme} toggleTheme={toggleTheme} openSettings={goToSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} />{showAdd && <AddTransaction onClose={() => setShowAdd(false)} accounts={accounts} categories={categories} transactions={transactions} onSaved={loadAll} />}</>;
+  if (screen === 'accounts') return <><Accounts setScreen={setScreen} accounts={accounts} transactions={transactions} onOpenAccount={openAccount} reload={loadAll} onAddClick={() => setShowAdd(true)} displayName={displayName} avatarUrl={avatarUrl} theme={theme} toggleTheme={toggleTheme} openSettings={goToSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} />{showAdd && <AddTransaction onClose={() => setShowAdd(false)} accounts={accounts} categories={categories} transactions={transactions} onSaved={loadAll} />}</>;
+  if (screen === 'settings') return <><Settings setScreen={setScreen} categories={categories} accounts={accounts} reload={loadAll} user={currentUser} onProfileUpdated={refreshUser} onAddClick={() => setShowAdd(true)} theme={theme} toggleTheme={toggleTheme} initialSection={settingsSection} openSettings={goToSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} />{showAdd && <AddTransaction onClose={() => setShowAdd(false)} accounts={accounts} categories={categories} transactions={transactions} onSaved={loadAll} />}</>;
+  return <><Dashboard setScreen={setScreen} transactions={transactions} categories={categories} accounts={accounts} goals={goals} loading={loading} displayName={displayName} avatarUrl={avatarUrl} onAddClick={() => setShowAdd(true)} theme={theme} toggleTheme={toggleTheme} onOpenFund={(id) => openFund(id, 'dashboard')} openSettings={goToSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} />{showAdd && <AddTransaction onClose={() => setShowAdd(false)} accounts={accounts} categories={categories} transactions={transactions} onSaved={loadAll} />}</>;
 }
 
 export default function App() {
