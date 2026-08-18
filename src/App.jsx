@@ -1037,7 +1037,7 @@ function QuickAdjustBalanceForm({ account, currentBalance, onClose, onSaved }) {
   );
 }
 
-function EditGoalForm({ goal, onClose, onSaved, isNew }) {
+function EditGoalForm({ goal, onClose, onSaved, isNew, softDelete }) {
   const [form, setForm] = useState({
     name: goal?.name || '',
     priority_term: goal?.priority_term || PRIORITY_TERMS[1].value,
@@ -1072,9 +1072,9 @@ function EditGoalForm({ goal, onClose, onSaved, isNew }) {
   }
 
   async function handleDelete() {
-    if (!confirm('Xóa mục tiêu này?')) return;
+    if (!confirm('Xóa mục tiêu này? Bạn có thể khôi phục trong 30 ngày ở mục Lịch sử.')) return;
     setSaving(true);
-    const { error } = await supabase.from('goals').delete().eq('id', goal.id);
+    const { error } = await softDelete('goals', goal.id, `Xoá mục tiêu "${goal.name}"`, 'delete_goal');
     setSaving(false);
     if (error) { alert('Lỗi: ' + error.message); return; }
     onSaved(); onClose();
@@ -2295,7 +2295,7 @@ function Funds({ setScreen, categories, transactions, onOpenFund, reload, onAddC
 /* ==============================================================================
    10. FUND DETAIL
    ============================================================================== */
-function FundDetail({ category, transactions, onBack, reload, setScreen, onAddClick, displayName, avatarUrl, theme, toggleTheme, openSettings, sidebarCollapsed, toggleSidebar }) {
+function FundDetail({ category, transactions, onBack, reload, softDelete, setScreen, onAddClick, displayName, avatarUrl, theme, toggleTheme, openSettings, sidebarCollapsed, toggleSidebar }) {
   const [filter, setFilter] = useState('all');
   const [showEdit, setShowEdit] = useState(false);
   const [quickMode, setQuickMode] = useState(null);
@@ -2327,8 +2327,8 @@ function FundDetail({ category, transactions, onBack, reload, setScreen, onAddCl
   const targetPct = target > 0 ? Math.min(100, (balance / target) * 100) : 0;
 
   async function handleDelete() {
-    if (!confirm('Xóa quỹ này? Các giao dịch cũ vẫn giữ nguyên số tiền.')) return;
-    const { error } = await supabase.from('categories').delete().eq('id', category.id);
+    if (!confirm('Xóa quỹ này? Các giao dịch cũ vẫn giữ nguyên số tiền. Bạn có thể khôi phục trong 30 ngày ở mục Lịch sử.')) return;
+    const { error } = await softDelete('categories', category.id, `Xoá danh mục "${category.name}"`, 'delete_category');
     if (error) { alert('Lỗi: ' + error.message); return; }
     reload(); onBack();
   }
@@ -2689,7 +2689,7 @@ function Accounts({ setScreen, accounts, transactions, onOpenAccount, reload, on
 /* ==============================================================================
    12. ACCOUNT DETAIL
    ============================================================================== */
-function AccountDetail({ account, transactions, categories, onBack, reload, setScreen, onAddClick, displayName, avatarUrl, theme, toggleTheme, openSettings, sidebarCollapsed, toggleSidebar }) {
+function AccountDetail({ account, transactions, categories, onBack, reload, softDelete, setScreen, onAddClick, displayName, avatarUrl, theme, toggleTheme, openSettings, sidebarCollapsed, toggleSidebar }) {
   const [showAdjust, setShowAdjust] = useState(false);
   const [showEdit, setShowEdit] = useState(false);
 
@@ -2700,8 +2700,8 @@ function AccountDetail({ account, transactions, categories, onBack, reload, setS
   const typeLabel = ACCOUNT_TYPES.find((t) => t.value === account.type)?.label || account.type;
 
   async function handleDelete() {
-    if (!confirm('Xóa tài khoản này? Các giao dịch cũ vẫn giữ nguyên số tiền.')) return;
-    const { error } = await supabase.from('accounts').delete().eq('id', account.id);
+    if (!confirm('Xóa tài khoản này? Các giao dịch cũ vẫn giữ nguyên số tiền. Bạn có thể khôi phục trong 30 ngày ở mục Lịch sử.')) return;
+    const { error } = await softDelete('accounts', account.id, `Xoá ví "${account.name}"`, 'delete_account');
     if (error) { alert('Lỗi: ' + error.message); return; }
     reload(); onBack();
   }
@@ -2836,7 +2836,7 @@ function AccountDetail({ account, transactions, categories, onBack, reload, setS
 /* ==============================================================================
    13. GOALS
    ============================================================================== */
-function Goals({ setScreen, goals, loadingGoals, reload, onAddClick, displayName, avatarUrl, theme, toggleTheme, openSettings, sidebarCollapsed, toggleSidebar }) {
+function Goals({ setScreen, goals, loadingGoals, reload, softDelete, onAddClick, displayName, avatarUrl, theme, toggleTheme, openSettings, sidebarCollapsed, toggleSidebar }) {
   const [editingGoal, setEditingGoal] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [page, setPage] = useState(1);
@@ -3160,7 +3160,7 @@ function Goals({ setScreen, goals, loadingGoals, reload, onAddClick, displayName
         </div>
       </div>
 
-      {editingGoal && <EditGoalForm goal={editingGoal === 'new' ? null : editingGoal} isNew={editingGoal === 'new'} onClose={() => setEditingGoal(null)} onSaved={reload} />}
+      {editingGoal && <EditGoalForm goal={editingGoal === 'new' ? null : editingGoal} isNew={editingGoal === 'new'} onClose={() => setEditingGoal(null)} onSaved={reload} softDelete={softDelete} />}
       <BottomNav screen="goals" setScreen={setScreen} onAddClick={onAddClick} displayName={displayName} avatarUrl={avatarUrl} theme={theme} toggleTheme={toggleTheme} openSettings={openSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} />
     </div>
   );
@@ -3169,7 +3169,7 @@ function Goals({ setScreen, goals, loadingGoals, reload, onAddClick, displayName
 /* ==============================================================================
    14. SETTINGS
    ============================================================================== */
-function Settings({ setScreen, categories, accounts, reload, user, onProfileUpdated, onAddClick, theme, toggleTheme, initialSection, openSettings, sidebarCollapsed, toggleSidebar }) {
+function Settings({ setScreen, categories, accounts, reload, softDelete, user, onProfileUpdated, onAddClick, theme, toggleTheme, initialSection, openSettings, sidebarCollapsed, toggleSidebar, onResetData, resettingData, logs, logActivity, restoreLog }) {
   const displayName = user?.user_metadata?.first_name || user?.user_metadata?.full_name;
   const avatarUrl = user?.user_metadata?.avatar_url;
   const [section, setSection] = useState(initialSection || 'profile');
@@ -3177,6 +3177,174 @@ function Settings({ setScreen, categories, accounts, reload, user, onProfileUpda
   async function handleLogout() {
     await supabase.auth.signOut();
   }
+
+  const [showResetModal, setShowResetModal] = useState(false);
+  const [resetPassword, setResetPassword] = useState('');
+  const [showResetPwd, setShowResetPwd] = useState(false);
+  const [resetError, setResetError] = useState('');
+  const [verifyingPwd, setVerifyingPwd] = useState(false);
+
+  function openResetModal() {
+    setResetPassword(''); setResetError(''); setShowResetModal(true);
+  }
+
+  async function confirmResetWithPassword() {
+    if (!resetPassword) { setResetError('Nhập mật khẩu để xác nhận'); return; }
+    setVerifyingPwd(true); setResetError('');
+    const { error } = await supabase.auth.signInWithPassword({ email: user?.email, password: resetPassword });
+    if (error) {
+      setResetError('Sai mật khẩu, vui lòng thử lại');
+      setVerifyingPwd(false);
+      return;
+    }
+    setVerifyingPwd(false);
+    setShowResetModal(false);
+    setResetPassword('');
+    await onResetData();
+  }
+
+  const ResetDataPanel = (
+    <div>
+      <h3 className="text-blueberry dark:text-white font-bold text-base mb-1.5">Vùng nguy hiểm</h3>
+      <p className="text-sm text-steel dark:text-light-grey mb-4 leading-relaxed">
+        Xoá toàn bộ ví, giao dịch, danh mục và mục tiêu bạn đã nhập để bắt đầu lại từ đầu. Tài khoản đăng nhập của bạn vẫn được giữ nguyên. Dữ liệu sẽ được lưu <span className="font-bold">30 ngày</span> trong mục Lịch sử để bạn khôi phục nếu cần, sau đó sẽ bị xoá vĩnh viễn.
+      </p>
+      <button
+        onClick={openResetModal} disabled={resettingData}
+        className="flex items-center gap-2 bg-cotton-candy text-white rounded-full px-5 py-2.5 text-sm font-bold disabled:opacity-60"
+      >
+        {resettingData ? <Loader2 size={15} className="animate-spin" /> : <Trash2 size={15} />}
+        Reset toàn bộ dữ liệu
+      </button>
+
+      {showResetModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm px-4" onClick={() => !verifyingPwd && setShowResetModal(false)}>
+          <div onClick={(e) => e.stopPropagation()} className="w-full max-w-sm bg-white dark:bg-[#1e1e32] rounded-3xl shadow-card border-0 dark:border dark:border-light-grey/10 p-6">
+            <div className="w-11 h-11 rounded-full bg-cotton-candy-light dark:bg-cotton-candy/10 flex items-center justify-center mb-4">
+              <Trash2 size={20} className="text-cotton-candy" />
+            </div>
+            <h3 className="text-blueberry dark:text-white font-bold text-lg mb-1.5">Xoá toàn bộ dữ liệu?</h3>
+            <p className="text-sm text-steel dark:text-light-grey mb-4 leading-relaxed">
+              Toàn bộ ví, giao dịch, danh mục và mục tiêu sẽ bị ẩn khỏi ứng dụng. Bạn có 30 ngày để khôi phục lại trong mục Lịch sử, sau đó dữ liệu sẽ bị xoá vĩnh viễn. Nhập mật khẩu đăng nhập để xác nhận.
+            </p>
+            <div className="relative mb-1">
+              <Lock size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-steel dark:text-light-grey pointer-events-none" />
+              <input
+                type={showResetPwd ? 'text' : 'password'}
+                value={resetPassword}
+                onChange={(e) => { setResetPassword(e.target.value); setResetError(''); }}
+                onKeyDown={(e) => e.key === 'Enter' && confirmResetWithPassword()}
+                placeholder="Mật khẩu đăng nhập"
+                autoFocus
+                className="w-full bg-ice-cream dark:bg-[#2a2a44] border border-light-grey/30 dark:border-light-grey/10 rounded-full pl-11 pr-11 py-3 text-sm text-blueberry dark:text-white placeholder:text-steel dark:placeholder:text-light-grey outline-none focus:border-cotton-candy/50 transition font-semibold"
+              />
+              <button type="button" onClick={() => setShowResetPwd((v) => !v)} className="absolute right-4 top-1/2 -translate-y-1/2 text-steel dark:text-light-grey">
+                {showResetPwd ? <EyeOff size={16} /> : <Eye size={16} />}
+              </button>
+            </div>
+            {resetError && <p className="text-xs text-cotton-candy font-semibold mb-2">{resetError}</p>}
+
+            <div className="flex gap-3 mt-4">
+              <button onClick={() => setShowResetModal(false)} disabled={verifyingPwd} className="flex-1 py-2.5 rounded-full text-sm font-bold text-steel dark:text-light-grey bg-ice-cream dark:bg-[#2a2a44] disabled:opacity-60">
+                Huỷ
+              </button>
+              <button onClick={confirmResetWithPassword} disabled={verifyingPwd} className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-full text-sm font-bold text-white bg-cotton-candy disabled:opacity-60">
+                {verifyingPwd ? <Loader2 size={15} className="animate-spin" /> : <Trash2 size={15} />}
+                Xác nhận xoá
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
+  const ACTION_META = {
+    reset_data: { icon: Trash2, color: 'text-cotton-candy bg-cotton-candy-light dark:bg-cotton-candy/10' },
+    change_password: { icon: KeyRound, color: 'text-lavender bg-lavender/10' },
+    delete_goal: { icon: Target, color: 'text-cotton-candy bg-cotton-candy-light dark:bg-cotton-candy/10' },
+    delete_category: { icon: LayoutGrid, color: 'text-cotton-candy bg-cotton-candy-light dark:bg-cotton-candy/10' },
+    delete_account: { icon: Wallet, color: 'text-cotton-candy bg-cotton-candy-light dark:bg-cotton-candy/10' },
+  };
+
+  const [restoreTarget, setRestoreTarget] = useState(null);
+  const [restoring, setRestoring] = useState(false);
+
+  async function handleConfirmRestore() {
+    setRestoring(true);
+    await restoreLog(restoreTarget);
+    setRestoring(false);
+    setRestoreTarget(null);
+  }
+
+  const SystemHistoryPanel = (
+    <div>
+      <h3 className="text-blueberry dark:text-white font-bold text-base mb-1.5">Lịch sử hệ thống</h3>
+      <p className="text-sm text-steel dark:text-light-grey mb-4 leading-relaxed">
+        Toàn bộ thay đổi liên quan đến hệ thống (đổi mật khẩu, xoá dữ liệu...) được ghi lại tại đây. Một số thao tác có thể khôi phục lại.
+      </p>
+
+      {(!logs || logs.length === 0) && (
+        <p className="text-sm text-steel dark:text-light-grey italic">Chưa có lịch sử nào.</p>
+      )}
+
+      <div className="flex flex-col gap-2.5">
+        {logs?.map((log) => {
+          const meta = ACTION_META[log.action_type] || { icon: Clock, color: 'text-steel bg-ice-cream dark:bg-[#2a2a44]' };
+          const Icon = meta.icon;
+          const daysLeft = 30 - Math.floor((Date.now() - new Date(log.created_at).getTime()) / 86400000);
+          const canRestore = log.restorable && !log.restored_at && daysLeft > 0;
+          return (
+            <div key={log.id} className="flex items-center gap-3 bg-ice-cream dark:bg-[#2a2a44] rounded-2xl p-3.5">
+              <div className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 ${meta.color}`}>
+                <Icon size={16} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-bold text-blueberry dark:text-white truncate">{log.description}</p>
+                <p className="text-xs text-steel dark:text-light-grey">
+                  {new Date(log.created_at).toLocaleString('vi-VN', { dateStyle: 'medium', timeStyle: 'short' })}
+                  {log.restored_at && <span className="text-turquoise font-bold"> · Đã khôi phục</span>}
+                  {!log.restored_at && log.restorable && (
+                    <span className={daysLeft > 0 ? '' : 'text-cotton-candy font-bold'}>
+                      {' · '}{daysLeft > 0 ? `Còn ${daysLeft} ngày để khôi phục` : 'Đã hết hạn khôi phục'}
+                    </span>
+                  )}
+                </p>
+              </div>
+              {canRestore && (
+                <button onClick={() => setRestoreTarget(log)} className="shrink-0 text-xs font-bold text-turquoise-light bg-turquoise/10 rounded-full px-3.5 py-2 hover:bg-turquoise/20 transition">
+                  Khôi phục
+                </button>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {restoreTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm px-4" onClick={() => !restoring && setRestoreTarget(null)}>
+          <div onClick={(e) => e.stopPropagation()} className="w-full max-w-sm bg-white dark:bg-[#1e1e32] rounded-3xl shadow-card border-0 dark:border dark:border-light-grey/10 p-6">
+            <div className="w-11 h-11 rounded-full bg-turquoise/10 flex items-center justify-center mb-4">
+              <Clock size={20} className="text-turquoise" />
+            </div>
+            <h3 className="text-blueberry dark:text-white font-bold text-lg mb-1.5">Khôi phục thao tác này?</h3>
+            <p className="text-sm text-steel dark:text-light-grey mb-5 leading-relaxed">
+              "{restoreTarget.description}" sẽ được khôi phục về đúng như trước khi thao tác diễn ra.
+            </p>
+            <div className="flex gap-3">
+              <button onClick={() => setRestoreTarget(null)} disabled={restoring} className="flex-1 py-2.5 rounded-full text-sm font-bold text-steel dark:text-light-grey bg-ice-cream dark:bg-[#2a2a44] disabled:opacity-60">
+                Huỷ
+              </button>
+              <button onClick={handleConfirmRestore} disabled={restoring} className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-full text-sm font-bold text-white bg-gradient-primary disabled:opacity-60">
+                {restoring ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />}
+                Xác nhận khôi phục
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 
   return (
     <div className={`min-h-screen relative bg-ice-cream dark:bg-night-sky flex justify-center ${sidebarCollapsed ? 'md:pl-20' : 'md:pl-64'} md:pt-20 transition-colors`}>
@@ -3190,11 +3358,15 @@ function Settings({ setScreen, categories, accounts, reload, user, onProfileUpda
         <div className="px-5 mt-4 flex gap-2">
           <button onClick={() => setSection('profile')} className={`flex-1 py-2 rounded-full text-sm font-bold ${section === 'profile' ? 'bg-white dark:bg-[#2a2a44] text-blueberry dark:text-white shadow' : 'bg-white/30 text-white'}`}>Hồ sơ</button>
           <button onClick={() => setSection('categories')} className={`flex-1 py-2 rounded-full text-sm font-bold ${section === 'categories' ? 'bg-white dark:bg-[#2a2a44] text-blueberry dark:text-white shadow' : 'bg-white/30 text-white'}`}>Danh mục</button>
+          <button onClick={() => setSection('data')} className={`flex-1 py-2 rounded-full text-sm font-bold ${section === 'data' ? 'bg-white dark:bg-[#2a2a44] text-blueberry dark:text-white shadow' : 'bg-white/30 text-white'}`}>Dữ liệu</button>
+          <button onClick={() => setSection('history')} className={`flex-1 py-2 rounded-full text-sm font-bold ${section === 'history' ? 'bg-white dark:bg-[#2a2a44] text-blueberry dark:text-white shadow' : 'bg-white/30 text-white'}`}>Lịch sử</button>
         </div>
 
         <div className="mt-4 bg-white dark:bg-[#1e1e32] rounded-t-[2.5rem] min-h-[76vh] px-5 pt-6 pb-6 shadow-soft">
-          {section === 'profile' && <ProfileSection user={user} onUpdated={onProfileUpdated} />}
-          {section === 'categories' && <CategorySection categories={categories} reload={reload} />}
+          {section === 'profile' && <ProfileSection user={user} onUpdated={onProfileUpdated} logActivity={logActivity} />}
+          {section === 'categories' && <CategorySection categories={categories} reload={reload} softDelete={softDelete} />}
+          {section === 'data' && ResetDataPanel}
+          {section === 'history' && SystemHistoryPanel}
         </div>
       </div>
 
@@ -3207,13 +3379,18 @@ function Settings({ setScreen, categories, accounts, reload, user, onProfileUpda
         <div className="flex gap-2 mb-6">
           <button onClick={() => setSection('profile')} className={`px-5 py-2 rounded-full text-sm font-bold ${section === 'profile' ? 'bg-gradient-primary text-white shadow-md shadow-turquoise/30' : 'bg-white dark:bg-[#2a2a44] text-steel dark:text-light-grey border-0 dark:border dark:border-light-grey/10'}`}>Hồ sơ</button>
           <button onClick={() => setSection('categories')} className={`px-5 py-2 rounded-full text-sm font-bold ${section === 'categories' ? 'bg-gradient-primary text-white shadow-md shadow-turquoise/30' : 'bg-white dark:bg-[#2a2a44] text-steel dark:text-light-grey border-0 dark:border dark:border-light-grey/10'}`}>Danh mục</button>
+          <button onClick={() => setSection('data')} className={`px-5 py-2 rounded-full text-sm font-bold ${section === 'data' ? 'bg-gradient-primary text-white shadow-md shadow-turquoise/30' : 'bg-white dark:bg-[#2a2a44] text-steel dark:text-light-grey border-0 dark:border dark:border-light-grey/10'}`}>Dữ liệu</button>
+          <button onClick={() => setSection('history')} className={`px-5 py-2 rounded-full text-sm font-bold ${section === 'history' ? 'bg-gradient-primary text-white shadow-md shadow-turquoise/30' : 'bg-white dark:bg-[#2a2a44] text-steel dark:text-light-grey border-0 dark:border dark:border-light-grey/10'}`}>Lịch sử</button>
         </div>
 
         <div className="bg-white dark:bg-[#1e1e32] rounded-3xl shadow-soft border-0 dark:border dark:border-light-grey/10 p-6">
-          {section === 'profile' && <ProfileSection user={user} onUpdated={onProfileUpdated} />}
-          {section === 'categories' && <CategorySection categories={categories} reload={reload} />}
+          {section === 'profile' && <ProfileSection user={user} onUpdated={onProfileUpdated} logActivity={logActivity} />}
+          {section === 'categories' && <CategorySection categories={categories} reload={reload} softDelete={softDelete} />}
+          {section === 'data' && ResetDataPanel}
+          {section === 'history' && SystemHistoryPanel}
         </div>
       </div>
+
 
       <BottomNav screen="settings" setScreen={setScreen} onAddClick={onAddClick} displayName={displayName} avatarUrl={avatarUrl} theme={theme} toggleTheme={toggleTheme} openSettings={openSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} />
     </div>
@@ -3223,7 +3400,7 @@ function Settings({ setScreen, categories, accounts, reload, user, onProfileUpda
 /* ==============================================================================
    15. SETTINGS SUB-COMPONENTS
    ============================================================================== */
-function ProfileSection({ user, onUpdated }) {
+function ProfileSection({ user, onUpdated, logActivity }) {
   const [firstName, setFirstName] = useState(user?.user_metadata?.first_name || '');
   const [lastName, setLastName] = useState('');
   const [avatarUrl, setAvatarUrl] = useState(user?.user_metadata?.avatar_url || '');
@@ -3279,6 +3456,7 @@ function ProfileSection({ user, onUpdated }) {
     if (error) { setPasswordMessage('Lỗi: ' + error.message); return; }
     setPasswordMessage('Đã đổi mật khẩu!');
     setNewPassword(''); setConfirmPassword('');
+    logActivity?.('change_password', 'Đổi mật khẩu đăng nhập', null, false);
   }
 
   return (
@@ -3324,7 +3502,7 @@ function ProfileSection({ user, onUpdated }) {
   );
 }
 
-function CategorySection({ categories, reload }) {
+function CategorySection({ categories, reload, softDelete }) {
   const [tab, setTab] = useState('expense');
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState({ name: '', icon: '', monthly_limit: '', is_fund: false, interest_rate: '' });
@@ -3344,8 +3522,9 @@ function CategorySection({ categories, reload }) {
   }
 
   async function handleDelete(id) {
-    if (!confirm('Xóa danh mục này? Các giao dịch cũ vẫn giữ nguyên số tiền.')) return;
-    const { error } = await supabase.from('categories').delete().eq('id', id);
+    if (!confirm('Xóa danh mục này? Các giao dịch cũ vẫn giữ nguyên số tiền. Bạn có thể khôi phục trong 30 ngày ở mục Lịch sử.')) return;
+    const cat = categories.find((c) => c.id === id);
+    const { error } = await softDelete('categories', id, `Xoá danh mục "${cat?.name || ''}"`, 'delete_category');
     if (error) { alert('Lỗi: ' + error.message); return; }
     reload();
   }
@@ -3427,19 +3606,69 @@ function MainApp({ user, theme, toggleTheme }) {
     setCurrentUser(data.user);
   }
 
+  const [logs, setLogs] = useState([]);
+  async function loadLogs() {
+    const { data } = await supabase.from('system_logs').select('*').order('created_at', { ascending: false });
+    setLogs(data || []);
+  }
+
+  async function logActivity(action_type, description, payload = null, restorable = false) {
+    await supabase.from('system_logs').insert({ action_type, description, payload, restorable });
+    loadLogs();
+  }
+
   async function loadAll() {
     setLoading(true); setLoadingGoals(true);
     const [{ data: accData }, { data: catData }, { data: txData }, { data: goalData }] = await Promise.all([
-      supabase.from('accounts').select('*').eq('is_active', true),
-      supabase.from('categories').select('*'),
-      supabase.from('transactions').select('*').order('created_at', { ascending: false }),
-      supabase.from('goals').select('*').order('created_at', { ascending: false }),
+      supabase.from('accounts').select('*').eq('is_active', true).is('deleted_at', null),
+      supabase.from('categories').select('*').is('deleted_at', null),
+      supabase.from('transactions').select('*').is('deleted_at', null).order('created_at', { ascending: false }),
+      supabase.from('goals').select('*').is('deleted_at', null).order('created_at', { ascending: false }),
     ]);
     setAccounts(accData || []); setCategories(catData || []); setTransactions(txData || []); setGoals(goalData || []);
     setLoading(false); setLoadingGoals(false);
+    loadLogs();
   }
 
   useEffect(() => { loadAll(); }, []);
+
+  const [resettingData, setResettingData] = useState(false);
+  async function resetAllData() {
+    setResettingData(true);
+    try {
+      const batchId = crypto.randomUUID();
+      const now = new Date().toISOString();
+      const desc = `Reset toàn bộ dữ liệu (${accounts.length} ví, ${categories.length} danh mục, ${transactions.length} giao dịch, ${goals.length} mục tiêu)`;
+      // Đánh dấu ẩn (soft delete) thay vì xoá thật — dữ liệu vẫn còn trong database 30 ngày để khôi phục
+      await supabase.from('transactions').update({ deleted_at: now, deleted_batch_id: batchId }).is('deleted_at', null);
+      await supabase.from('goals').update({ deleted_at: now, deleted_batch_id: batchId }).is('deleted_at', null);
+      await supabase.from('categories').update({ deleted_at: now, deleted_batch_id: batchId }).is('deleted_at', null);
+      await supabase.from('accounts').update({ deleted_at: now, deleted_batch_id: batchId }).is('deleted_at', null);
+      await logActivity('reset_data', desc, { batchId, tables: ['transactions', 'goals', 'categories', 'accounts'] }, true);
+    } finally {
+      await loadAll();
+      setResettingData(false);
+    }
+  }
+
+  // Dùng chung cho MỌI thao tác xoá 1 mục (ví, danh mục, mục tiêu...): ẩn đi thay vì xoá thật,
+  // ghi log kèm batchId để có thể khôi phục trong 30 ngày.
+  async function softDelete(table, id, description, actionType) {
+    const batchId = crypto.randomUUID();
+    const now = new Date().toISOString();
+    const { error } = await supabase.from(table).update({ deleted_at: now, deleted_batch_id: batchId }).eq('id', id);
+    if (!error) await logActivity(actionType, description, { batchId, tables: [table] }, true);
+    return { error };
+  }
+
+  async function restoreLog(log) {
+    const { batchId, tables } = log.payload || {};
+    if (!batchId || !tables?.length) return;
+    // Bật lại đúng những dòng đã bị ẩn bởi thao tác này (khớp deleted_batch_id) ở từng bảng liên quan
+    await Promise.all(tables.map((t) => supabase.from(t).update({ deleted_at: null, deleted_batch_id: null }).eq('deleted_batch_id', batchId)));
+    await supabase.from('system_logs').update({ restored_at: new Date().toISOString() }).eq('id', log.id);
+    await loadAll();
+  }
 
   const [showAdd, setShowAdd] = useState(false);
   const [selectedFundId, setSelectedFundId] = useState(null);
@@ -3452,17 +3681,17 @@ function MainApp({ user, theme, toggleTheme }) {
   if (screen === 'fund-detail') {
     const cat = categories.find((c) => c.id === selectedFundId);
     if (!cat) { setScreen('dashboard'); return null; }
-    return <><FundDetail category={cat} transactions={transactions} onBack={() => setScreen(fundReturnScreen)} reload={loadAll} setScreen={setScreen} onAddClick={() => setShowAdd(true)} displayName={displayName} avatarUrl={avatarUrl} theme={theme} toggleTheme={toggleTheme} openSettings={goToSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} />{showAdd && <AddTransaction onClose={() => setShowAdd(false)} accounts={accounts} categories={categories} transactions={transactions} onSaved={loadAll} />}</>;
+    return <><FundDetail category={cat} transactions={transactions} onBack={() => setScreen(fundReturnScreen)} reload={loadAll} softDelete={softDelete} setScreen={setScreen} onAddClick={() => setShowAdd(true)} displayName={displayName} avatarUrl={avatarUrl} theme={theme} toggleTheme={toggleTheme} openSettings={goToSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} />{showAdd && <AddTransaction onClose={() => setShowAdd(false)} accounts={accounts} categories={categories} transactions={transactions} onSaved={loadAll} />}</>;
   }
   if (screen === 'account-detail') {
     const acc = accounts.find((a) => a.id === selectedAccountId);
     if (!acc) { setScreen('accounts'); return null; }
-    return <><AccountDetail account={acc} transactions={transactions} categories={categories} onBack={() => setScreen(accountReturnScreen)} reload={loadAll} setScreen={setScreen} onAddClick={() => setShowAdd(true)} displayName={displayName} avatarUrl={avatarUrl} theme={theme} toggleTheme={toggleTheme} openSettings={goToSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} />{showAdd && <AddTransaction onClose={() => setShowAdd(false)} accounts={accounts} categories={categories} transactions={transactions} onSaved={loadAll} />}</>;
+    return <><AccountDetail account={acc} transactions={transactions} categories={categories} onBack={() => setScreen(accountReturnScreen)} reload={loadAll} softDelete={softDelete} setScreen={setScreen} onAddClick={() => setShowAdd(true)} displayName={displayName} avatarUrl={avatarUrl} theme={theme} toggleTheme={toggleTheme} openSettings={goToSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} />{showAdd && <AddTransaction onClose={() => setShowAdd(false)} accounts={accounts} categories={categories} transactions={transactions} onSaved={loadAll} />}</>;
   }
   if (screen === 'funds') return <><Funds setScreen={setScreen} categories={categories} transactions={transactions} onOpenFund={openFund} reload={loadAll} onAddClick={() => setShowAdd(true)} displayName={displayName} avatarUrl={avatarUrl} theme={theme} toggleTheme={toggleTheme} openSettings={goToSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} />{showAdd && <AddTransaction onClose={() => setShowAdd(false)} accounts={accounts} categories={categories} transactions={transactions} onSaved={loadAll} />}</>;
-  if (screen === 'goals') return <><Goals setScreen={setScreen} goals={goals} loadingGoals={loadingGoals} reload={loadAll} onAddClick={() => setShowAdd(true)} displayName={displayName} avatarUrl={avatarUrl} theme={theme} toggleTheme={toggleTheme} openSettings={goToSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} />{showAdd && <AddTransaction onClose={() => setShowAdd(false)} accounts={accounts} categories={categories} transactions={transactions} onSaved={loadAll} />}</>;
+  if (screen === 'goals') return <><Goals setScreen={setScreen} goals={goals} loadingGoals={loadingGoals} reload={loadAll} softDelete={softDelete} onAddClick={() => setShowAdd(true)} displayName={displayName} avatarUrl={avatarUrl} theme={theme} toggleTheme={toggleTheme} openSettings={goToSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} />{showAdd && <AddTransaction onClose={() => setShowAdd(false)} accounts={accounts} categories={categories} transactions={transactions} onSaved={loadAll} />}</>;
   if (screen === 'accounts') return <><Accounts setScreen={setScreen} accounts={accounts} transactions={transactions} onOpenAccount={openAccount} reload={loadAll} onAddClick={() => setShowAdd(true)} displayName={displayName} avatarUrl={avatarUrl} theme={theme} toggleTheme={toggleTheme} openSettings={goToSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} />{showAdd && <AddTransaction onClose={() => setShowAdd(false)} accounts={accounts} categories={categories} transactions={transactions} onSaved={loadAll} />}</>;
-  if (screen === 'settings') return <><Settings setScreen={setScreen} categories={categories} accounts={accounts} reload={loadAll} user={currentUser} onProfileUpdated={refreshUser} onAddClick={() => setShowAdd(true)} theme={theme} toggleTheme={toggleTheme} initialSection={settingsSection} openSettings={goToSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} />{showAdd && <AddTransaction onClose={() => setShowAdd(false)} accounts={accounts} categories={categories} transactions={transactions} onSaved={loadAll} />}</>;
+  if (screen === 'settings') return <><Settings setScreen={setScreen} categories={categories} accounts={accounts} reload={loadAll} softDelete={softDelete} user={currentUser} onProfileUpdated={refreshUser} onAddClick={() => setShowAdd(true)} theme={theme} toggleTheme={toggleTheme} initialSection={settingsSection} openSettings={goToSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} onResetData={resetAllData} resettingData={resettingData} logs={logs} logActivity={logActivity} restoreLog={restoreLog} />{showAdd && <AddTransaction onClose={() => setShowAdd(false)} accounts={accounts} categories={categories} transactions={transactions} onSaved={loadAll} />}</>;
   return <><Dashboard setScreen={setScreen} transactions={transactions} categories={categories} accounts={accounts} goals={goals} loading={loading} displayName={displayName} avatarUrl={avatarUrl} onAddClick={() => setShowAdd(true)} theme={theme} toggleTheme={toggleTheme} onOpenFund={(id) => openFund(id, 'dashboard')} onOpenAccount={openAccount} reload={loadAll} openSettings={goToSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} />{showAdd && <AddTransaction onClose={() => setShowAdd(false)} accounts={accounts} categories={categories} transactions={transactions} onSaved={loadAll} />}</>;
 }
 
@@ -3471,7 +3700,7 @@ function MainApp({ user, theme, toggleTheme }) {
    ============================================================================== */
 // TODO: dán URL ảnh nền của bạn vào đây, ví dụ '/bg-savanna.jpg' hoặc link ảnh online.
 // Để trống thì màn hình vẫn đẹp với nền gradient màu thương hiệu bên dưới.
-const AUTH_BG_IMAGE = '/images/bg hongkong.jpg';
+const AUTH_BG_IMAGE = 'images/hk.jpg';
 
 function AuthScreen() {
   const [mode, setMode] = useState('signup');
@@ -3517,51 +3746,63 @@ function AuthScreen() {
     setLoading(false);
   }
 
-  const fieldClass = "w-full bg-white/10 border border-white/10 rounded-full py-3.5 text-sm text-white placeholder:text-white/40 outline-none focus:border-white/40 focus:bg-white/[0.14] transition font-semibold";
+  const fieldClass = "w-full bg-white/55 border border-white/70 rounded-full py-3.5 text-sm text-black placeholder:text-black/45 outline-none focus:border-white focus:bg-white/75 transition font-semibold";
 
   return (
     <div className="min-h-screen relative overflow-hidden flex items-center justify-center px-4 sm:px-6 py-10">
-      {/* ===== Nền: đặt ảnh vào AUTH_BG_IMAGE ở trên, phần overlay bên dưới giúp chữ luôn rõ ===== */}
+      {/* ===== Nền: đặt ảnh vào AUTH_BG_IMAGE ở trên. Có ảnh → chỉ làm tối nhẹ trung tính để giữ màu ảnh gốc.
+           Không có ảnh → dùng gradient màu thương hiệu làm nền tạm. ===== */}
       <div className="absolute inset-0">
         {AUTH_BG_IMAGE ? (
-          <img src={AUTH_BG_IMAGE} alt="" className="w-full h-full object-cover" />
+          <>
+            <img src={AUTH_BG_IMAGE} alt="" className="w-full h-full object-cover" />
+            <div className="absolute inset-0 bg-black/35" />
+          </>
         ) : (
-          <div className="w-full h-full bg-gradient-to-b from-[#1c1c30] via-night-sky to-blueberry" />
+          <>
+            <div className="w-full h-full bg-gradient-to-br from-turquoise via-baby-blue to-lavender" />
+            <div className="absolute inset-0 bg-gradient-to-br from-turquoise/50 via-baby-blue/30 to-lavender/50" />
+          </>
         )}
-        <div className="absolute inset-0 bg-gradient-to-b from-night-sky/35 via-black/15 to-blueberry/40" />
       </div>
-      <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-[600px] h-[350px] rounded-full bg-turquoise/20 blur-[120px]" />
-      <div className="absolute top-10 right-10 w-64 h-64 rounded-full bg-cotton-candy/10 blur-3xl" />
-      <div className="absolute -top-20 -left-20 w-72 h-72 rounded-full bg-lavender/10 blur-3xl" />
+      <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-[600px] h-[350px] rounded-full bg-cotton-candy/20 blur-[120px]" />
+      <div className="absolute top-10 right-10 w-64 h-64 rounded-full bg-white/15 blur-3xl" />
+      <div className="absolute -top-20 -left-20 w-72 h-72 rounded-full bg-turquoise-light/25 blur-3xl" />
+      <div className="absolute bottom-10 -right-16 w-60 h-60 rounded-full bg-lavender-light/25 blur-3xl" />
 
       {/* ===== Card đăng nhập ===== */}
       <div className="relative w-full max-w-sm">
         <div
-          className="relative rounded-[1.75rem] overflow-hidden bg-white/[0.10] backdrop-blur-2xl backdrop-saturate-150 border border-white/30 p-6"
-          style={{ boxShadow: 'inset 0 1px 1px rgba(255,255,255,0.35), inset 0 -1px 16px rgba(0,0,0,0.12), 0 25px 60px -8px rgba(0,0,0,0.5)' }}
+          className="relative rounded-[1.75rem] overflow-hidden bg-white/40 backdrop-blur-[42px] backdrop-saturate-[180%] border border-white/80 p-6"
+          style={{ boxShadow: 'inset 0 2px 1px rgba(255,255,255,0.9), inset 0 -2px 24px rgba(255,255,255,0.3), inset 0 0 50px rgba(255,255,255,0.12), 0 30px 70px -10px rgba(48,49,80,0.5)' }}
         >
-          {/* lớp kính bóng: gradient sáng mờ dần + 2 quầng sáng loang tạo cảm giác khúc xạ ánh sáng */}
-          <div className="pointer-events-none absolute inset-0 z-0 bg-gradient-to-b from-white/30 via-white/[0.06] to-transparent" />
-          <div className="pointer-events-none absolute -top-16 -left-12 z-0 w-48 h-48 rounded-full bg-white/30 blur-3xl" />
-          <div className="pointer-events-none absolute -bottom-20 -right-10 z-0 w-44 h-44 rounded-full bg-turquoise/25 blur-3xl" />
-          {/* lớp tối rất nhẹ chỉ đủ để chữ luôn đọc được, không che mất hiệu ứng kính */}
-          <div className="pointer-events-none absolute inset-0 z-0 bg-black/15" />
+          {/* lớp kính bóng: gradient sáng mờ dần + quầng sáng loang tạo cảm giác khúc xạ ánh sáng như liquid glass */}
+          <div className="pointer-events-none absolute inset-0 z-0 bg-gradient-to-b from-white/65 via-white/10 to-transparent" />
+          <div className="pointer-events-none absolute -top-24 -left-20 z-0 w-64 h-64 rounded-full bg-white/55 blur-3xl" />
+          <div className="pointer-events-none absolute -bottom-28 -right-16 z-0 w-60 h-60 rounded-full bg-turquoise/30 blur-3xl" />
+          <div className="pointer-events-none absolute top-1/3 -right-14 z-0 w-40 h-40 rounded-full bg-cotton-candy/25 blur-3xl" />
+          <div className="pointer-events-none absolute bottom-1/4 -left-14 z-0 w-36 h-36 rounded-full bg-lavender/20 blur-3xl" />
+          {/* 2 vệt sáng chéo mô phỏng ánh sáng phản chiếu trên mặt kính cong, đậm hơn để rõ chất liquid glass */}
+          <div className="pointer-events-none absolute -top-1/2 -left-1/4 z-0 w-[140%] h-[80%] rotate-[-18deg] bg-gradient-to-b from-white/55 via-white/0 to-transparent" />
+          <div className="pointer-events-none absolute -bottom-1/3 -right-1/4 z-0 w-[100%] h-[60%] rotate-[-18deg] bg-gradient-to-t from-white/25 via-white/0 to-transparent" />
+          {/* viền sáng bo tròn phía trên cùng để có cảm giác mép kính bắt sáng */}
+          <div className="pointer-events-none absolute inset-x-0 top-0 z-0 h-px bg-gradient-to-r from-transparent via-white to-transparent" />
 
           <div className="relative z-10">
-          <div className="flex bg-black/20 border border-white/15 rounded-full p-1 mb-5">
+          <div className="flex bg-white/40 border border-white/60 rounded-full p-1 mb-5">
             <button
               onClick={() => switchMode('signup')}
-              className={`flex-1 py-2 rounded-full text-sm font-bold transition ${mode === 'signup' ? 'bg-white text-blueberry shadow' : 'text-white/70'}`}>
+              className={`flex-1 py-2 rounded-full text-sm font-bold transition ${mode === 'signup' ? 'bg-gradient-primary text-white shadow' : 'text-blueberry/70'}`}>
               Đăng ký
             </button>
             <button
               onClick={() => switchMode('login')}
-              className={`flex-1 py-2 rounded-full text-sm font-bold transition ${mode === 'login' ? 'bg-white text-blueberry shadow' : 'text-white/70'}`}>
+              className={`flex-1 py-2 rounded-full text-sm font-bold transition ${mode === 'login' ? 'bg-gradient-primary text-white shadow' : 'text-blueberry/70'}`}>
               Đăng nhập
             </button>
           </div>
 
-          <p className="text-xs text-white/50 font-semibold mb-5">
+          <p className="text-xs text-blueberry/60 font-semibold mb-5">
             {mode === 'signup' ? 'Điền thông tin để tạo tài khoản mới' : 'Chào mừng trở lại, đăng nhập để tiếp tục'}
           </p>
 
@@ -3570,16 +3811,16 @@ function AuthScreen() {
               <div className="flex gap-3">
                 <input
                   value={firstName} onChange={(e) => setFirstName(e.target.value)}
-                  placeholder="Tên" className="w-1/2 bg-white/10 border border-white/10 rounded-full px-5 py-3.5 text-sm text-white placeholder:text-white/40 outline-none focus:border-white/40 focus:bg-white/[0.14] transition font-semibold"
+                  placeholder="Tên" className="w-1/2 bg-white/55 border border-white/70 rounded-full px-5 py-3.5 text-sm text-black placeholder:text-black/45 outline-none focus:border-white focus:bg-white/75 transition font-semibold"
                 />
                 <input
                   value={lastName} onChange={(e) => setLastName(e.target.value)}
-                  placeholder="Họ" className="w-1/2 bg-white/10 border border-white/10 rounded-full px-5 py-3.5 text-sm text-white placeholder:text-white/40 outline-none focus:border-white/40 focus:bg-white/[0.14] transition font-semibold"
+                  placeholder="Họ" className="w-1/2 bg-white/55 border border-white/70 rounded-full px-5 py-3.5 text-sm text-black placeholder:text-black/45 outline-none focus:border-white focus:bg-white/75 transition font-semibold"
                 />
               </div>
             )}
             <div className="relative">
-              <Mail size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-white/40 pointer-events-none" />
+              <Mail size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-blueberry/50 pointer-events-none" />
               <input
                 type="email" value={email} onChange={(e) => setEmail(e.target.value)}
                 placeholder="Email của bạn" autoCapitalize="none"
@@ -3587,13 +3828,13 @@ function AuthScreen() {
               />
             </div>
             <div className="relative">
-              <Lock size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-white/40 pointer-events-none" />
+              <Lock size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-blueberry/50 pointer-events-none" />
               <input
                 type={showPassword ? 'text' : 'password'} value={password} onChange={(e) => setPassword(e.target.value)}
                 placeholder="Mật khẩu (tối thiểu 6 ký tự)"
                 className={`${fieldClass} pl-11 pr-11`}
               />
-              <button type="button" onClick={() => setShowPassword((v) => !v)} className="absolute right-4 top-1/2 -translate-y-1/2 text-white/40 hover:text-white/70 transition">
+              <button type="button" onClick={() => setShowPassword((v) => !v)} className="absolute right-4 top-1/2 -translate-y-1/2 text-blueberry/50 hover:text-blueberry transition">
                 {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
               </button>
             </div>
@@ -3601,38 +3842,38 @@ function AuthScreen() {
 
           {mode === 'login' && (
             <div className="flex items-center justify-between mt-3.5 px-1">
-              <label className="flex items-center gap-1.5 text-xs text-white/60 font-semibold cursor-pointer select-none">
+              <label className="flex items-center gap-1.5 text-xs text-blueberry/70 font-semibold cursor-pointer select-none">
                 <input type="checkbox" checked={rememberMe} onChange={(e) => setRememberMe(e.target.checked)} className="w-3.5 h-3.5 rounded accent-turquoise" />
                 Ghi nhớ đăng nhập
               </label>
-              <button type="button" onClick={handleForgotPassword} className="text-xs text-turquoise-light font-bold hover:underline">
+              <button type="button" onClick={handleForgotPassword} className="text-xs text-blueberry font-bold hover:underline">
                 Quên mật khẩu?
               </button>
             </div>
           )}
 
           {message && (
-            <p className={`text-sm text-center mt-4 rounded-xl py-2 px-3 border ${isError ? 'text-cotton-candy-light bg-cotton-candy/10 border-cotton-candy/20' : 'text-turquoise-light bg-turquoise/10 border-turquoise/20'}`}>
+            <p className={`text-sm text-center mt-4 rounded-xl py-2 px-3 border ${isError ? 'text-cotton-candy bg-white/60 border-cotton-candy/30' : 'text-turquoise bg-white/60 border-turquoise/30'}`}>
               {message}
             </p>
           )}
 
           <button
             onClick={handleSubmit} disabled={loading}
-            className="w-full bg-white text-blueberry rounded-full py-3.5 font-bold flex items-center justify-center gap-2 disabled:opacity-60 mt-5 shadow-lg shadow-black/20 hover:bg-white/90 transition"
+            className="w-full bg-gradient-primary text-white rounded-full py-3.5 font-bold flex items-center justify-center gap-2 disabled:opacity-60 mt-5 shadow-lg shadow-turquoise/40 hover:brightness-105 transition"
           >
             {loading ? <Loader2 size={18} className="animate-spin" /> : null}
             {mode === 'signup' ? 'Tạo tài khoản' : 'Đăng nhập'}
           </button>
 
-          <p className="text-center text-xs text-white/60 mt-5 font-semibold">
+          <p className="text-center text-xs text-blueberry/70 mt-5 font-semibold">
             {mode === 'signup' ? 'Đã có tài khoản? ' : 'Chưa có tài khoản? '}
-            <button type="button" onClick={() => switchMode(mode === 'signup' ? 'login' : 'signup')} className="text-white font-bold hover:underline">
+            <button type="button" onClick={() => switchMode(mode === 'signup' ? 'login' : 'signup')} className="text-blueberry font-bold hover:underline">
               {mode === 'signup' ? 'Đăng nhập' : 'Đăng ký'}
             </button>
           </p>
 
-          <p className="text-center text-[11px] text-white/30 mt-4 font-semibold">
+          <p className="text-center text-[11px] text-blueberry/50 mt-4 font-semibold">
             Dữ liệu tài chính của bạn được mã hóa và chỉ bạn có thể xem.
           </p>
           </div>
