@@ -469,7 +469,7 @@ function EmojiCircle({ emoji, size = 36, active = false, activeColor = '#0DBACC'
 
 function SummaryCard({ icon: Icon, iconBg, label, value, sub }) {
   return (
-    <div className="bg-white dark:bg-[#1e1e32] rounded-2xl shadow-soft border-0 dark:border dark:border-light-grey/10 p-4">
+    <div className="bg-white dark:bg-[#1e1e32] rounded-2xl shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)] p-4">
       <div className="flex items-center justify-between mb-3">
         <div className={`w-9 h-9 rounded-xl flex items-center justify-center ${iconBg}`}>
           <Icon size={16} className="text-white" />
@@ -512,23 +512,33 @@ function BottomNav({ screen, setScreen, onAddClick, displayName, avatarUrl, them
 
   return (
     <>
-      <div className="fixed bottom-4 left-1/2 -translate-x-1/2 w-[calc(100%-1.5rem)] max-w-sm bg-white dark:bg-[#1e1e32] rounded-full shadow-card px-6 py-3 flex items-center justify-between z-10 md:hidden">
-        <div className="flex items-center gap-7">
+      <div
+        className="fixed bottom-4 left-1/2 -translate-x-1/2 w-[calc(100%-1.5rem)] max-w-sm rounded-full px-6 py-3 flex items-center justify-between z-10 md:hidden bg-white/30 dark:bg-[#1e1e32]/45 backdrop-blur-[30px] backdrop-saturate-[200%] border border-white/70 dark:border-white/10"
+        style={{ boxShadow: 'inset 0 1.5px 1px rgba(255,255,255,0.85), inset 0 -1px 12px rgba(255,255,255,0.2), 0 15px 40px -8px rgba(48,49,80,0.35)' }}
+      >
+        {/* lớp kính bóng: bọc riêng + bo tròn + overflow-hidden để không cắt mất nút "+" nhô lên trên */}
+        <div className="pointer-events-none absolute inset-0 z-0 rounded-full overflow-hidden">
+          <div className="absolute inset-0 bg-gradient-to-b from-white/50 dark:from-white/10 via-white/5 dark:via-white/0 to-transparent" />
+          <div className="absolute -top-8 left-6 w-20 h-20 rounded-full bg-white/50 dark:bg-white/10 blur-2xl" />
+          <div className="absolute -bottom-8 right-10 w-16 h-16 rounded-full bg-turquoise/25 blur-2xl" />
+        </div>
+
+        <div className="relative z-10 flex items-center gap-7">
           <button onClick={() => setScreen('dashboard')}><Home size={19} className={screen === 'dashboard' ? 'text-turquoise' : 'text-light-grey'} /></button>
           <button onClick={() => setScreen('funds')}><PiggyBank size={19} className={screen === 'funds' ? 'text-turquoise' : 'text-light-grey'} /></button>
         </div>
-        <button onClick={onAddClick} className="w-11 h-11 rounded-full bg-gradient-primary flex items-center justify-center -mt-6 shadow-lg shadow-turquoise/30 flex-shrink-0"><Plus size={20} className="text-white" /></button>
-        <div className="flex items-center gap-7">
+        <button onClick={onAddClick} className="relative z-10 w-11 h-11 rounded-full bg-gradient-primary flex items-center justify-center -mt-6 shadow-lg shadow-turquoise/30 flex-shrink-0"><Plus size={20} className="text-white" /></button>
+        <div className="relative z-10 flex items-center gap-7">
           <button onClick={() => setScreen('accounts')}><Wallet size={19} className={screen === 'accounts' ? 'text-turquoise' : 'text-light-grey'} /></button>
           <button onClick={() => setScreen('goals')}><Sparkles size={19} className={screen === 'goals' ? 'text-turquoise' : 'text-light-grey'} /></button>
         </div>
       </div>
 
-      <button onClick={toggleTheme} className="fixed top-6 right-5 w-10 h-10 rounded-full bg-white/90 dark:bg-night-sky/90 backdrop-blur shadow-lg flex items-center justify-center z-20 md:hidden">
+      <button onClick={toggleTheme} className="fixed top-6 right-5 w-10 h-10 rounded-full bg-white/40 dark:bg-night-sky/45 backdrop-blur-[24px] backdrop-saturate-[200%] border border-white/70 dark:border-white/10 shadow-lg flex items-center justify-center z-20 md:hidden">
         {theme === 'dark' ? <Sun size={17} className="text-turquoise" /> : <Moon size={17} className="text-blueberry" />}
       </button>
 
-      <div className={`hidden md:flex flex-col fixed left-0 top-0 h-screen ${sidebarCollapsed ? 'w-20 px-2' : 'w-64 px-5'} bg-white dark:bg-[#1e1e32] border-r border-light-grey/20 dark:border-light-grey/10 py-6 z-20 transition-all duration-200`}>
+      <div className={`hidden md:flex flex-col fixed left-0 top-0 h-screen ${sidebarCollapsed ? 'w-20 px-2' : 'w-64 px-5'} bg-white dark:bg-[#1e1e32] border-r border-[rgba(189,189,203,0.2)] dark:border-[rgba(189,189,203,0.1)] py-6 z-20 transition-all duration-200`}>
         <div className={`flex items-center mb-8 ${sidebarCollapsed ? 'justify-center px-0' : 'gap-2 px-1'}`}>
           <div className="w-9 h-9 rounded-xl bg-gradient-primary flex items-center justify-center flex-shrink-0">
             <Wallet size={17} className="text-white" />
@@ -573,7 +583,7 @@ function BottomNav({ screen, setScreen, onAddClick, displayName, avatarUrl, them
         </div>
       </div>
 
-      <div className={`hidden md:flex fixed top-0 ${sidebarCollapsed ? 'left-20' : 'left-64'} right-0 h-20 bg-white/80 dark:bg-[#1e1e32]/80 backdrop-blur border-b border-light-grey/20 dark:border-light-grey/10 items-center px-8 z-10 transition-all duration-200`}>
+      <div className={`hidden md:flex fixed top-0 ${sidebarCollapsed ? 'left-20' : 'left-64'} right-0 h-20 bg-white/80 dark:bg-[#1e1e32]/80 backdrop-blur border-b border-[rgba(189,189,203,0.2)] dark:border-[rgba(189,189,203,0.1)] items-center px-8 z-10 transition-all duration-200`}>
         <div className="flex items-center gap-2 bg-ice-cream dark:bg-night-sky/50 rounded-full px-4 py-2.5 w-72">
           <Search size={16} className="text-steel dark:text-light-grey" />
           <input placeholder="Tìm kiếm nhanh" className="bg-transparent outline-none text-sm flex-1 text-blueberry dark:text-white placeholder:text-steel dark:placeholder:text-light-grey" />
@@ -598,7 +608,7 @@ function BottomNav({ screen, setScreen, onAddClick, displayName, avatarUrl, them
             {showDesktopMenu && (
               <>
                 <div className="fixed inset-0 z-30" onClick={() => setShowDesktopMenu(false)} />
-                <div className="absolute top-12 right-0 bg-white dark:bg-[#1e1e32] rounded-2xl shadow-card border-0 dark:border dark:border-light-grey/10 py-1.5 w-56 z-40">
+                <div className="absolute top-12 right-0 bg-white dark:bg-[#1e1e32] rounded-2xl shadow-card border-0 dark:border dark:border-[rgba(189,189,203,0.1)] py-1.5 w-56 z-40">
                   <button onClick={() => { setShowDesktopMenu(false); openSettings ? openSettings('profile') : setScreen('settings'); }} className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-blueberry dark:text-white hover:bg-ice-cream dark:hover:bg-night-sky/30">
                     <UserCog size={15} /> Cài đặt tài khoản
                   </button>
@@ -1462,7 +1472,7 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
             {showAccountMenu && (
               <>
                 <div className="fixed inset-0 z-30" onClick={() => setShowAccountMenu(false)} />
-                <div className="absolute top-14 right-0 bg-white dark:bg-[#1e1e32] rounded-2xl shadow-card border-0 dark:border dark:border-light-grey/10 py-1.5 w-52 z-40">
+                <div className="absolute top-14 right-0 bg-white dark:bg-[#1e1e32] rounded-2xl shadow-card border-0 dark:border dark:border-[rgba(189,189,203,0.1)] py-1.5 w-52 z-40">
                   <button onClick={() => { setShowAccountMenu(false); openSettings ? openSettings('profile') : setScreen('settings'); }} className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-blueberry dark:text-white hover:bg-ice-cream dark:hover:bg-night-sky/30">
                     <UserCog size={15} /> Cài đặt tài khoản
                   </button>
@@ -1492,7 +1502,7 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
               </button>
             ))}
         </div>
-        <div className="mt-6 bg-white dark:bg-[#1e1e32] rounded-t-[2.5rem] min-h-[60vh] px-5 pt-6 pb-6 shadow-soft">
+        <div className="mt-6 bg-white dark:bg-[#1e1e32] rounded-[2.5rem] min-h-[60vh] px-5 pt-6 pb-6 shadow-soft">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-blueberry dark:text-white font-extrabold text-lg">Ngân sách tháng này</h2>
           </div>
@@ -1580,7 +1590,7 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
           <div className="flex items-center justify-between mt-8 mb-3"><h2 className="text-blueberry dark:text-white font-extrabold text-lg">Giao dịch</h2></div>
           {loading ? <div className="flex justify-center py-8"><Loader2 size={24} className="animate-spin text-turquoise" /></div>
             : transactions.length === 0 ? <p className="text-steel dark:text-light-grey text-sm text-center py-8">Chưa có giao dịch nào. Bấm nút + để thêm.</p>
-            : <div className="flex flex-col divide-y divide-light-grey/20 dark:divide-light-grey/10">
+            : <div className="flex flex-col divide-y divide-[rgba(189,189,203,0.2)] dark:divide-[rgba(189,189,203,0.1)]">
                 {transactions.slice(0, 20).map((tx) => {
                   const cat = categories.find((c) => c.id === tx.category_id);
                   return (
@@ -1613,7 +1623,7 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
             `,
           }}
         >
-          <div style={{ gridArea: 'chart' }} className="bg-white dark:bg-[#1e1e32] rounded-3xl p-6 shadow-soft border-0 dark:border dark:border-light-grey/10 transition-colors">
+          <div style={{ gridArea: 'chart' }} className="bg-white dark:bg-[#1e1e32] rounded-3xl p-6 shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)] transition-colors">
             <p className="text-blueberry dark:text-white font-extrabold mb-4">Tổng quan tài sản</p>
             <div className="grid grid-cols-3 gap-4 mb-6">
               <div>
@@ -1654,7 +1664,7 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
           </div>
 
           <div style={{ gridArea: 'right' }} className="flex flex-col gap-6">
-            <div className="bg-white dark:bg-[#1e1e32] rounded-3xl p-6 shadow-soft border-0 dark:border dark:border-light-grey/10 transition-colors w-full">
+            <div className="bg-white dark:bg-[#1e1e32] rounded-3xl p-6 shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)] transition-colors w-full">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-blueberry dark:text-white font-extrabold">Ví</h3>
                 <div className="flex items-center gap-1.5">
@@ -1668,7 +1678,7 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
                     {showWalletPopover && (
                       <>
                         <div className="fixed inset-0 z-30" onClick={() => setShowWalletPopover(false)} />
-                        <div className="absolute top-9 right-0 bg-white dark:bg-[#1e1e32] rounded-2xl shadow-card border-0 dark:border dark:border-light-grey/10 py-1.5 w-56 z-40 max-h-72 overflow-y-auto">
+                        <div className="absolute top-9 right-0 bg-white dark:bg-[#1e1e32] rounded-2xl shadow-card border-0 dark:border dark:border-[rgba(189,189,203,0.1)] py-1.5 w-56 z-40 max-h-72 overflow-y-auto">
                           {accounts.length === 0 ? (
                             <p className="text-steel dark:text-light-grey text-xs text-center py-4 px-4">Chưa có ví nào.</p>
                           ) : accounts.map((acc) => (
@@ -1686,7 +1696,7 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
               </div>
 
               {accounts.length === 0 ? (
-                <button onClick={() => setShowAddWallet(true)} className="w-full border-2 border-dashed border-light-grey/40 dark:border-light-grey/20 rounded-3xl py-8 flex flex-col items-center gap-1.5 text-steel dark:text-light-grey hover:border-turquoise dark:hover:border-turquoise transition">
+                <button onClick={() => setShowAddWallet(true)} className="w-full border-2 border-dashed border-[rgba(189,189,203,0.4)] dark:border-[rgba(189,189,203,0.2)] rounded-3xl py-8 flex flex-col items-center gap-1.5 text-steel dark:text-light-grey hover:border-turquoise dark:hover:border-turquoise transition">
                   <Wallet size={22} />
                   <span className="text-xs font-bold">Chưa có ví nào — bấm để thêm ví đầu tiên</span>
                 </button>
@@ -1741,7 +1751,7 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
               {showAddWallet && <EditAccountModal onClose={() => setShowAddWallet(false)} onSaved={reload} isNew={true} />}
             </div>
 
-            <div className="bg-white dark:bg-[#1e1e32] rounded-3xl p-6 shadow-soft border-0 dark:border dark:border-light-grey/10 transition-colors flex-1">
+            <div className="bg-white dark:bg-[#1e1e32] rounded-3xl p-6 shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)] transition-colors flex-1">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-blueberry dark:text-white font-extrabold">Giao dịch gần đây</h3>
                 <select value={recentTxFilter} onChange={(e) => setRecentTxFilter(e.target.value)} className="bg-ice-cream dark:bg-night-sky rounded-full text-xs font-bold px-3 py-1.5 outline-none text-blueberry dark:text-white">
@@ -1753,7 +1763,7 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
               {loading ? <div className="flex justify-center py-6"><Loader2 size={20} className="animate-spin text-turquoise" /></div>
                 : recentTxList.length === 0 ? <p className="text-steel dark:text-light-grey text-sm text-center py-4">Không có giao dịch nào.</p>
                 : (
-                  <div className="flex flex-col divide-y divide-light-grey/20 dark:divide-light-grey/10">
+                  <div className="flex flex-col divide-y divide-[rgba(189,189,203,0.2)] dark:divide-[rgba(189,189,203,0.1)]">
                     {recentTxList.map((tx) => {
                       const cat = categories.find((c) => c.id === tx.category_id);
                       return (
@@ -1773,7 +1783,7 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
           </div>
 
           <div style={{ gridArea: 'incexp' }} className="grid grid-cols-2 gap-6 items-stretch">
-            <div className="bg-white dark:bg-[#1e1e32] rounded-3xl p-6 shadow-soft border-0 dark:border dark:border-light-grey/10 transition-colors h-full">
+            <div className="bg-white dark:bg-[#1e1e32] rounded-3xl p-6 shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)] transition-colors h-full">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-blueberry dark:text-white font-extrabold">Tổng thu nhập</h3>
                 <TotalsPeriodSelect month={incomeTotalsMonth} year={incomeTotalsYear} onMonthChange={setIncomeTotalsMonth} onYearChange={setIncomeTotalsYear} />
@@ -1805,7 +1815,7 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
               )}
             </div>
 
-            <div className="bg-white dark:bg-[#1e1e32] rounded-3xl p-6 shadow-soft border-0 dark:border dark:border-light-grey/10 transition-colors h-full">
+            <div className="bg-white dark:bg-[#1e1e32] rounded-3xl p-6 shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)] transition-colors h-full">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-blueberry dark:text-white font-extrabold">Tổng chi tiêu</h3>
                 <TotalsPeriodSelect month={expenseTotalsMonth} year={expenseTotalsYear} onMonthChange={setExpenseTotalsMonth} onYearChange={setExpenseTotalsYear} />
@@ -1838,7 +1848,7 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
             </div>
           </div>
 
-          <div style={{ gridArea: 'cost' }} className="bg-white dark:bg-[#1e1e32] rounded-3xl p-6 shadow-soft border-0 dark:border dark:border-light-grey/10 transition-colors">
+          <div style={{ gridArea: 'cost' }} className="bg-white dark:bg-[#1e1e32] rounded-3xl p-6 shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)] transition-colors">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-blueberry dark:text-white font-extrabold">Phân tích chi phí</h3>
             </div>
@@ -1866,7 +1876,7 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
             )}
           </div>
 
-          <div style={{ gridArea: 'health' }} className="bg-white dark:bg-[#1e1e32] rounded-3xl p-6 shadow-soft border-0 dark:border dark:border-light-grey/10 transition-colors flex flex-col items-center">
+          <div style={{ gridArea: 'health' }} className="bg-white dark:bg-[#1e1e32] rounded-3xl p-6 shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)] transition-colors flex flex-col items-center">
             <h3 className="text-blueberry dark:text-white font-extrabold self-start mb-1">Sức khỏe tài chính</h3>
             <p className="text-steel dark:text-light-grey text-xs self-start mb-4 font-semibold">Tỷ lệ tiết kiệm</p>
             <svg width="100" height="100" viewBox="0 0 120 120" className="-rotate-90">
@@ -1878,7 +1888,7 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
             <p className="text-steel dark:text-light-grey text-xs mt-14">Dựa trên tháng này</p>
           </div>
 
-          <div style={{ gridArea: 'goal' }} className="bg-white dark:bg-[#1e1e32] rounded-3xl p-6 shadow-soft border-0 dark:border dark:border-light-grey/10 transition-colors">
+          <div style={{ gridArea: 'goal' }} className="bg-white dark:bg-[#1e1e32] rounded-3xl p-6 shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)] transition-colors">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-blueberry dark:text-white font-extrabold">Mục tiêu</h3>
               <button onClick={() => setScreen('goals')} className="text-turquoise text-xs font-bold">Xem tất cả</button>
@@ -1903,7 +1913,7 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
         </div>
 
         <div className="grid grid-cols-2 gap-6 mt-6">
-          <div className="bg-white dark:bg-[#1e1e32] rounded-3xl p-6 shadow-soft border-0 dark:border dark:border-light-grey/10 transition-colors">
+          <div className="bg-white dark:bg-[#1e1e32] rounded-3xl p-6 shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)] transition-colors">
             <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
               <h3 className="text-blueberry dark:text-white font-extrabold">Thu nhập theo danh mục</h3>
               <PeriodControls />
@@ -1913,7 +1923,7 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
             )}
           </div>
 
-          <div className="bg-white dark:bg-[#1e1e32] rounded-3xl p-6 shadow-soft border-0 dark:border dark:border-light-grey/10 transition-colors">
+          <div className="bg-white dark:bg-[#1e1e32] rounded-3xl p-6 shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)] transition-colors">
             <h3 className="text-blueberry dark:text-white font-extrabold mb-4">Chi tiêu theo danh mục</h3>
             {expenseSeries.length === 0 ? <p className="text-steel dark:text-light-grey text-sm text-center py-6">Chưa có chi tiêu trong khoảng này.</p> : (
               <CategoryBarChart series={expenseSeries} maxVal={maxExpenseBucketVal} />
@@ -1998,7 +2008,7 @@ function Funds({ setScreen, categories, transactions, onOpenFund, reload, onAddC
 
   return (
     <div className={`min-h-screen relative bg-ice-cream dark:bg-night-sky flex justify-center ${sidebarCollapsed ? 'md:pl-20' : 'md:pl-64'} md:pt-20 transition-colors`}>
-      <div className="absolute inset-0 bg-gradient-warm md:hidden opacity-70" />
+      <div className="absolute inset-0 bg-gradient-secondary md:hidden opacity-70" />
       <div className="w-full max-w-sm md:hidden min-h-screen pb-28 relative">
         <div className="px-5 pt-8">
           <div className="flex items-center gap-2 bg-white rounded-2xl shadow-soft px-4 py-3">
@@ -2064,7 +2074,7 @@ function Funds({ setScreen, categories, transactions, onOpenFund, reload, onAddC
           <SummaryCard icon={Sparkles} iconBg="bg-lavender" label="Tổng số lượng quỹ" value={funds.length} sub={`${doneCount} đã đạt mục tiêu`} />
         </div>
 
-        <div className="bg-white dark:bg-[#1e1e32] rounded-3xl shadow-soft border-0 dark:border dark:border-light-grey/10 overflow-hidden">
+        <div className="bg-white dark:bg-[#1e1e32] rounded-3xl shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)] overflow-hidden">
           <div className="flex items-center justify-between p-5 pb-3 flex-wrap gap-3">
             <div className="flex items-center gap-2 flex-wrap">
               {filterTarget !== 'all' && (
@@ -2083,11 +2093,11 @@ function Funds({ setScreen, categories, transactions, onOpenFund, reload, onAddC
                 <button onClick={() => { setFilterTarget('all'); setFilterRate('all'); setPage(1); }} className="text-xs font-bold text-steel dark:text-light-grey hover:text-blueberry dark:hover:text-white underline">Reset</button>
               )}
               <div className="relative">
-                <button onClick={(e) => { e.stopPropagation(); setShowFilterMenu((v) => !v); setShowSortMenu(false); }} className="flex items-center gap-1.5 border border-dashed border-steel/40 dark:border-light-grey/30 rounded-full px-3 py-1.5 text-xs font-bold text-steel dark:text-light-grey hover:border-turquoise dark:hover:border-turquoise">
+                <button onClick={(e) => { e.stopPropagation(); setShowFilterMenu((v) => !v); setShowSortMenu(false); }} className="flex items-center gap-1.5 border border-dashed border-[rgba(126,127,144,0.4)] dark:border-[rgba(189,189,203,0.3)] rounded-full px-3 py-1.5 text-xs font-bold text-steel dark:text-light-grey hover:border-turquoise dark:hover:border-turquoise">
                   <Filter size={13} /> Thêm bộ lọc
                 </button>
                 {showFilterMenu && (
-                  <div onClick={(e) => e.stopPropagation()} className="absolute left-0 top-9 z-20 bg-white dark:bg-[#1e1e32] border-0 dark:border dark:border-light-grey/10 rounded-2xl shadow-card p-4 w-64">
+                  <div onClick={(e) => e.stopPropagation()} className="absolute left-0 top-9 z-20 bg-white dark:bg-[#1e1e32] border-0 dark:border dark:border-[rgba(189,189,203,0.1)] rounded-2xl shadow-card p-4 w-64">
                     <p className="text-xs font-bold text-steel dark:text-light-grey mb-2">Mục tiêu quỹ</p>
                     <div className="flex flex-wrap gap-2 mb-4">
                       {[['all', 'Tất cả'], ['none', 'Chưa đặt'], ['set', 'Đang tích lũy'], ['done', 'Đã đạt']].map(([k, l]) => (
@@ -2110,11 +2120,11 @@ function Funds({ setScreen, categories, transactions, onOpenFund, reload, onAddC
 
             <div className="flex items-center gap-2">
               <div className="relative">
-                <button onClick={(e) => { e.stopPropagation(); setShowSortMenu((v) => !v); setShowFilterMenu(false); }} className="flex items-center gap-2 border border-steel/30 dark:border-light-grey/20 rounded-full px-4 py-2 text-sm text-blueberry dark:text-white font-semibold">
+                <button onClick={(e) => { e.stopPropagation(); setShowSortMenu((v) => !v); setShowFilterMenu(false); }} className="flex items-center gap-2 border border-[rgba(126,127,144,0.3)] dark:border-[rgba(189,189,203,0.2)] rounded-full px-4 py-2 text-sm text-blueberry dark:text-white font-semibold">
                   <ArrowUpDown size={14} /> {activeSortField.label}
                 </button>
                 {showSortMenu && (
-                  <div onClick={(e) => e.stopPropagation()} className="absolute right-0 top-10 z-20 bg-white dark:bg-[#1e1e32] border-0 dark:border dark:border-light-grey/10 rounded-2xl shadow-card p-2 w-56">
+                  <div onClick={(e) => e.stopPropagation()} className="absolute right-0 top-10 z-20 bg-white dark:bg-[#1e1e32] border-0 dark:border dark:border-[rgba(189,189,203,0.1)] rounded-2xl shadow-card p-2 w-56">
                     <p className="text-xs font-bold text-steel dark:text-light-grey px-2 py-1.5">Sắp xếp theo</p>
                     {FUND_SORT_FIELDS.map((f) => (
                       <button key={f.key} onClick={() => { setSortField((cur) => { if (cur === f.key) { setSortDir((d) => (d === 'asc' ? 'desc' : 'asc')); return cur; } setSortDir(f.key === 'created' ? 'desc' : 'asc'); return f.key; }); }}
@@ -2146,7 +2156,7 @@ function Funds({ setScreen, categories, transactions, onOpenFund, reload, onAddC
             </div>
           </div>
 
-          <div className="border-t border-light-grey/20 dark:border-light-grey/10">
+          <div className="border-t border-[rgba(189,189,203,0.2)] dark:border-[rgba(189,189,203,0.1)]">
             {funds.length === 0 ? (
               <p className="text-steel dark:text-light-grey text-sm text-center py-16">Chưa có quỹ nào. Bấm "Tạo quỹ mới" để bắt đầu.</p>
             ) : displayFunds.length === 0 ? (
@@ -2160,7 +2170,7 @@ function Funds({ setScreen, categories, transactions, onOpenFund, reload, onAddC
                   const isDone = target > 0 && balance >= target;
                   const rStyle = fundRateStyle(f);
                   return (
-                    <div key={f.id} onClick={() => onOpenFund(f.id, 'funds')} className="bg-white dark:bg-[#1e1e32] rounded-2xl border-0 dark:border dark:border-light-grey/10 overflow-hidden shadow-soft hover:shadow-card transition cursor-pointer">
+                    <div key={f.id} onClick={() => onOpenFund(f.id, 'funds')} className="bg-white dark:bg-[#1e1e32] rounded-2xl border-0 dark:border dark:border-[rgba(189,189,203,0.1)] overflow-hidden shadow-soft hover:shadow-card transition cursor-pointer">
                       <div
                         className="relative h-24 flex items-end p-4"
                         style={f.background_url
@@ -2177,7 +2187,7 @@ function Funds({ setScreen, categories, transactions, onOpenFund, reload, onAddC
                           <MoreHorizontal size={14} />
                         </button>
                         {openMenuId === f.id && (
-                          <div onClick={(e) => e.stopPropagation()} className="absolute top-10 right-2.5 z-20 bg-white dark:bg-[#1e1e32] border-0 dark:border dark:border-light-grey/10 rounded-xl shadow-card py-1 w-40 text-left">
+                          <div onClick={(e) => e.stopPropagation()} className="absolute top-10 right-2.5 z-20 bg-white dark:bg-[#1e1e32] border-0 dark:border dark:border-[rgba(189,189,203,0.1)] rounded-xl shadow-card py-1 w-40 text-left">
                             <button onClick={() => { onOpenFund(f.id, 'funds'); setOpenMenuId(null); }} className="w-full flex items-center gap-2 px-3 py-2 text-sm text-blueberry dark:text-white hover:bg-ice-cream dark:hover:bg-night-sky/30">
                               <Eye size={14} /> Xem chi tiết
                             </button>
@@ -2200,7 +2210,7 @@ function Funds({ setScreen, categories, transactions, onOpenFund, reload, onAddC
                           <span className="text-[10px] font-bold px-2 py-1 rounded-full" style={{ color: rStyle.color, background: rStyle.bg }}>{rStyle.value}</span>
                           <span className={`text-[10px] font-bold px-2 py-1 rounded-full ${isDone ? 'bg-turquoise/10 text-turquoise' : 'bg-ice-cream text-steel dark:bg-night-sky dark:text-light-grey'}`}>{target > 0 ? (isDone ? 'Đã đạt' : 'Đang tích lũy') : 'Chưa đặt mục tiêu'}</span>
                         </div>
-                        <div className="flex items-center justify-between text-xs text-steel dark:text-light-grey pt-3 border-t border-light-grey/20 dark:border-light-grey/10">
+                        <div className="flex items-center justify-between text-xs text-steel dark:text-light-grey pt-3 border-t border-[rgba(189,189,203,0.2)] dark:border-[rgba(189,189,203,0.1)]">
                           <span className="flex items-center gap-1"><Calendar size={12} /> {f.created_at ? new Date(f.created_at).toLocaleDateString('vi-VN') : '—'}</span>
                           <span>{target > 0 ? formatMoney(target) : '—'}</span>
                         </div>
@@ -2213,7 +2223,7 @@ function Funds({ setScreen, categories, transactions, onOpenFund, reload, onAddC
               <div className="overflow-x-auto">
                 <table className="w-full text-sm min-w-[1000px]">
                   <thead>
-                    <tr className="text-left text-steel dark:text-light-grey border-b border-light-grey/20 dark:border-light-grey/10">
+                    <tr className="text-left text-steel dark:text-light-grey border-b border-[rgba(189,189,203,0.2)] dark:border-[rgba(189,189,203,0.1)]">
                       <th className="p-4 font-bold">Tên quỹ</th>
                       <th className="p-4 font-bold">Lãi suất</th>
                       <th className="p-4 font-bold text-right">Số dư hiện tại</th>
@@ -2231,7 +2241,7 @@ function Funds({ setScreen, categories, transactions, onOpenFund, reload, onAddC
                       const isDone = target > 0 && balance >= target;
                       const rStyle = fundRateStyle(f);
                       return (
-                        <tr key={f.id} onClick={() => onOpenFund(f.id, 'funds')} className="border-b border-light-grey/20 dark:border-light-grey/10 last:border-0 hover:bg-ice-cream dark:hover:bg-night-sky/30 cursor-pointer">
+                        <tr key={f.id} onClick={() => onOpenFund(f.id, 'funds')} className="border-b border-[rgba(189,189,203,0.2)] dark:border-[rgba(189,189,203,0.1)] last:border-0 hover:bg-ice-cream dark:hover:bg-night-sky/30 cursor-pointer">
                           <td className="p-4">
                             <div className="flex items-center gap-3">
                               <EmojiCircle emoji={f.icon} size={36} bg="#E3D6FF" />
@@ -2254,7 +2264,7 @@ function Funds({ setScreen, categories, transactions, onOpenFund, reload, onAddC
                               <MoreHorizontal size={18} />
                             </button>
                             {openMenuId === f.id && (
-                              <div onClick={(e) => e.stopPropagation()} className="absolute right-4 top-12 z-20 bg-white dark:bg-[#1e1e32] border-0 dark:border dark:border-light-grey/10 rounded-xl shadow-card py-1 w-40 text-left">
+                              <div onClick={(e) => e.stopPropagation()} className="absolute right-4 top-12 z-20 bg-white dark:bg-[#1e1e32] border-0 dark:border dark:border-[rgba(189,189,203,0.1)] rounded-xl shadow-card py-1 w-40 text-left">
                                 <button onClick={() => { onOpenFund(f.id, 'funds'); setOpenMenuId(null); }} className="w-full flex items-center gap-2 px-3 py-2 text-sm text-blueberry dark:text-white hover:bg-ice-cream dark:hover:bg-night-sky/30">
                                   <Eye size={14} /> Xem chi tiết
                                 </button>
@@ -2274,10 +2284,10 @@ function Funds({ setScreen, categories, transactions, onOpenFund, reload, onAddC
           </div>
 
           {displayFunds.length > 0 && (
-            <div className="flex items-center justify-between p-5 border-t border-light-grey/20 dark:border-light-grey/10">
+            <div className="flex items-center justify-between p-5 border-t border-[rgba(189,189,203,0.2)] dark:border-[rgba(189,189,203,0.1)]">
               <p className="text-steel dark:text-light-grey text-xs font-semibold">Trang {currentPage} / {totalPages}</p>
               <div className="flex gap-2">
-                <button disabled={currentPage <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))} className="px-4 py-2 rounded-full border border-steel/30 dark:border-light-grey/20 text-sm text-blueberry dark:text-white font-semibold disabled:opacity-40">Previous</button>
+                <button disabled={currentPage <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))} className="px-4 py-2 rounded-full border border-[rgba(126,127,144,0.3)] dark:border-[rgba(189,189,203,0.2)] text-sm text-blueberry dark:text-white font-semibold disabled:opacity-40">Previous</button>
                 <button disabled={currentPage >= totalPages} onClick={() => setPage((p) => Math.min(totalPages, p + 1))} className="px-4 py-2 rounded-full bg-gradient-primary text-white text-sm font-bold disabled:opacity-40 shadow-md shadow-turquoise/30">Next</button>
               </div>
             </div>
@@ -2416,7 +2426,7 @@ function FundDetail({ category, transactions, onBack, reload, softDelete, setScr
                 {dailyProfitHistory.length > 0 && (
                   <div className="mt-4 text-left">
                     <p className="text-steel dark:text-light-grey text-sm font-bold mb-2">Lịch sử lợi nhuận theo ngày</p>
-                    <div className="flex flex-col divide-y divide-light-grey/20 dark:divide-light-grey/10 max-h-72 overflow-y-auto">
+                    <div className="flex flex-col divide-y divide-[rgba(189,189,203,0.2)] dark:divide-[rgba(189,189,203,0.1)] max-h-72 overflow-y-auto">
                       {dailyProfitHistory.map((d) => (
                         <div key={d.date.getTime()} className="flex items-center gap-3 py-2.5">
                           <div className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 bg-turquoise/10">
@@ -2509,7 +2519,7 @@ function FundDetail({ category, transactions, onBack, reload, softDelete, setScr
 
         <div className="grid grid-cols-3 gap-6">
           <div className="col-span-2 flex flex-col gap-6">
-            <div className="bg-white dark:bg-[#1e1e32] rounded-3xl p-6 shadow-soft border-0 dark:border dark:border-light-grey/10">
+            <div className="bg-white dark:bg-[#1e1e32] rounded-3xl p-6 shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)]">
               <p className="text-steel dark:text-light-grey text-sm font-semibold">Số dư hiện tại</p>
               <p className="text-blueberry dark:text-white text-4xl font-bold mt-1">{formatMoney(balance)}</p>
               {accruedProfit > 1 && <p className="text-turquoise text-sm mt-1 font-semibold">Trong đó lãi cộng dồn: {formatMoney(accruedProfit)}</p>}
@@ -2532,7 +2542,7 @@ function FundDetail({ category, transactions, onBack, reload, softDelete, setScr
               </div>
             </div>
 
-            <div className="bg-white dark:bg-[#1e1e32] rounded-3xl p-6 shadow-soft border-0 dark:border dark:border-light-grey/10">
+            <div className="bg-white dark:bg-[#1e1e32] rounded-3xl p-6 shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)]">
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-blueberry dark:text-white font-extrabold text-lg">Lịch sử</h2>
                 <div className="flex gap-2">
@@ -2550,7 +2560,7 @@ function FundDetail({ category, transactions, onBack, reload, softDelete, setScr
                     {dailyProfitHistory.length > 0 && (
                       <div className="mt-4 text-left">
                         <p className="text-steel dark:text-light-grey text-sm font-bold mb-2">Lịch sử lợi nhuận theo ngày</p>
-                        <div className="flex flex-col divide-y divide-light-grey/20 dark:divide-light-grey/10 max-h-80 overflow-y-auto">
+                        <div className="flex flex-col divide-y divide-[rgba(189,189,203,0.2)] dark:divide-[rgba(189,189,203,0.1)] max-h-80 overflow-y-auto">
                           {dailyProfitHistory.map((d) => (
                             <div key={d.date.getTime()} className="flex items-center gap-3 py-2.5">
                               <div className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 bg-turquoise/10">
@@ -2569,7 +2579,7 @@ function FundDetail({ category, transactions, onBack, reload, softDelete, setScr
                   </div>
                 )
               ) : history.length === 0 ? <p className="text-steel dark:text-light-grey text-sm text-center py-8">Chưa có giao dịch nào.</p> : (
-                <div className="flex flex-col divide-y divide-light-grey/20 dark:divide-light-grey/10">
+                <div className="flex flex-col divide-y divide-[rgba(189,189,203,0.2)] dark:divide-[rgba(189,189,203,0.1)]">
                   {history.map((tx) => {
                     const isInitial = tx.type === 'allocation' && firstAllocation && tx.id === firstAllocation.id;
                     return (
@@ -2596,7 +2606,7 @@ function FundDetail({ category, transactions, onBack, reload, softDelete, setScr
             </div>
           </div>
 
-          <div className="bg-white dark:bg-[#1e1e32] rounded-3xl p-6 shadow-soft border-0 dark:border dark:border-light-grey/10 h-fit">
+          <div className="bg-white dark:bg-[#1e1e32] rounded-3xl p-6 shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)] h-fit">
             <h3 className="text-blueberry dark:text-white font-extrabold mb-4">Thông tin quỹ</h3>
             <div className="flex flex-col gap-3 text-sm">
               <div className="flex justify-between"><span className="text-steel dark:text-light-grey font-semibold">Số tiền ban đầu</span><span className="text-blueberry dark:text-white font-bold">{initialAmount > 0 ? formatMoney(initialAmount) : '—'}</span></div>
@@ -2624,7 +2634,7 @@ function Accounts({ setScreen, accounts, transactions, onOpenAccount, reload, on
   const totalBalance = accounts.reduce((s, a) => s + accountBalance(a, transactions), 0);
   return (
     <div className={`min-h-screen relative bg-ice-cream dark:bg-night-sky flex justify-center ${sidebarCollapsed ? 'md:pl-20' : 'md:pl-64'} md:pt-20 transition-colors`}>
-      <div className="absolute inset-0 bg-gradient-cool md:hidden opacity-70" />
+      <div className="absolute inset-0 bg-gradient-primary md:hidden opacity-70" />
       <div className="w-full max-w-sm md:hidden min-h-screen pb-28 relative">
         <div className="px-5 pt-8 flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -2634,7 +2644,7 @@ function Accounts({ setScreen, accounts, transactions, onOpenAccount, reload, on
           <button onClick={() => setShowCreate(true)} className="w-9 h-9 rounded-full bg-white/30 backdrop-blur flex items-center justify-center"><Plus size={18} className="text-white" /></button>
         </div>
         <div className="px-5 mt-4 text-center"><p className="text-white/80 text-sm font-semibold">Tổng tất cả tài khoản</p><p className="text-white text-3xl font-bold">{formatMoney(totalBalance)}</p></div>
-        <div className="mt-6 bg-white dark:bg-[#1e1e32] rounded-t-[2.5rem] min-h-[70vh] px-5 pt-6 pb-6 shadow-soft">
+        <div className="mt-6 bg-white dark:bg-[#1e1e32] rounded-[2.5rem] min-h-[70vh] px-5 pt-6 pb-6 shadow-soft">
           {accounts.length === 0 ? <p className="text-steel dark:text-light-grey text-sm text-center py-10">Chưa có ví nào. Bấm + để thêm ví đầu tiên.</p> : (
             <div className="flex flex-col gap-3">
               {accounts.map((acc) => (
@@ -2665,7 +2675,7 @@ function Accounts({ setScreen, accounts, transactions, onOpenAccount, reload, on
         ) : (
           <div className="grid grid-cols-3 gap-5 mt-6">
             {accounts.map((acc) => (
-              <button key={acc.id} onClick={() => onOpenAccount(acc.id, 'accounts')} className="text-left bg-white dark:bg-[#1e1e32] rounded-3xl p-5 shadow-soft border-0 dark:border dark:border-light-grey/10 hover:shadow-card transition">
+              <button key={acc.id} onClick={() => onOpenAccount(acc.id, 'accounts')} className="text-left bg-white dark:bg-[#1e1e32] rounded-3xl p-5 shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)] hover:shadow-card transition">
                 <div className="flex items-center gap-3 mb-4">
                   <EmojiCircle emoji={acc.icon} size={44} active activeColor="#0DBACC" />
                   <div className="min-w-0">
@@ -2736,10 +2746,10 @@ function AccountDetail({ account, transactions, categories, onBack, reload, soft
           </div>
         </div>
 
-        <div className="mt-6 bg-white dark:bg-[#1e1e32] rounded-t-[2.5rem] min-h-[65vh] px-5 pt-6 pb-6 shadow-soft">
+        <div className="mt-6 bg-white dark:bg-[#1e1e32] rounded-[2.5rem] min-h-[65vh] px-5 pt-6 pb-6 shadow-soft">
           <h2 className="text-blueberry dark:text-white font-extrabold text-lg mb-3">Lịch sử</h2>
           {history.length === 0 ? <p className="text-steel dark:text-light-grey text-sm text-center py-8">Chưa có giao dịch nào.</p> : (
-            <div className="flex flex-col divide-y divide-light-grey/20 dark:divide-light-grey/10">
+            <div className="flex flex-col divide-y divide-[rgba(189,189,203,0.2)] dark:divide-[rgba(189,189,203,0.1)]">
               {history.map((tx) => {
                 const cat = categories.find((c) => c.id === tx.category_id);
                 const isDirectSet = tx.type === 'adjustment' && (tx.note || '').startsWith('[SET]');
@@ -2785,14 +2795,14 @@ function AccountDetail({ account, transactions, categories, onBack, reload, soft
 
         <div className="grid grid-cols-3 gap-6">
           <div className="col-span-2">
-            <div className="bg-white dark:bg-[#1e1e32] rounded-3xl p-6 shadow-soft border-0 dark:border dark:border-light-grey/10 mb-6">
+            <div className="bg-white dark:bg-[#1e1e32] rounded-3xl p-6 shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)] mb-6">
               <p className="text-steel dark:text-light-grey text-sm font-semibold">Số dư hiện tại</p>
               <p className="text-blueberry dark:text-white text-4xl font-bold mt-1">{formatMoney(balance)}</p>
             </div>
-            <div className="bg-white dark:bg-[#1e1e32] rounded-3xl p-6 shadow-soft border-0 dark:border dark:border-light-grey/10">
+            <div className="bg-white dark:bg-[#1e1e32] rounded-3xl p-6 shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)]">
               <h2 className="text-blueberry dark:text-white font-extrabold text-lg mb-4">Lịch sử</h2>
               {history.length === 0 ? <p className="text-steel dark:text-light-grey text-sm text-center py-8">Chưa có giao dịch nào.</p> : (
-                <div className="flex flex-col divide-y divide-light-grey/20 dark:divide-light-grey/10">
+                <div className="flex flex-col divide-y divide-[rgba(189,189,203,0.2)] dark:divide-[rgba(189,189,203,0.1)]">
                   {history.map((tx) => {
                     const cat = categories.find((c) => c.id === tx.category_id);
                     const isDirectSet = tx.type === 'adjustment' && (tx.note || '').startsWith('[SET]');
@@ -2816,7 +2826,7 @@ function AccountDetail({ account, transactions, categories, onBack, reload, soft
               )}
             </div>
           </div>
-          <div className="bg-white dark:bg-[#1e1e32] rounded-3xl p-6 shadow-soft border-0 dark:border dark:border-light-grey/10 h-fit">
+          <div className="bg-white dark:bg-[#1e1e32] rounded-3xl p-6 shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)] h-fit">
             <h3 className="text-blueberry dark:text-white font-extrabold mb-4">Thông tin tài khoản</h3>
             <div className="flex flex-col gap-3 text-sm">
               <div className="flex justify-between"><span className="text-steel dark:text-light-grey font-semibold">Loại</span><span className="text-blueberry dark:text-white font-bold">{typeLabel}</span></div>
@@ -2886,7 +2896,7 @@ function Goals({ setScreen, goals, loadingGoals, reload, softDelete, onAddClick,
           <button onClick={() => setScreen('dashboard')} className="w-9 h-9 rounded-full bg-white/30 backdrop-blur flex items-center justify-center"><ArrowLeft size={18} className="text-white" /></button>
           <h1 className="text-white text-lg font-bold">Mục tiêu</h1>
         </div>
-        <div className="mt-6 bg-white dark:bg-[#1e1e32] rounded-t-[2.5rem] min-h-[80vh] px-5 pt-6 pb-6 shadow-soft">
+        <div className="mt-6 bg-white dark:bg-[#1e1e32] rounded-[2.5rem] min-h-[80vh] px-5 pt-6 pb-6 shadow-soft">
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-blueberry dark:text-white font-extrabold text-lg">Mục tiêu của tôi</h2>
             <button onClick={() => setEditingGoal('new')} className="w-7 h-7 rounded-full bg-ice-cream dark:bg-night-sky flex items-center justify-center"><Plus size={16} className="text-blueberry dark:text-white" /></button>
@@ -2934,7 +2944,7 @@ function Goals({ setScreen, goals, loadingGoals, reload, softDelete, onAddClick,
           <SummaryCard icon={Sparkles} iconBg="bg-lavender" label="Tổng số lượng mục tiêu" value={goals.length} sub={`${doneCount} đã hoàn thành`} />
         </div>
 
-        <div className="bg-white dark:bg-[#1e1e32] rounded-3xl shadow-soft border-0 dark:border dark:border-light-grey/10 overflow-hidden">
+        <div className="bg-white dark:bg-[#1e1e32] rounded-3xl shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)] overflow-hidden">
           <div className="flex items-center justify-between p-5 pb-3 flex-wrap gap-3">
             <div className="flex items-center gap-2 flex-wrap">
               {filterStatus !== 'all' && (
@@ -2953,11 +2963,11 @@ function Goals({ setScreen, goals, loadingGoals, reload, softDelete, onAddClick,
                 <button onClick={() => { setFilterStatus('all'); setFilterPriority('all'); setPage(1); }} className="text-xs font-bold text-steel dark:text-light-grey hover:text-blueberry dark:hover:text-white underline">Reset</button>
               )}
               <div className="relative">
-                <button onClick={(e) => { e.stopPropagation(); setShowFilterMenu((v) => !v); setShowSortMenu(false); }} className="flex items-center gap-1.5 border border-dashed border-steel/40 dark:border-light-grey/30 rounded-full px-3 py-1.5 text-xs font-bold text-steel dark:text-light-grey hover:border-turquoise dark:hover:border-turquoise">
+                <button onClick={(e) => { e.stopPropagation(); setShowFilterMenu((v) => !v); setShowSortMenu(false); }} className="flex items-center gap-1.5 border border-dashed border-[rgba(126,127,144,0.4)] dark:border-[rgba(189,189,203,0.3)] rounded-full px-3 py-1.5 text-xs font-bold text-steel dark:text-light-grey hover:border-turquoise dark:hover:border-turquoise">
                   <Filter size={13} /> Thêm bộ lọc
                 </button>
                 {showFilterMenu && (
-                  <div onClick={(e) => e.stopPropagation()} className="absolute left-0 top-9 z-20 bg-white dark:bg-[#1e1e32] border-0 dark:border dark:border-light-grey/10 rounded-2xl shadow-card p-4 w-64">
+                  <div onClick={(e) => e.stopPropagation()} className="absolute left-0 top-9 z-20 bg-white dark:bg-[#1e1e32] border-0 dark:border dark:border-[rgba(189,189,203,0.1)] rounded-2xl shadow-card p-4 w-64">
                     <p className="text-xs font-bold text-steel dark:text-light-grey mb-2">Trạng thái</p>
                     <div className="flex flex-wrap gap-2 mb-4">
                       {[['all', 'Tất cả'], ['active', 'Đang làm'], ['done', 'Hoàn thành']].map(([k, l]) => (
@@ -2980,11 +2990,11 @@ function Goals({ setScreen, goals, loadingGoals, reload, softDelete, onAddClick,
 
             <div className="flex items-center gap-2">
               <div className="relative">
-                <button onClick={(e) => { e.stopPropagation(); setShowSortMenu((v) => !v); setShowFilterMenu(false); }} className="flex items-center gap-2 border border-steel/30 dark:border-light-grey/20 rounded-full px-4 py-2 text-sm text-blueberry dark:text-white font-semibold">
+                <button onClick={(e) => { e.stopPropagation(); setShowSortMenu((v) => !v); setShowFilterMenu(false); }} className="flex items-center gap-2 border border-[rgba(126,127,144,0.3)] dark:border-[rgba(189,189,203,0.2)] rounded-full px-4 py-2 text-sm text-blueberry dark:text-white font-semibold">
                   <ArrowUpDown size={14} /> Ngày tạo
                 </button>
                 {showSortMenu && (
-                  <div onClick={(e) => e.stopPropagation()} className="absolute right-0 top-10 z-20 bg-white dark:bg-[#1e1e32] border-0 dark:border dark:border-light-grey/10 rounded-2xl shadow-card p-2 w-56">
+                  <div onClick={(e) => e.stopPropagation()} className="absolute right-0 top-10 z-20 bg-white dark:bg-[#1e1e32] border-0 dark:border dark:border-[rgba(189,189,203,0.1)] rounded-2xl shadow-card p-2 w-56">
                     <p className="text-xs font-bold text-steel dark:text-light-grey px-2 py-1.5">Sắp xếp theo</p>
                     {GOAL_SORT_FIELDS.map((f) => (
                       <button key={f.key} onClick={() => { setSortField((cur) => { if (cur === f.key) { setSortDir((d) => (d === 'asc' ? 'desc' : 'asc')); return cur; } setSortDir(f.key === 'created' ? 'desc' : 'asc'); return f.key; }); }}
@@ -3016,7 +3026,7 @@ function Goals({ setScreen, goals, loadingGoals, reload, softDelete, onAddClick,
             </div>
           </div>
 
-          <div className="border-t border-light-grey/20 dark:border-light-grey/10">
+          <div className="border-t border-[rgba(189,189,203,0.2)] dark:border-[rgba(189,189,203,0.1)]">
             {loadingGoals ? <div className="flex justify-center py-10"><Loader2 size={24} className="animate-spin text-turquoise" /></div>
               : displayGoals.length === 0 ? <p className="text-steel dark:text-light-grey text-sm text-center py-16">Không tìm thấy mục tiêu nào.</p>
               : viewMode === 'card' ? (
@@ -3026,7 +3036,7 @@ function Goals({ setScreen, goals, loadingGoals, reload, softDelete, onAddClick,
                     const pct = isDone ? 100 : (goal.target_amount ? Math.min(100, (goal.current_amount / goal.target_amount) * 100) : 0);
                     const pStyle = priorityStyle(goal.priority_term);
                     return (
-                      <div key={goal.id} onClick={() => setEditingGoal(goal)} className="bg-white dark:bg-[#1e1e32] rounded-2xl border-0 dark:border dark:border-light-grey/10 overflow-hidden shadow-soft hover:shadow-card transition cursor-pointer">
+                      <div key={goal.id} onClick={() => setEditingGoal(goal)} className="bg-white dark:bg-[#1e1e32] rounded-2xl border-0 dark:border dark:border-[rgba(189,189,203,0.1)] overflow-hidden shadow-soft hover:shadow-card transition cursor-pointer">
                         <div className="relative h-28 flex items-center justify-center" style={{ background: `linear-gradient(135deg, ${pStyle.bg}, ${pStyle.color}33)` }}>
                           {isDone ? <Check size={40} className="opacity-30" style={{ color: pStyle.color }} /> : <Target size={40} className="opacity-30" style={{ color: pStyle.color }} />}
                           <span className="absolute top-2.5 left-2.5 flex items-center gap-1 bg-white/80 dark:bg-[#2a2a44]/80 backdrop-blur text-[11px] font-bold px-2 py-1 rounded-full text-blueberry dark:text-white">
@@ -3037,7 +3047,7 @@ function Goals({ setScreen, goals, loadingGoals, reload, softDelete, onAddClick,
                             <MoreHorizontal size={14} />
                           </button>
                           {openMenuId === goal.id && (
-                            <div onClick={(e) => e.stopPropagation()} className="absolute top-10 right-2.5 z-20 bg-white dark:bg-[#1e1e32] border-0 dark:border dark:border-light-grey/10 rounded-xl shadow-card py-1 w-40 text-left">
+                            <div onClick={(e) => e.stopPropagation()} className="absolute top-10 right-2.5 z-20 bg-white dark:bg-[#1e1e32] border-0 dark:border dark:border-[rgba(189,189,203,0.1)] rounded-xl shadow-card py-1 w-40 text-left">
                               <button onClick={() => { setEditingGoal(goal); setOpenMenuId(null); }} className="w-full flex items-center gap-2 px-3 py-2 text-sm text-blueberry dark:text-white hover:bg-ice-cream dark:hover:bg-night-sky/30">
                                 <Eye size={14} /> Xem chi tiết
                               </button>
@@ -3057,7 +3067,7 @@ function Goals({ setScreen, goals, loadingGoals, reload, softDelete, onAddClick,
                             {goal.priority_term && <span className="text-[10px] font-bold px-2 py-1 rounded-full" style={{ color: pStyle.color, background: pStyle.bg }}>{goal.priority_term}</span>}
                             <span className={`text-[10px] font-bold px-2 py-1 rounded-full ${isDone ? 'bg-turquoise/10 text-turquoise' : 'bg-ice-cream text-steel dark:bg-night-sky dark:text-light-grey'}`}>{isDone ? 'Hoàn thành' : 'Đang làm'}</span>
                           </div>
-                          <div className="flex items-center justify-between text-xs text-steel dark:text-light-grey pt-3 border-t border-light-grey/20 dark:border-light-grey/10">
+                          <div className="flex items-center justify-between text-xs text-steel dark:text-light-grey pt-3 border-t border-[rgba(189,189,203,0.2)] dark:border-[rgba(189,189,203,0.1)]">
                             <span className="flex items-center gap-1"><Calendar size={12} /> {goal.start_date ? new Date(goal.start_date).toLocaleDateString('vi-VN') : '—'}</span>
                             <span>{goal.target_amount ? formatMoney(goal.target_amount) : '—'}</span>
                           </div>
@@ -3070,7 +3080,7 @@ function Goals({ setScreen, goals, loadingGoals, reload, softDelete, onAddClick,
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm min-w-[1150px]">
                     <thead>
-                      <tr className="text-left text-steel dark:text-light-grey border-b border-light-grey/20 dark:border-light-grey/10">
+                      <tr className="text-left text-steel dark:text-light-grey border-b border-[rgba(189,189,203,0.2)] dark:border-[rgba(189,189,203,0.1)]">
                         <th className="p-4 font-bold">Tên mục tiêu</th>
                         <th className="p-4 font-bold">Mức độ ưu tiên</th>
                         <th className="p-4 font-bold text-right">Số tiền mục tiêu</th>
@@ -3091,7 +3101,7 @@ function Goals({ setScreen, goals, loadingGoals, reload, softDelete, onAddClick,
                         const pStyle = priorityStyle(goal.priority_term);
                         const duration = isDone ? durationText(goal.start_date, goal.end_date) : null;
                         return (
-                          <tr key={goal.id} onClick={() => setEditingGoal(goal)} className="border-b border-light-grey/20 dark:border-light-grey/10 last:border-0 hover:bg-ice-cream dark:hover:bg-night-sky/30 cursor-pointer">
+                          <tr key={goal.id} onClick={() => setEditingGoal(goal)} className="border-b border-[rgba(189,189,203,0.2)] dark:border-[rgba(189,189,203,0.1)] last:border-0 hover:bg-ice-cream dark:hover:bg-night-sky/30 cursor-pointer">
                             <td className="p-4">
                               <div className="flex items-center gap-3">
                                 <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${isDone ? 'bg-turquoise' : 'bg-gradient-primary'}`}>
@@ -3129,7 +3139,7 @@ function Goals({ setScreen, goals, loadingGoals, reload, softDelete, onAddClick,
                                 <MoreHorizontal size={18} />
                               </button>
                               {openMenuId === goal.id && (
-                                <div onClick={(e) => e.stopPropagation()} className="absolute right-4 top-12 z-20 bg-white dark:bg-[#1e1e32] border-0 dark:border dark:border-light-grey/10 rounded-xl shadow-card py-1 w-40 text-left">
+                                <div onClick={(e) => e.stopPropagation()} className="absolute right-4 top-12 z-20 bg-white dark:bg-[#1e1e32] border-0 dark:border dark:border-[rgba(189,189,203,0.1)] rounded-xl shadow-card py-1 w-40 text-left">
                                   <button onClick={() => { setEditingGoal(goal); setOpenMenuId(null); }} className="w-full flex items-center gap-2 px-3 py-2 text-sm text-blueberry dark:text-white hover:bg-ice-cream dark:hover:bg-night-sky/30">
                                     <Eye size={14} /> Xem chi tiết
                                   </button>
@@ -3149,10 +3159,10 @@ function Goals({ setScreen, goals, loadingGoals, reload, softDelete, onAddClick,
           </div>
 
           {displayGoals.length > 0 && (
-            <div className="flex items-center justify-between p-5 border-t border-light-grey/20 dark:border-light-grey/10">
+            <div className="flex items-center justify-between p-5 border-t border-[rgba(189,189,203,0.2)] dark:border-[rgba(189,189,203,0.1)]">
               <p className="text-steel dark:text-light-grey text-xs font-semibold">Trang {currentPage} / {totalPages}</p>
               <div className="flex gap-2">
-                <button disabled={currentPage <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))} className="px-4 py-2 rounded-full border border-steel/30 dark:border-light-grey/20 text-sm text-blueberry dark:text-white font-semibold disabled:opacity-40">Previous</button>
+                <button disabled={currentPage <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))} className="px-4 py-2 rounded-full border border-[rgba(126,127,144,0.3)] dark:border-[rgba(189,189,203,0.2)] text-sm text-blueberry dark:text-white font-semibold disabled:opacity-40">Previous</button>
                 <button disabled={currentPage >= totalPages} onClick={() => setPage((p) => Math.min(totalPages, p + 1))} className="px-4 py-2 rounded-full bg-gradient-primary text-white text-sm font-bold disabled:opacity-40 shadow-md shadow-turquoise/30">Next</button>
               </div>
             </div>
@@ -3219,7 +3229,7 @@ function Settings({ setScreen, categories, accounts, reload, softDelete, user, o
 
       {showResetModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm px-4" onClick={() => !verifyingPwd && setShowResetModal(false)}>
-          <div onClick={(e) => e.stopPropagation()} className="w-full max-w-sm bg-white dark:bg-[#1e1e32] rounded-3xl shadow-card border-0 dark:border dark:border-light-grey/10 p-6">
+          <div onClick={(e) => e.stopPropagation()} className="w-full max-w-sm bg-white dark:bg-[#1e1e32] rounded-3xl shadow-card border-0 dark:border dark:border-[rgba(189,189,203,0.1)] p-6">
             <div className="w-11 h-11 rounded-full bg-cotton-candy-light dark:bg-cotton-candy/10 flex items-center justify-center mb-4">
               <Trash2 size={20} className="text-cotton-candy" />
             </div>
@@ -3236,7 +3246,7 @@ function Settings({ setScreen, categories, accounts, reload, softDelete, user, o
                 onKeyDown={(e) => e.key === 'Enter' && confirmResetWithPassword()}
                 placeholder="Mật khẩu đăng nhập"
                 autoFocus
-                className="w-full bg-ice-cream dark:bg-[#2a2a44] border border-light-grey/30 dark:border-light-grey/10 rounded-full pl-11 pr-11 py-3 text-sm text-blueberry dark:text-white placeholder:text-steel dark:placeholder:text-light-grey outline-none focus:border-cotton-candy/50 transition font-semibold"
+                className="w-full bg-ice-cream dark:bg-[#2a2a44] border border-[rgba(189,189,203,0.3)] dark:border-[rgba(189,189,203,0.1)] rounded-full pl-11 pr-11 py-3 text-sm text-blueberry dark:text-white placeholder:text-steel dark:placeholder:text-light-grey outline-none focus:border-[rgba(241,138,181,0.5)] transition font-semibold"
               />
               <button type="button" onClick={() => setShowResetPwd((v) => !v)} className="absolute right-4 top-1/2 -translate-y-1/2 text-steel dark:text-light-grey">
                 {showResetPwd ? <EyeOff size={16} /> : <Eye size={16} />}
@@ -3323,7 +3333,7 @@ function Settings({ setScreen, categories, accounts, reload, softDelete, user, o
 
       {restoreTarget && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm px-4" onClick={() => !restoring && setRestoreTarget(null)}>
-          <div onClick={(e) => e.stopPropagation()} className="w-full max-w-sm bg-white dark:bg-[#1e1e32] rounded-3xl shadow-card border-0 dark:border dark:border-light-grey/10 p-6">
+          <div onClick={(e) => e.stopPropagation()} className="w-full max-w-sm bg-white dark:bg-[#1e1e32] rounded-3xl shadow-card border-0 dark:border dark:border-[rgba(189,189,203,0.1)] p-6">
             <div className="w-11 h-11 rounded-full bg-turquoise/10 flex items-center justify-center mb-4">
               <Clock size={20} className="text-turquoise" />
             </div>
@@ -3362,7 +3372,7 @@ function Settings({ setScreen, categories, accounts, reload, softDelete, user, o
           <button onClick={() => setSection('history')} className={`flex-1 py-2 rounded-full text-sm font-bold ${section === 'history' ? 'bg-white dark:bg-[#2a2a44] text-blueberry dark:text-white shadow' : 'bg-white/30 text-white'}`}>Lịch sử</button>
         </div>
 
-        <div className="mt-4 bg-white dark:bg-[#1e1e32] rounded-t-[2.5rem] min-h-[76vh] px-5 pt-6 pb-6 shadow-soft">
+        <div className="mt-4 bg-white dark:bg-[#1e1e32] rounded-[2.5rem] min-h-[76vh] px-5 pt-6 pb-6 shadow-soft">
           {section === 'profile' && <ProfileSection user={user} onUpdated={onProfileUpdated} logActivity={logActivity} />}
           {section === 'categories' && <CategorySection categories={categories} reload={reload} softDelete={softDelete} />}
           {section === 'data' && ResetDataPanel}
@@ -3373,17 +3383,17 @@ function Settings({ setScreen, categories, accounts, reload, softDelete, user, o
       <div className="hidden md:block w-full max-w-3xl px-8 py-8">
         <div className="flex items-center justify-between mb-6">
           <h1 className="text-blueberry dark:text-white text-2xl font-extrabold">Cài đặt</h1>
-          <button onClick={handleLogout} className="flex items-center gap-2 bg-white dark:bg-[#2a2a44] text-cotton-candy rounded-full px-4 py-2 text-sm font-bold shadow-soft border-0 dark:border dark:border-light-grey/10"><LogOut size={15} /> Đăng xuất</button>
+          <button onClick={handleLogout} className="flex items-center gap-2 bg-white dark:bg-[#2a2a44] text-cotton-candy rounded-full px-4 py-2 text-sm font-bold shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)]"><LogOut size={15} /> Đăng xuất</button>
         </div>
 
         <div className="flex gap-2 mb-6">
-          <button onClick={() => setSection('profile')} className={`px-5 py-2 rounded-full text-sm font-bold ${section === 'profile' ? 'bg-gradient-primary text-white shadow-md shadow-turquoise/30' : 'bg-white dark:bg-[#2a2a44] text-steel dark:text-light-grey border-0 dark:border dark:border-light-grey/10'}`}>Hồ sơ</button>
-          <button onClick={() => setSection('categories')} className={`px-5 py-2 rounded-full text-sm font-bold ${section === 'categories' ? 'bg-gradient-primary text-white shadow-md shadow-turquoise/30' : 'bg-white dark:bg-[#2a2a44] text-steel dark:text-light-grey border-0 dark:border dark:border-light-grey/10'}`}>Danh mục</button>
-          <button onClick={() => setSection('data')} className={`px-5 py-2 rounded-full text-sm font-bold ${section === 'data' ? 'bg-gradient-primary text-white shadow-md shadow-turquoise/30' : 'bg-white dark:bg-[#2a2a44] text-steel dark:text-light-grey border-0 dark:border dark:border-light-grey/10'}`}>Dữ liệu</button>
-          <button onClick={() => setSection('history')} className={`px-5 py-2 rounded-full text-sm font-bold ${section === 'history' ? 'bg-gradient-primary text-white shadow-md shadow-turquoise/30' : 'bg-white dark:bg-[#2a2a44] text-steel dark:text-light-grey border-0 dark:border dark:border-light-grey/10'}`}>Lịch sử</button>
+          <button onClick={() => setSection('profile')} className={`px-5 py-2 rounded-full text-sm font-bold ${section === 'profile' ? 'bg-gradient-primary text-white shadow-md shadow-turquoise/30' : 'bg-white dark:bg-[#2a2a44] text-steel dark:text-light-grey border-0 dark:border dark:border-[rgba(189,189,203,0.1)]'}`}>Hồ sơ</button>
+          <button onClick={() => setSection('categories')} className={`px-5 py-2 rounded-full text-sm font-bold ${section === 'categories' ? 'bg-gradient-primary text-white shadow-md shadow-turquoise/30' : 'bg-white dark:bg-[#2a2a44] text-steel dark:text-light-grey border-0 dark:border dark:border-[rgba(189,189,203,0.1)]'}`}>Danh mục</button>
+          <button onClick={() => setSection('data')} className={`px-5 py-2 rounded-full text-sm font-bold ${section === 'data' ? 'bg-gradient-primary text-white shadow-md shadow-turquoise/30' : 'bg-white dark:bg-[#2a2a44] text-steel dark:text-light-grey border-0 dark:border dark:border-[rgba(189,189,203,0.1)]'}`}>Dữ liệu</button>
+          <button onClick={() => setSection('history')} className={`px-5 py-2 rounded-full text-sm font-bold ${section === 'history' ? 'bg-gradient-primary text-white shadow-md shadow-turquoise/30' : 'bg-white dark:bg-[#2a2a44] text-steel dark:text-light-grey border-0 dark:border dark:border-[rgba(189,189,203,0.1)]'}`}>Lịch sử</button>
         </div>
 
-        <div className="bg-white dark:bg-[#1e1e32] rounded-3xl shadow-soft border-0 dark:border dark:border-light-grey/10 p-6">
+        <div className="bg-white dark:bg-[#1e1e32] rounded-3xl shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)] p-6">
           {section === 'profile' && <ProfileSection user={user} onUpdated={onProfileUpdated} logActivity={logActivity} />}
           {section === 'categories' && <CategorySection categories={categories} reload={reload} softDelete={softDelete} />}
           {section === 'data' && ResetDataPanel}
@@ -3537,7 +3547,7 @@ function CategorySection({ categories, reload, softDelete }) {
         <button onClick={() => setTab('expense')} className={`flex-1 py-2 rounded-full text-sm font-bold ${tab === 'expense' ? 'bg-white dark:bg-[#2a2a44] text-turquoise shadow' : 'text-steel dark:text-light-grey'}`}>Chi tiêu</button>
         <button onClick={() => setTab('income')} className={`flex-1 py-2 rounded-full text-sm font-bold ${tab === 'income' ? 'bg-white dark:bg-[#2a2a44] text-turquoise shadow' : 'text-steel dark:text-light-grey'}`}>Thu nhập</button>
       </div>
-      <button onClick={startNew} className="w-full border-2 border-dashed border-steel/40 dark:border-light-grey/20 rounded-2xl py-3 text-sm text-steel dark:text-light-grey font-bold mb-4 flex items-center justify-center gap-2 hover:border-turquoise dark:hover:border-turquoise transition"><Plus size={16} /> Thêm danh mục mới</button>
+      <button onClick={startNew} className="w-full border-2 border-dashed border-[rgba(126,127,144,0.4)] dark:border-[rgba(189,189,203,0.2)] rounded-2xl py-3 text-sm text-steel dark:text-light-grey font-bold mb-4 flex items-center justify-center gap-2 hover:border-turquoise dark:hover:border-turquoise transition"><Plus size={16} /> Thêm danh mục mới</button>
       <div className="flex flex-col gap-2">
         {list.map((cat) => (
           <div key={cat.id} className="flex items-center gap-3 bg-ice-cream dark:bg-night-sky rounded-2xl p-3">
@@ -3700,7 +3710,7 @@ function MainApp({ user, theme, toggleTheme }) {
    ============================================================================== */
 // TODO: dán URL ảnh nền của bạn vào đây, ví dụ '/bg-savanna.jpg' hoặc link ảnh online.
 // Để trống thì màn hình vẫn đẹp với nền gradient màu thương hiệu bên dưới.
-const AUTH_BG_IMAGE = 'images/hk.jpg';
+const AUTH_BG_IMAGE = '';
 
 function AuthScreen() {
   const [mode, setMode] = useState('signup');
@@ -3853,7 +3863,7 @@ function AuthScreen() {
           )}
 
           {message && (
-            <p className={`text-sm text-center mt-4 rounded-xl py-2 px-3 border ${isError ? 'text-cotton-candy bg-white/60 border-cotton-candy/30' : 'text-turquoise bg-white/60 border-turquoise/30'}`}>
+            <p className={`text-sm text-center mt-4 rounded-xl py-2 px-3 border ${isError ? 'text-cotton-candy bg-white/60 border-[rgba(241,138,181,0.3)]' : 'text-turquoise bg-white/60 border-[rgba(13,186,204,0.3)]'}`}>
               {message}
             </p>
           )}
