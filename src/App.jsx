@@ -11,13 +11,11 @@ import {
 } from 'lucide-react';
 
 /* ==============================================================================
-   02. CUSTOM STYLES (based on Fincheck palette)
+   02. CUSTOM STYLES (Fincheck palette + ẩn scrollbar)
    ============================================================================== */
 const fincheckStyles = `
   @import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&display=swap');
-
   * { font-family: 'Nunito', sans-serif; }
-
   :root {
     --turquoise: #0DBACC;
     --baby-blue: #74ACEF;
@@ -35,7 +33,6 @@ const fincheckStyles = `
     --cotton-candy-light: #FFCDDB;
     --lavender-light: #E3D6FF;
   }
-
   .bg-ice-cream { background-color: var(--ice-cream); }
   .bg-turquoise { background-color: var(--turquoise); }
   .bg-baby-blue { background-color: var(--baby-blue); }
@@ -49,7 +46,6 @@ const fincheckStyles = `
   .bg-baby-blue-light { background-color: var(--baby-blue-light); }
   .bg-cotton-candy-light { background-color: var(--cotton-candy-light); }
   .bg-lavender-light { background-color: var(--lavender-light); }
-
   .text-turquoise { color: var(--turquoise); }
   .text-baby-blue { color: var(--baby-blue); }
   .text-cotton-candy { color: var(--cotton-candy); }
@@ -59,23 +55,14 @@ const fincheckStyles = `
   .text-light-grey { color: var(--light-grey); }
   .text-white { color: var(--white); }
   .text-night-sky { color: var(--night-sky); }
-
   .border-turquoise { border-color: var(--turquoise); }
   .border-baby-blue { border-color: var(--baby-blue); }
   .border-cotton-candy { border-color: var(--cotton-candy); }
   .border-lavender { border-color: var(--lavender); }
   .border-steel { border-color: var(--steel); }
   .border-light-grey { border-color: var(--light-grey); }
-
-  .hover\\:bg-turquoise-dark:hover { background-color: #0aa8b8; }
-  .hover\\:bg-baby-blue-dark:hover { background-color: #5a9be0; }
-  .hover\\:bg-cotton-candy-dark:hover { background-color: #e07aa0; }
-  .hover\\:bg-lavender-dark:hover { background-color: #8a6fd4; }
-
   .shadow-soft { box-shadow: 0 1px 2px rgba(48,49,80,0.04), 0 8px 24px rgba(48,49,80,0.08); }
   .shadow-card { box-shadow: 0 2px 4px rgba(48,49,80,0.05), 0 14px 40px rgba(48,49,80,0.11); }
-
-  /* dark mode overrides */
   .dark .bg-ice-cream { background-color: var(--night-sky); }
   .dark .bg-white { background-color: #1e1e32; }
   .dark .text-blueberry { color: var(--white); }
@@ -84,13 +71,31 @@ const fincheckStyles = `
   .dark .border-light-grey { border-color: #3a3a5a; }
   .dark .shadow-soft { box-shadow: 0 4px 20px rgba(0,0,0,0.3); }
   .dark .shadow-card { box-shadow: 0 8px 32px rgba(0,0,0,0.4); }
-
-  /* Gradients */
   .bg-gradient-primary { background: linear-gradient(135deg, var(--turquoise), var(--baby-blue)); }
   .bg-gradient-secondary { background: linear-gradient(135deg, var(--cotton-candy), var(--lavender)); }
   .bg-gradient-warm { background: linear-gradient(135deg, var(--cotton-candy-light), var(--lavender-light)); }
   .bg-gradient-cool { background: linear-gradient(135deg, var(--turquoise-light), var(--baby-blue-light)); }
   .bg-gradient-hero { background: linear-gradient(135deg, var(--turquoise), var(--lavender)); }
+
+  /* Ẩn scrollbar nhưng vẫn cho scroll */
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* Mobile: ẩn scrollbar toàn bộ */
+  @media (max-width: 767px) {
+    * {
+      scrollbar-width: none;
+      -ms-overflow-style: none;
+    }
+    *::-webkit-scrollbar {
+      display: none;
+    }
+  }
 `;
 
 /* ==============================================================================
@@ -198,6 +203,27 @@ function nowForInput() {
   return d.toISOString().slice(0, 16);
 }
 
+// Quy tắc "kỳ nhận lợi nhuận đầu tiên" của Túi Thần Tài:
+// - Nạp tiền Thứ 2 -> Thứ 5: nhận lợi nhuận kỳ đầu vào "ngày kia" (nạp + 2 ngày)
+// - Nạp tiền Thứ 6 -> Chủ nhật: nhận lợi nhuận kỳ đầu vào Thứ 3 tuần kế tiếp
+// Getday(): 0=CN, 1=T2, 2=T3, 3=T4, 4=T5, 5=T6, 6=T7
+function firstProfitCreditDate(depositDate) {
+  const d = new Date(depositDate);
+  d.setHours(0, 0, 0, 0);
+  const w = d.getDay();
+  let offsetDays;
+  if (w >= 1 && w <= 4) {
+    // Thứ 2 - Thứ 5: +2 ngày
+    offsetDays = 2;
+  } else {
+    // Thứ 6 (5), Thứ 7 (6), Chủ nhật (0): dời tới Thứ 3 (2) kế tiếp
+    offsetDays = (2 - w + 7) % 7;
+    if (offsetDays === 0) offsetDays = 7;
+  }
+  d.setDate(d.getDate() + offsetDays);
+  return d;
+}
+
 function fundBalance(categoryId, transactions) {
   return transactions
     .filter((t) => t.category_id === categoryId)
@@ -233,7 +259,8 @@ function fundBalanceWithProfit(category, transactions) {
   const cursor = new Date(startDate);
   while (cursor <= yesterday) {
     balance += changesByDay[cursor.getTime()] || 0;
-    if (balance > 0 && dailyRate > 0) balance *= 1 + dailyRate;
+    // Lợi nhuận = Số dư * Tỷ suất/365, làm tròn xuống
+    if (balance > 0 && dailyRate > 0) balance += Math.floor(balance * dailyRate);
     cursor.setDate(cursor.getDate() + 1);
   }
   balance += changesByDay[today.getTime()] || 0;
@@ -267,7 +294,7 @@ function fundTransactionsWithBalance(category, transactions) {
       balance += t.type === 'allocation' ? Number(t.amount) : -Number(t.amount);
       result.push({ ...t, balanceAfter: balance });
     });
-    if (balance > 0 && dailyRate > 0) balance *= 1 + dailyRate;
+    if (balance > 0 && dailyRate > 0) balance += Math.floor(balance * dailyRate);
     cursor.setDate(cursor.getDate() + 1);
   }
   (txsByDay[today.getTime()] || []).forEach((t) => {
@@ -305,10 +332,10 @@ function fundDailyProfitHistory(category, transactions) {
     balance += changesByDay[cursor.getTime()] || 0;
     let profit = 0;
     if (balance > 0 && dailyRate > 0) {
-      profit = balance * dailyRate;
+      profit = Math.floor(balance * dailyRate);
       balance += profit;
     }
-    if (profit > 0.5) days.push({ date: new Date(cursor), profit, balance });
+    if (profit > 0) days.push({ date: new Date(cursor), profit, balance });
     cursor.setDate(cursor.getDate() + 1);
   }
   return days.reverse();
@@ -516,7 +543,6 @@ function BottomNav({ screen, setScreen, onAddClick, displayName, avatarUrl, them
         className="fixed bottom-4 left-1/2 -translate-x-1/2 w-[calc(100%-1.5rem)] max-w-sm rounded-full px-6 py-3 flex items-center justify-between z-10 md:hidden bg-white/30 dark:bg-[#1e1e32]/45 backdrop-blur-[30px] backdrop-saturate-[200%] border border-white/70 dark:border-white/10"
         style={{ boxShadow: 'inset 0 1.5px 1px rgba(255,255,255,0.85), inset 0 -1px 12px rgba(255,255,255,0.2), 0 15px 40px -8px rgba(48,49,80,0.35)' }}
       >
-        {/* lớp kính bóng: bọc riêng + bo tròn + overflow-hidden để không cắt mất nút "+" nhô lên trên */}
         <div className="pointer-events-none absolute inset-0 z-0 rounded-full overflow-hidden">
           <div className="absolute inset-0 bg-gradient-to-b from-white/50 dark:from-white/10 via-white/5 dark:via-white/0 to-transparent" />
           <div className="absolute -top-8 left-6 w-20 h-20 rounded-full bg-white/50 dark:bg-white/10 blur-2xl" />
@@ -667,14 +693,28 @@ function AddTransaction({ onClose, accounts, categories, transactions, onSaved }
   }
 
   function handleTypeChange(t) {
-    setType(t); setSelectedCategory(null); setExpenseSource(null);
+    setType(t); 
+    setSelectedCategory(null); 
+    setExpenseSource(null);
     setSelectedYear(Number(currentPeriodKey().split('-')[0]));
     setSelectedPeriod(currentPeriodKey());
   }
-  function handleCategoryChange(id) { setSelectedCategory(id); setExpenseSource(null); }
+
+  function handleCategoryChange(id) {
+    setSelectedCategory(id);
+    setExpenseSource(null);
+  }
+
+  function handleExpenseSourceSelect(source) {
+    setExpenseSource(source);
+    setSelectedCategory(null);
+  }
 
   function resetForm() {
-    setAmount(''); setSelectedCategory(null); setExpenseSource(null); setNote('');
+    setAmount(''); 
+    setSelectedCategory(null); 
+    setExpenseSource(null); 
+    setNote('');
     setDateTime(nowForInput());
     setSelectedYear(Number(currentPeriodKey().split('-')[0]));
     setSelectedPeriod(currentPeriodKey());
@@ -718,7 +758,7 @@ function AddTransaction({ onClose, accounts, categories, transactions, onSaved }
 
   return (
     <div className="fixed inset-0 bg-black/0 md:bg-black/40 z-30 md:flex md:items-center md:justify-center md:p-6" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="bg-white dark:bg-[#1e1e32] w-full h-full md:h-auto md:max-h-[88vh] md:max-w-lg md:rounded-3xl md:overflow-y-auto overflow-y-auto relative">
+      <div className="bg-white dark:bg-[#1e1e32] w-full h-full md:h-auto md:max-h-[88vh] md:max-w-xl md:rounded-3xl md:overflow-y-auto overflow-y-auto relative scrollbar-hide">
         <div className="px-5 pt-8 md:pt-6 flex items-center justify-between sticky top-0 bg-white dark:bg-[#1e1e32] z-10">
           <button onClick={onClose} className="w-9 h-9 rounded-full bg-ice-cream dark:bg-night-sky flex items-center justify-center"><X size={18} className="text-blueberry dark:text-white" /></button>
           <h1 className="text-blueberry dark:text-white text-lg font-bold">Thêm giao dịch</h1>
@@ -763,16 +803,18 @@ function AddTransaction({ onClose, accounts, categories, transactions, onSaved }
         {type === 'expense' && (
           <div className="px-5 mt-8">
             <p className="text-blueberry dark:text-white font-bold text-sm mb-3">Nguồn tiền <span className="text-cotton-candy">*</span></p>
-            {isFundCategory && <p className="text-steel dark:text-light-grey text-xs mb-3">Rút từ quỹ "{activeCat.name}" — chọn thêm nơi nhận tiền để lưu vào lịch sử ví.</p>}
+            {isFundCategory && <p className="text-steel dark:text-light-grey text-xs mb-3">Rút từ quỹ "{activeCat.name}" — chọn ví nhận tiền.</p>}
             <div className="grid grid-cols-4 sm:grid-cols-5 gap-3">
-              <button onClick={() => setExpenseSource('income')} className="flex flex-col items-center gap-1.5">
-                <EmojiCircle emoji="💵" size={48} active={expenseSource === 'income'} activeColor="#0DBACC" />
-                <span className={`text-[11px] text-center leading-tight ${expenseSource === 'income' ? 'text-blueberry dark:text-white font-semibold' : 'text-steel dark:text-light-grey'}`}>Thu nhập</span>
-              </button>
+              {!isFundCategory && (
+                <button onClick={() => handleExpenseSourceSelect('income')} className="flex flex-col items-center gap-1.5">
+                  <EmojiCircle emoji="💵" size={48} active={expenseSource === 'income'} activeColor="#0DBACC" />
+                  <span className={`text-[11px] text-center leading-tight ${expenseSource === 'income' ? 'text-blueberry dark:text-white font-semibold' : 'text-steel dark:text-light-grey'}`}>Thu nhập</span>
+                </button>
+              )}
               {accounts.map((acc) => {
                 const active = expenseSource === acc.id;
                 return (
-                  <button key={acc.id} onClick={() => setExpenseSource(acc.id)} className="flex flex-col items-center gap-1.5">
+                  <button key={acc.id} onClick={() => handleExpenseSourceSelect(acc.id)} className="flex flex-col items-center gap-1.5">
                     <EmojiCircle emoji={acc.icon} size={48} active={active} activeColor="#0DBACC" />
                     <span className={`text-[11px] text-center leading-tight ${active ? 'text-blueberry dark:text-white font-semibold' : 'text-steel dark:text-light-grey'}`}>{acc.name}</span>
                   </button>
@@ -965,12 +1007,27 @@ function QuickAllocateWithdrawForm({ category, mode, onClose, onSaved }) {
   const [amount, setAmount] = useState('');
   const [note, setNote] = useState('');
   const [saving, setSaving] = useState(false);
+  const [selectedYear, setSelectedYear] = useState(Number(currentPeriodKey().split('-')[0]));
+  const [selectedPeriod, setSelectedPeriod] = useState(currentPeriodKey());
+  const yearNow = new Date().getFullYear();
+  const years = Array.from({ length: 5 }, (_, i) => yearNow - 2 + i);
+  const periods = buildPeriods(selectedYear);
+
+  function handleYearChange(y) {
+    setSelectedYear(y);
+    const month = selectedPeriod.split('-')[1];
+    setSelectedPeriod(`${y}-${month}`);
+  }
 
   async function handleSave() {
     if (!amount || Number(amount) === 0) { alert('Nhập số tiền'); return; }
     setSaving(true);
+    let noteToSave = note || null;
+    if (mode === 'allocation' && selectedPeriod) {
+      noteToSave = tagPeriodNote(selectedPeriod, note);
+    }
     const { error } = await supabase.from('transactions').insert({
-      category_id: category.id, type: mode, amount: Number(amount), note: note || null,
+      category_id: category.id, type: mode, amount: Number(amount), note: noteToSave,
       date: new Date().toISOString().slice(0, 10), created_at: new Date().toISOString(),
     });
     setSaving(false);
@@ -986,7 +1043,21 @@ function QuickAllocateWithdrawForm({ category, mode, onClose, onSaved }) {
           <button onClick={onClose}><X size={18} className="text-steel dark:text-light-grey" /></button>
         </div>
         <MoneyInput value={amount} onChange={setAmount} placeholder="Số tiền" className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-lg font-bold outline-none mb-3 dark:text-white dark:placeholder:text-light-grey text-blueberry" />
-        <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Ghi chú (không bắt buộc)" className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none mb-4 dark:text-white dark:placeholder:text-light-grey text-blueberry" />
+        <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Ghi chú (không bắt buộc)" className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none mb-3 dark:text-white dark:placeholder:text-light-grey text-blueberry" />
+
+        {mode === 'allocation' && (
+          <div className="mb-3">
+            <p className="text-blueberry dark:text-white font-bold text-sm mb-2">Nguồn nạp (Kỳ thu nhập)</p>
+            <select value={selectedYear} onChange={(e) => handleYearChange(Number(e.target.value))} className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none mb-2 dark:text-white text-blueberry">
+              {years.map((y) => <option key={y} value={y}>{y}</option>)}
+            </select>
+            <select value={selectedPeriod} onChange={(e) => setSelectedPeriod(e.target.value)} className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none dark:text-white text-blueberry">
+              {periods.map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
+            </select>
+            <p className="text-steel dark:text-light-grey text-xs mt-2">Số tiền sẽ được trừ từ thu nhập của kỳ này.</p>
+          </div>
+        )}
+
         <button onClick={handleSave} disabled={saving} className={`w-full text-white rounded-xl py-3 font-bold flex items-center justify-center gap-2 disabled:opacity-60 shadow-md ${mode === 'allocation' ? 'bg-gradient-primary shadow-turquoise/30' : 'bg-cotton-candy shadow-cotton-candy/30'}`}>
           {saving ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />} {mode === 'allocation' ? 'Nạp quỹ' : 'Rút quỹ'}
         </button>
@@ -1314,7 +1385,7 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
     if (series.length === 0) return null;
     return (
       <div>
-        <div className="flex items-end gap-3 overflow-x-auto pb-1" style={{ height: 130 }}>
+        <div className="flex items-end gap-3 overflow-x-auto pb-1 scrollbar-hide" style={{ height: 130 }}>
           {breakdownBuckets.map((b, bi) => (
             <div key={bi} className="flex flex-col items-center justify-end h-full flex-shrink-0" style={{ minWidth: series.length * 9 + 10 }}>
               <div className="flex items-end gap-1 h-full">
@@ -1439,6 +1510,26 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
 
   const savingsRate = incomeThisMonth > 0 ? Math.max(0, Math.min(100, ((incomeThisMonth - expenseThisMonth) / incomeThisMonth) * 100)) : 0;
 
+  function groupTransactionsByDate(txs) {
+    const groups = {};
+    txs.forEach(tx => {
+      const date = new Date(tx.date || tx.created_at);
+      const key = date.toDateString();
+      if (!groups[key]) groups[key] = [];
+      groups[key].push(tx);
+    });
+    return groups;
+  }
+
+  function formatDateLabel(dateStr) {
+    const today = new Date();
+    const yesterday = new Date(today); yesterday.setDate(yesterday.getDate() - 1);
+    const date = new Date(dateStr);
+    if (date.toDateString() === today.toDateString()) return 'Hôm nay';
+    if (date.toDateString() === yesterday.toDateString()) return 'Hôm qua';
+    return date.toLocaleDateString('vi-VN', { weekday: 'long', day: 'numeric', month: 'short' });
+  }
+
   const filteredTx = transactions.filter((t) => {
     if (!search) return true;
     const cat = categories.find((c) => c.id === t.category_id);
@@ -1456,12 +1547,15 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
     } else if (recentTxFilter === 'year') {
       list = transactions.filter((t) => Number(transactionPeriodKey(t).split('-')[0]) === nowD.getFullYear());
     }
-    return [...list].sort((a, b) => new Date(b.date || b.created_at) - new Date(a.date || a.created_at)).slice(0, 6);
+    return [...list].sort((a, b) => new Date(b.date || b.created_at) - new Date(a.date || a.created_at)).slice(0, 20);
   })();
 
+  const groupedRecentTx = groupTransactionsByDate(recentTxList);
+  const sortedGroupKeys = Object.keys(groupedRecentTx).sort((a, b) => new Date(b) - new Date(a));
+
   return (
-    <div className={`min-h-screen relative bg-ice-cream dark:bg-night-sky flex justify-center ${sidebarCollapsed ? 'md:pl-20' : 'md:pl-64'} md:pt-20 transition-colors`}>
-      <div className="absolute inset-0 bg-gradient-hero md:hidden opacity-70" />
+    <div className={`min-h-screen relative bg-ice-cream dark:bg-[#1a1a2e] flex justify-center ${sidebarCollapsed ? 'md:pl-20' : 'md:pl-64'} md:pt-20 transition-colors`}>
+      <div className={`absolute inset-0 md:hidden ${theme === 'dark' ? 'bg-[#1a1a2e]' : 'bg-gradient-hero opacity-70'}`} />
       <div className="w-full max-w-sm md:hidden min-h-screen pb-28 relative">
         <div className="px-5 pt-8 flex items-center justify-between">
           <div><p className="text-white/80 text-sm font-semibold">Chào bạn!</p><h1 className="text-white text-2xl font-extrabold">{displayName || 'Bạn'}</h1></div>
@@ -1492,7 +1586,7 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
           <p className="text-white/70 text-xs font-semibold">Tổng tài sản</p>
           <p className="text-white text-3xl font-bold">{formatMoney(totalAssets)}</p>
         </div>
-        <div className="mt-6 px-5 flex gap-3 overflow-x-auto pb-2">
+        <div className="mt-6 px-5 flex gap-3 overflow-x-auto pb-2 scrollbar-hide">
           {fundCategories.length === 0 ? <p className="text-white/70 text-sm">Đánh dấu danh mục là "Quỹ" trong Cài đặt để hiện ở đây.</p>
             : fundCategories.map((f) => (
               <button key={f.id} onClick={() => onOpenFund(f.id)} className="min-w-[150px] text-left bg-white/90 backdrop-blur rounded-3xl p-4 shadow-lg shadow-black/5 flex-shrink-0">
@@ -1590,21 +1684,31 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
           <div className="flex items-center justify-between mt-8 mb-3"><h2 className="text-blueberry dark:text-white font-extrabold text-lg">Giao dịch</h2></div>
           {loading ? <div className="flex justify-center py-8"><Loader2 size={24} className="animate-spin text-turquoise" /></div>
             : transactions.length === 0 ? <p className="text-steel dark:text-light-grey text-sm text-center py-8">Chưa có giao dịch nào. Bấm nút + để thêm.</p>
-            : <div className="flex flex-col divide-y divide-[rgba(189,189,203,0.2)] dark:divide-[rgba(189,189,203,0.1)]">
-                {transactions.slice(0, 20).map((tx) => {
-                  const cat = categories.find((c) => c.id === tx.category_id);
-                  return (
-                    <div key={tx.id} className="flex items-center gap-3 py-3">
-                      <EmojiCircle emoji={cat?.icon} size={40} bg={tx.type === 'income' ? '#B4F1F1' : '#E3D6FF'} />
-                      <div className="flex-1 min-w-0"><p className="text-blueberry dark:text-white font-bold text-sm">{cat?.name || 'Khác'}</p><p className="text-steel dark:text-light-grey text-xs">{stripPeriodTag(tx.note) || new Date(tx.date || tx.created_at).toLocaleString('vi-VN')}</p></div>
-                      <p className={`font-bold text-sm flex-shrink-0 ${tx.type === 'income' ? 'text-turquoise' : 'text-blueberry dark:text-white'}`}>{tx.type === 'income' ? '+' : '-'}{formatMoney(tx.amount)}</p>
+            : (
+              <div className="flex flex-col gap-4 scrollbar-hide">
+                {sortedGroupKeys.map((key) => (
+                  <div key={key}>
+                    <p className="text-xs font-bold text-steel dark:text-light-grey mb-2">{formatDateLabel(key)}</p>
+                    <div className="flex flex-col divide-y divide-[rgba(189,189,203,0.2)] dark:divide-[rgba(189,189,203,0.1)]">
+                      {groupedRecentTx[key].map((tx) => {
+                        const cat = categories.find((c) => c.id === tx.category_id);
+                        return (
+                          <div key={tx.id} className="flex items-center gap-3 py-3 first:pt-0 last:pb-0">
+                            <EmojiCircle emoji={cat?.icon} size={40} bg={tx.type === 'income' ? '#B4F1F1' : '#E3D6FF'} />
+                            <div className="flex-1 min-w-0"><p className="text-blueberry dark:text-white font-bold text-sm">{cat?.name || 'Khác'}</p><p className="text-steel dark:text-light-grey text-xs">{stripPeriodTag(tx.note) || new Date(tx.date || tx.created_at).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}</p></div>
+                            <p className={`font-bold text-sm flex-shrink-0 ${tx.type === 'income' ? 'text-turquoise' : 'text-blueberry dark:text-white'}`}>{tx.type === 'income' ? '+' : '-'}{formatMoney(tx.amount)}</p>
+                          </div>
+                        );
+                      })}
                     </div>
-                  );
-                })}
-              </div>}
+                  </div>
+                ))}
+              </div>
+            )}
         </div>
       </div>
 
+      {/* Desktop version giữ nguyên */}
       <div className="hidden md:block w-full max-w-[1400px] px-8 py-8">
         <div className="flex items-center justify-between mb-6">
           <h1 className="text-blueberry dark:text-white text-2xl font-extrabold">Dashboard</h1>
@@ -1709,7 +1813,7 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
                       const stackTotalWidth = Math.max(viewport, (accounts.length * cardWidth));
                       return (
                         <div className="relative" style={{ width: viewport }}>
-                          <div ref={walletScrollRef} className="hide-scrollbar overflow-x-auto" style={{ width: viewport, scrollSnapType: 'x mandatory', WebkitOverflowScrolling: 'touch', paddingLeft: 12, scrollPaddingLeft: 12 }}>
+                          <div ref={walletScrollRef} className="hide-scrollbar overflow-x-auto scrollbar-hide" style={{ width: viewport, scrollSnapType: 'x mandatory', WebkitOverflowScrolling: 'touch', paddingLeft: 12, scrollPaddingLeft: 12 }}>
                             <div className="flex items-start" style={{ width: stackTotalWidth }}>
                             {accounts.map((acc, i) => {
                               return (
@@ -1763,20 +1867,27 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
               {loading ? <div className="flex justify-center py-6"><Loader2 size={20} className="animate-spin text-turquoise" /></div>
                 : recentTxList.length === 0 ? <p className="text-steel dark:text-light-grey text-sm text-center py-4">Không có giao dịch nào.</p>
                 : (
-                  <div className="flex flex-col divide-y divide-[rgba(189,189,203,0.2)] dark:divide-[rgba(189,189,203,0.1)]">
-                    {recentTxList.map((tx) => {
-                      const cat = categories.find((c) => c.id === tx.category_id);
-                      return (
-                        <div key={tx.id} className="flex items-center gap-3 py-2.5 first:pt-0 last:pb-0">
-                          <EmojiCircle emoji={cat?.icon} size={36} bg={tx.type === 'income' ? '#B4F1F1' : '#E3D6FF'} />
-                          <div className="flex-1 min-w-0">
-                            <p className="text-blueberry dark:text-white font-bold text-sm truncate">{cat?.name || (tx.type === 'income' ? 'Thu nhập' : 'Chi tiêu')}</p>
-                            <p className="text-steel dark:text-light-grey text-xs">{new Date(tx.date || tx.created_at).toLocaleDateString('vi-VN')}</p>
-                          </div>
-                          <p className={`font-bold text-sm flex-shrink-0 ${tx.type === 'income' ? 'text-turquoise' : 'text-blueberry dark:text-white'}`}>{tx.type === 'income' ? '+' : '-'}{formatMoney(tx.amount)}</p>
+                  <div className="flex flex-col gap-3 scrollbar-hide">
+                    {sortedGroupKeys.map((key) => (
+                      <div key={key}>
+                        <p className="text-xs font-bold text-steel dark:text-light-grey mb-1">{formatDateLabel(key)}</p>
+                        <div className="flex flex-col divide-y divide-[rgba(189,189,203,0.2)] dark:divide-[rgba(189,189,203,0.1)]">
+                          {groupedRecentTx[key].map((tx) => {
+                            const cat = categories.find((c) => c.id === tx.category_id);
+                            return (
+                              <div key={tx.id} className="flex items-center gap-3 py-2.5 first:pt-0 last:pb-0">
+                                <EmojiCircle emoji={cat?.icon} size={36} bg={tx.type === 'income' ? '#B4F1F1' : '#E3D6FF'} />
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-blueberry dark:text-white font-bold text-sm truncate">{cat?.name || (tx.type === 'income' ? 'Thu nhập' : 'Chi tiêu')}</p>
+                                  <p className="text-steel dark:text-light-grey text-xs">{new Date(tx.date || tx.created_at).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}</p>
+                                </div>
+                                <p className={`font-bold text-sm flex-shrink-0 ${tx.type === 'income' ? 'text-turquoise' : 'text-blueberry dark:text-white'}`}>{tx.type === 'income' ? '+' : '-'}{formatMoney(tx.amount)}</p>
+                              </div>
+                            );
+                          })}
                         </div>
-                      );
-                    })}
+                      </div>
+                    ))}
                   </div>
                 )}
             </div>
@@ -1950,7 +2061,7 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
 }
 
 /* ==============================================================================
-   09. FUNDS
+   09. FUNDS - Đã sửa responsive thanh tổng số dư
    ============================================================================== */
 function Funds({ setScreen, categories, transactions, onOpenFund, reload, onAddClick, displayName, avatarUrl, theme, toggleTheme, openSettings, sidebarCollapsed, toggleSidebar }) {
   const [showCreate, setShowCreate] = useState(false);
@@ -2007,41 +2118,43 @@ function Funds({ setScreen, categories, transactions, onOpenFund, reload, onAddC
   const editingInitialAmount = editingFirstAllocation ? Number(editingFirstAllocation.amount) : 0;
 
   return (
-    <div className={`min-h-screen relative bg-ice-cream dark:bg-night-sky flex justify-center ${sidebarCollapsed ? 'md:pl-20' : 'md:pl-64'} md:pt-20 transition-colors`}>
-      <div className="absolute inset-0 bg-gradient-secondary md:hidden opacity-70" />
+    <div className={`min-h-screen relative bg-ice-cream dark:bg-[#1a1a2e] flex justify-center ${sidebarCollapsed ? 'md:pl-20' : 'md:pl-64'} md:pt-20 transition-colors`}>
+      <div className={`absolute inset-0 md:hidden ${theme === 'dark' ? 'bg-[#1a1a2e]' : 'bg-gradient-secondary opacity-70'}`} />
       <div className="w-full max-w-sm md:hidden min-h-screen pb-28 relative">
         <div className="px-5 pt-8">
-          <div className="flex items-center gap-2 bg-white rounded-2xl shadow-soft px-4 py-3">
-            <Search size={16} className="text-steel" />
-            <input value={searchTerm} onChange={(e) => { setSearchTerm(e.target.value); setPage(1); }} placeholder="Tìm quỹ..." className="bg-transparent outline-none text-sm flex-1 text-blueberry" />
+          <div className="flex items-center gap-2 bg-white dark:bg-[#2a2a44] rounded-2xl shadow-soft px-4 py-3">
+            <Search size={16} className="text-steel dark:text-light-grey" />
+            <input value={searchTerm} onChange={(e) => { setSearchTerm(e.target.value); setPage(1); }} placeholder="Tìm quỹ..." className="bg-transparent outline-none text-sm flex-1 text-blueberry dark:text-white" />
           </div>
         </div>
 
         <div className="px-5 mt-5 flex items-center justify-between">
-          <h1 className="text-blueberry text-lg font-extrabold">Danh sách quỹ</h1>
-          <div className="flex items-center gap-1 bg-white rounded-full shadow-soft px-1 py-1">
-            <button onClick={() => setViewMode((v) => (v === 'card' ? 'list' : 'card'))} className="flex items-center gap-1 px-2.5 py-1.5 rounded-full text-xs font-semibold text-blueberry">
+          <h1 className="text-blueberry dark:text-white text-lg font-extrabold">Danh sách quỹ</h1>
+          <div className="flex items-center gap-1 bg-white dark:bg-[#2a2a44] rounded-full shadow-soft px-1 py-1">
+            <button onClick={() => setViewMode((v) => (v === 'card' ? 'list' : 'card'))} className="flex items-center gap-1 px-2.5 py-1.5 rounded-full text-xs font-semibold text-blueberry dark:text-white">
               <List size={13} /> Quản lý
             </button>
-            <span className="w-px h-4 bg-light-grey" />
+            <span className="w-px h-4 bg-light-grey dark:bg-light-grey/20" />
             <button onClick={() => setShowCreate(true)} className="flex items-center gap-1 px-2.5 py-1.5 rounded-full text-xs font-semibold text-turquoise">
               <Plus size={13} /> Tạo quỹ
             </button>
           </div>
         </div>
 
-        <div className="px-5 mt-3 mb-4 bg-white/70 backdrop-blur rounded-2xl px-4 py-3 flex items-center justify-between shadow-soft">
-          <p className="text-steel text-xs font-semibold">Tổng số dư mọi quỹ</p>
-          <p className="text-blueberry font-bold">{formatMoney(totalFunds)}</p>
+        {/* Thanh tổng số dư - responsive, khớp lề với danh sách quỹ (px-5) */}
+        <div className="mx-5 mt-2 mb-3 bg-white/70 dark:bg-[#2a2a44]/70 backdrop-blur rounded-xl px-3 py-2 flex items-center justify-between shadow-soft">
+          <p className="text-steel dark:text-light-grey text-xs font-semibold">Tổng số dư mọi quỹ</p>
+          <p className="text-blueberry dark:text-white font-bold text-sm">{formatMoney(totalFunds)}</p>
         </div>
 
-        <div className="px-5 flex flex-col gap-4">
+        <div className="px-5 flex flex-col gap-4 scrollbar-hide">
           {filteredFunds.length === 0 ? (
-            <p className="text-steel text-sm text-center py-10">{funds.length === 0 ? 'Chưa có quỹ nào. Bấm "Tạo quỹ" để tạo quỹ đầu tiên.' : 'Không tìm thấy quỹ nào.'}</p>
+            <p className="text-steel dark:text-light-grey text-sm text-center py-10">{funds.length === 0 ? 'Chưa có quỹ nào. Bấm "Tạo quỹ" để tạo quỹ đầu tiên.' : 'Không tìm thấy quỹ nào.'}</p>
           ) : (
             filteredFunds.map((f, i) => {
               const balance = fundBalanceWithProfit(f, transactions);
               const target = Number(f.target_amount || 0);
+              const rStyle = fundRateStyle(f);
               return (
                 <button key={f.id} onClick={() => onOpenFund(f.id, 'funds')} className="relative w-full h-44 rounded-3xl overflow-hidden text-left shadow-soft"
                   style={{ background: fundCardBackground(f, i), backgroundSize: 'cover', backgroundPosition: 'center' }}>
@@ -2057,6 +2170,10 @@ function Funds({ setScreen, categories, transactions, onOpenFund, reload, onAddC
                       {formatMoney(balance)}{target > 0 && <span className="font-semibold text-sm"> / {formatMoney(target)}</span>}
                     </span>
                   </span>
+                  <span className="absolute bottom-3 right-3 flex items-center gap-1 text-white text-[10px] font-bold bg-black/30 backdrop-blur px-2 py-0.5 rounded-full">
+                    <span className="w-1.5 h-1.5 rounded-full" style={{ background: rStyle.color }} />
+                    {rStyle.value} {f.interest_rate > 0 && `(${f.interest_rate}%)`}
+                  </span>
                 </button>
               );
             })
@@ -2064,6 +2181,7 @@ function Funds({ setScreen, categories, transactions, onOpenFund, reload, onAddC
         </div>
       </div>
 
+      {/* Desktop version giữ nguyên */}
       <div className="hidden md:block w-full max-w-[1400px] px-8 py-8" onClick={() => { setOpenMenuId(null); setShowFilterMenu(false); setShowSortMenu(false); }}>
         <h1 className="text-blueberry dark:text-white text-2xl font-extrabold mb-6">Quản lý quỹ</h1>
 
@@ -2207,7 +2325,9 @@ function Funds({ setScreen, categories, transactions, onOpenFund, reload, onAddC
                           </div>
                         </div>
                         <div className="flex items-center gap-1.5 mb-3 flex-wrap">
-                          <span className="text-[10px] font-bold px-2 py-1 rounded-full" style={{ color: rStyle.color, background: rStyle.bg }}>{rStyle.value}</span>
+                          <span className="text-[10px] font-bold px-2 py-1 rounded-full" style={{ color: rStyle.color, background: rStyle.bg }}>
+                            {rStyle.value} {f.interest_rate > 0 && `(${f.interest_rate}%)`}
+                          </span>
                           <span className={`text-[10px] font-bold px-2 py-1 rounded-full ${isDone ? 'bg-turquoise/10 text-turquoise' : 'bg-ice-cream text-steel dark:bg-night-sky dark:text-light-grey'}`}>{target > 0 ? (isDone ? 'Đã đạt' : 'Đang tích lũy') : 'Chưa đặt mục tiêu'}</span>
                         </div>
                         <div className="flex items-center justify-between text-xs text-steel dark:text-light-grey pt-3 border-t border-[rgba(189,189,203,0.2)] dark:border-[rgba(189,189,203,0.1)]">
@@ -2249,7 +2369,9 @@ function Funds({ setScreen, categories, transactions, onOpenFund, reload, onAddC
                             </div>
                           </td>
                           <td className="p-4">
-                            <span className="text-xs font-bold px-2 py-1 rounded-full whitespace-nowrap" style={{ color: rStyle.color, background: rStyle.bg }}>{rStyle.value}</span>
+                            <span className="text-xs font-bold px-2 py-1 rounded-full whitespace-nowrap" style={{ color: rStyle.color, background: rStyle.bg }}>
+                              {rStyle.value} {f.interest_rate > 0 && `(${f.interest_rate}%)`}
+                            </span>
                           </td>
                           <td className="p-4 text-right text-blueberry dark:text-white">{formatMoney(balance)}</td>
                           <td className="p-4 text-right text-steel dark:text-light-grey">{target > 0 ? formatMoney(target) : '—'}</td>
@@ -2303,28 +2425,74 @@ function Funds({ setScreen, categories, transactions, onOpenFund, reload, onAddC
 }
 
 /* ==============================================================================
-   10. FUND DETAIL
+   10. FUND DETAIL - Đã sửa lịch sử lợi nhuận đúng thời gian và thứ tự
    ============================================================================== */
 function FundDetail({ category, transactions, onBack, reload, softDelete, setScreen, onAddClick, displayName, avatarUrl, theme, toggleTheme, openSettings, sidebarCollapsed, toggleSidebar }) {
   const [filter, setFilter] = useState('all');
   const [showEdit, setShowEdit] = useState(false);
   const [quickMode, setQuickMode] = useState(null);
 
+  // Lấy tất cả giao dịch nạp/rút, sắp xếp theo thời gian tăng dần
   const allHistory = transactions
     .filter((t) => t.category_id === category.id && (t.type === 'allocation' || t.type === 'expense'))
-    .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    .sort((a, b) => new Date(a.date || a.created_at) - new Date(b.date || b.created_at));
+
+  // Tìm khoản nạp đầu tiên (theo thời gian)
   const firstAllocation = allHistory
     .filter((t) => t.type === 'allocation')
     .sort((a, b) => new Date(a.date || a.created_at) - new Date(b.date || b.created_at))[0];
   const initialAmount = firstAllocation ? Number(firstAllocation.amount) : 0;
+
+  // Lịch sử lợi nhuận hàng ngày (mỗi ngày 1 dòng, đã làm tròn xuống)
   const dailyProfitHistory = fundDailyProfitHistory(category, transactions);
-  const txsWithBalance = [...fundTransactionsWithBalance(category, transactions)]
-    .sort((a, b) => new Date(b.date || b.created_at) - new Date(a.date || a.created_at));
-  const combinedAll = [
-    ...txsWithBalance,
-    ...dailyProfitHistory.map((d) => ({ id: `profit-${d.date.getTime()}`, type: 'profit', amount: d.profit, date: d.date.toISOString(), created_at: d.date.toISOString(), balanceAfter: d.balance })),
-  ].sort((a, b) => new Date(b.date || b.created_at) - new Date(a.date || a.created_at));
-  const history = filter === 'all' ? combinedAll : filter === 'profit' ? [] : txsWithBalance.filter((t) => t.type === filter);
+
+  // Ngày nhận lợi nhuận kỳ đầu tiên, tính theo ngày nạp tiền đầu tiên của quỹ (quy tắc Túi Thần Tài)
+  const firstDepositDate = firstAllocation ? new Date(firstAllocation.date || firstAllocation.created_at) : null;
+  const firstCreditDate = firstDepositDate ? firstProfitCreditDate(firstDepositDate) : null;
+
+  // Kết hợp tất cả: giao dịch nạp/rút + lợi nhuận, sắp xếp theo thời gian tăng dần
+  const combinedHistory = [
+    ...allHistory.map(tx => ({ ...tx, type: tx.type, isProfit: false })),
+    ...dailyProfitHistory.map(d => {
+      // Những ngày lợi nhuận trước "kỳ đầu tiên" đều dồn hiển thị vào đúng firstCreditDate;
+      // từ firstCreditDate trở đi, lợi nhuận ngày D hiển thị vào ngày D+1 như bình thường
+      const dDay = new Date(d.date); dDay.setHours(0, 0, 0, 0);
+      let displayDate;
+      if (firstCreditDate && dDay < firstCreditDate) {
+        displayDate = new Date(firstCreditDate);
+      } else {
+        displayDate = new Date(d.date);
+        displayDate.setDate(displayDate.getDate() + 1);
+      }
+      displayDate.setHours(0, 27, 30, 0);
+      return {
+        id: `profit-${d.date.getTime()}`,
+        type: 'profit',
+        isProfit: true,
+        amount: d.profit,
+        date: d.date.toISOString(),
+        created_at: displayDate.toISOString(),
+        balanceAfter: d.balance,
+        note: `Lợi nhuận ngày ${d.date.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' })}`,
+        displayDate: displayDate,
+      };
+    })
+  ].sort((a, b) => {
+    // Giao dịch nạp/rút: sắp theo "date" (ngày nghiệp vụ, giống allHistory) chứ KHÔNG phải created_at
+    // (created_at là thời điểm lưu vào DB, có thể khác ngày nghiệp vụ nếu nhập bù/chỉnh sửa sau)
+    // Lợi nhuận: sắp theo created_at đã được set = displayDate
+    const ka = a.isProfit ? new Date(a.created_at) : new Date(a.date || a.created_at);
+    const kb = b.isProfit ? new Date(b.created_at) : new Date(b.date || b.created_at);
+    return ka - kb;
+  });
+
+  // Lọc theo filter
+  const filteredHistory = filter === 'all' ? combinedHistory :
+    filter === 'profit' ? combinedHistory.filter(item => item.isProfit) :
+    combinedHistory.filter(item => item.type === filter && !item.isProfit);
+
+  // Đảo ngược để hiển thị mới nhất lên đầu
+  const displayHistory = [...filteredHistory].reverse();
 
   const balance = fundBalanceWithProfit(category, transactions);
   const principalBalance = fundBalance(category.id, transactions);
@@ -2343,9 +2511,19 @@ function FundDetail({ category, transactions, onBack, reload, softDelete, setScr
     reload(); onBack();
   }
 
+  // Format thời gian cho hiển thị
+  const formatDisplayTime = (item) => {
+    if (item.isProfit) {
+      // Lợi nhuận hiển thị với giờ 00:27:30 của ngày hôm sau
+      const d = new Date(item.displayDate || item.created_at);
+      return d.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    }
+    return new Date(item.date || item.created_at).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
+  };
+
   return (
-    <div className={`min-h-screen relative bg-ice-cream dark:bg-night-sky flex justify-center ${sidebarCollapsed ? 'md:pl-20' : 'md:pl-64'} md:pt-20 transition-colors`}>
-      <div className="w-full max-w-sm md:hidden min-h-screen pb-28 relative bg-ice-cream dark:bg-night-sky">
+    <div className={`min-h-screen relative bg-ice-cream dark:bg-[#1a1a2e] flex justify-center ${sidebarCollapsed ? 'md:pl-20' : 'md:pl-64'} md:pt-20 transition-colors`}>
+      <div className="w-full max-w-sm md:hidden min-h-screen pb-28 relative bg-ice-cream dark:bg-[#1a1a2e]">
         <div className="h-56 relative"
           style={{
             ...(category.background_url ? { backgroundImage: `linear-gradient(rgba(0,0,0,0.35),rgba(0,0,0,0.35)), url(${category.background_url})`, backgroundSize: 'cover', backgroundPosition: 'center' } : { background: 'linear-gradient(180deg,#0DBACC,#74ACEF,#C1DDFF)' }),
@@ -2410,64 +2588,41 @@ function FundDetail({ category, transactions, onBack, reload, softDelete, setScr
         <div className="px-5 mt-6">
           <h2 className="text-blueberry dark:text-white font-extrabold text-lg mb-3">Hoạt động gần đây</h2>
 
-          <div className="flex gap-2 overflow-x-auto pb-1 mb-4">
+          <div className="flex gap-2 overflow-x-auto pb-1 mb-4 scrollbar-hide">
             {[{ key: 'all', label: 'Tất cả' }, { key: 'allocation', label: 'Góp quỹ' }, { key: 'expense', label: 'Rút quỹ' }, { key: 'profit', label: 'Lợi nhuận' }].map((f) => (
               <button key={f.key} onClick={() => setFilter(f.key)} className={`px-4 py-1.5 rounded-full text-sm flex-shrink-0 font-semibold ${filter === f.key ? 'bg-gradient-primary text-white shadow-md shadow-turquoise/30' : 'bg-white dark:bg-[#2a2a44] text-steel dark:text-light-grey shadow-soft'}`}>{f.label}</button>
             ))}
           </div>
 
-          {filter === 'profit' ? (
-            rate === 0 ? <p className="text-steel dark:text-light-grey text-sm text-center py-8">Chưa đặt tỷ suất lợi nhuận cho quỹ này. Bấm ✏️ để đặt.</p> : (
-              <div className="bg-white dark:bg-[#1e1e32] rounded-2xl p-5 text-center shadow-soft">
-                <p className="text-steel dark:text-light-grey text-sm font-semibold mb-1">Lợi nhuận cộng dồn đến hôm nay</p>
-                <p className="text-blueberry dark:text-white text-2xl font-bold">{formatMoney(accruedProfit)}</p>
-                <p className="text-steel dark:text-light-grey text-sm mt-2">Dự kiến ngày mai: +{formatMoney(dailyProfit)}</p>
-                <p className="text-steel dark:text-light-grey text-xs mt-1">Lãi được cộng dồn vào số dư và tiếp tục sinh lời (lãi kép), tính từ ngày sau khi nạp.</p>
-                {dailyProfitHistory.length > 0 && (
-                  <div className="mt-4 text-left">
-                    <p className="text-steel dark:text-light-grey text-sm font-bold mb-2">Lịch sử lợi nhuận theo ngày</p>
-                    <div className="flex flex-col divide-y divide-[rgba(189,189,203,0.2)] dark:divide-[rgba(189,189,203,0.1)] max-h-72 overflow-y-auto">
-                      {dailyProfitHistory.map((d) => (
-                        <div key={d.date.getTime()} className="flex items-center gap-3 py-2.5">
-                          <div className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 bg-turquoise/10">
-                            <Sparkles size={14} className="text-turquoise" />
-                          </div>
-                          <div className="flex-1 min-w-0 text-left">
-                            <p className="text-blueberry dark:text-white font-bold text-sm">{d.date.toLocaleDateString('vi-VN')}</p>
-                            <p className="text-steel dark:text-light-grey text-xs">Số dư sau lãi: {formatMoney(d.balance)}</p>
-                          </div>
-                          <p className="font-bold text-sm flex-shrink-0 text-turquoise">+{formatMoney(d.profit)}</p>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            )
-          ) : history.length === 0 ? <p className="text-steel dark:text-light-grey text-sm text-center py-8">Chưa có giao dịch nào.</p> : (
-            <div className="flex flex-col gap-2.5">
-              {history.map((tx) => {
-                const isProfit = tx.type === 'profit';
-                const isAlloc = tx.type === 'allocation';
-                const isInitial = isAlloc && firstAllocation && tx.id === firstAllocation.id;
+          {displayHistory.length === 0 ? (
+            <p className="text-steel dark:text-light-grey text-sm text-center py-8">Chưa có hoạt động nào.</p>
+          ) : (
+            <div className="flex flex-col gap-2.5 scrollbar-hide">
+              {displayHistory.map((item) => {
+                const isProfit = item.isProfit;
+                const isAlloc = item.type === 'allocation';
+                const isInitial = isAlloc && firstAllocation && item.id === firstAllocation.id;
                 const label = isAlloc ? 'Góp quỹ' : isProfit ? 'Lợi nhuận' : 'Rút quỹ';
                 const iconBg = isAlloc ? 'bg-turquoise/10' : isProfit ? 'bg-turquoise/10' : 'bg-cotton-candy/10';
-                const amountColor = tx.type === 'expense' ? 'text-cotton-candy' : 'text-turquoise';
+                const amountColor = item.type === 'expense' ? 'text-cotton-candy' : 'text-turquoise';
+                const timeDisplay = formatDisplayTime(item);
+                const dateDisplay = new Date(item.date || item.created_at).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric' });
+
                 return (
-                  <div key={tx.id} className={`rounded-2xl p-4 shadow-soft ${isInitial ? 'bg-turquoise/10 border-2 border-turquoise' : 'bg-white dark:bg-[#1e1e32]'}`}>
+                  <div key={item.id} className={`rounded-2xl p-4 shadow-soft ${isInitial ? 'bg-turquoise/10 border-2 border-turquoise' : 'bg-white dark:bg-[#1e1e32]'}`}>
                     <div className="flex items-center gap-3">
                       <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${isInitial ? 'bg-turquoise' : iconBg}`}>
                         {isInitial ? <Star size={16} className="text-white fill-white" /> : isAlloc ? <TrendingUp size={16} className="text-turquoise" /> : isProfit ? <Sparkles size={16} className="text-turquoise" /> : <TrendingDown size={16} className="text-cotton-candy" />}
                       </div>
                       <div className="flex-1 min-w-0">
-                        <p className="text-steel dark:text-light-grey text-xs">{relativeTime(tx.date || tx.created_at)}</p>
+                        <p className="text-steel dark:text-light-grey text-xs">{dateDisplay} · {timeDisplay}</p>
                         <p className="text-blueberry dark:text-white font-bold text-sm">{label}{isInitial && <span className="ml-1.5 text-[10px] font-bold text-turquoise bg-turquoise/20 px-1.5 py-0.5 rounded-full align-middle">Nạp ban đầu</span>}</p>
                       </div>
-                      <p className={`font-bold text-sm flex-shrink-0 ${amountColor}`}>{tx.type === 'expense' ? '-' : '+'}{formatMoney(tx.amount)}</p>
+                      <p className={`font-bold text-sm flex-shrink-0 ${amountColor}`}>{item.type === 'expense' ? '-' : '+'}{formatMoney(item.amount)}</p>
                     </div>
-                    {isProfit && <p className="text-steel dark:text-light-grey text-xs mt-2 pl-[52px] truncate">Lợi nhuận của ngày {new Date(tx.date || tx.created_at).toLocaleDateString('vi-VN')}</p>}
-                    {!isProfit && stripPeriodTag(tx.note) && <p className="text-steel dark:text-light-grey text-xs mt-2 pl-[52px] truncate">{stripPeriodTag(tx.note)}</p>}
-                    {tx.balanceAfter !== undefined && <p className="text-steel dark:text-light-grey text-xs mt-1 pl-[52px]">Số dư: {formatMoney(tx.balanceAfter)}</p>}
+                    {isProfit && <p className="text-steel dark:text-light-grey text-xs mt-2 pl-[52px] truncate">{item.note || `Lợi nhuận ngày ${new Date(item.date).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' })}`}</p>}
+                    {!isProfit && stripPeriodTag(item.note) && <p className="text-steel dark:text-light-grey text-xs mt-2 pl-[52px] truncate">{stripPeriodTag(item.note)}</p>}
+                    {item.balanceAfter !== undefined && <p className="text-steel dark:text-light-grey text-xs mt-1 pl-[52px]">Số dư: {formatMoney(item.balanceAfter)}</p>}
                   </div>
                 );
               })}
@@ -2491,6 +2646,7 @@ function FundDetail({ category, transactions, onBack, reload, softDelete, setScr
         </div>
       </div>
 
+      {/* Desktop version giữ nguyên cấu trúc, áp dụng logic tương tự */}
       <div className="hidden md:block w-full max-w-4xl px-8 py-8">
         <div className="flex items-center justify-between mb-6">
           <div className="flex items-center gap-3">
@@ -2560,7 +2716,7 @@ function FundDetail({ category, transactions, onBack, reload, softDelete, setScr
                     {dailyProfitHistory.length > 0 && (
                       <div className="mt-4 text-left">
                         <p className="text-steel dark:text-light-grey text-sm font-bold mb-2">Lịch sử lợi nhuận theo ngày</p>
-                        <div className="flex flex-col divide-y divide-[rgba(189,189,203,0.2)] dark:divide-[rgba(189,189,203,0.1)] max-h-80 overflow-y-auto">
+                        <div className="flex flex-col divide-y divide-[rgba(189,189,203,0.2)] dark:divide-[rgba(189,189,203,0.1)] max-h-80 overflow-y-auto scrollbar-hide">
                           {dailyProfitHistory.map((d) => (
                             <div key={d.date.getTime()} className="flex items-center gap-3 py-2.5">
                               <div className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 bg-turquoise/10">
@@ -2578,26 +2734,26 @@ function FundDetail({ category, transactions, onBack, reload, softDelete, setScr
                     )}
                   </div>
                 )
-              ) : history.length === 0 ? <p className="text-steel dark:text-light-grey text-sm text-center py-8">Chưa có giao dịch nào.</p> : (
-                <div className="flex flex-col divide-y divide-[rgba(189,189,203,0.2)] dark:divide-[rgba(189,189,203,0.1)]">
-                  {history.map((tx) => {
-                    const isInitial = tx.type === 'allocation' && firstAllocation && tx.id === firstAllocation.id;
+              ) : displayHistory.length === 0 ? <p className="text-steel dark:text-light-grey text-sm text-center py-8">Chưa có giao dịch nào.</p> : (
+                <div className="flex flex-col divide-y divide-[rgba(189,189,203,0.2)] dark:divide-[rgba(189,189,203,0.1)] scrollbar-hide">
+                  {displayHistory.map((item) => {
+                    const isInitial = item.type === 'allocation' && firstAllocation && item.id === firstAllocation.id;
                     return (
-                      <div key={tx.id} className={`flex items-center gap-3 py-3 ${isInitial ? 'bg-turquoise/10 -mx-2 px-2 rounded-xl border border-turquoise' : ''}`}>
-                        <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${isInitial ? 'bg-turquoise' : tx.type === 'allocation' ? 'bg-turquoise/10' : tx.type === 'profit' ? 'bg-turquoise/10' : 'bg-cotton-candy/10'}`}>
-                          {isInitial ? <Star size={16} className="text-white fill-white" /> : tx.type === 'allocation' ? <TrendingUp size={16} className="text-turquoise" /> : tx.type === 'profit' ? <Sparkles size={16} className="text-turquoise" /> : <TrendingDown size={16} className="text-cotton-candy" />}
+                      <div key={item.id} className={`flex items-center gap-3 py-3 ${isInitial ? 'bg-turquoise/10 -mx-2 px-2 rounded-xl border border-turquoise' : ''}`}>
+                        <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${isInitial ? 'bg-turquoise' : item.type === 'allocation' ? 'bg-turquoise/10' : item.isProfit ? 'bg-turquoise/10' : 'bg-cotton-candy/10'}`}>
+                          {isInitial ? <Star size={16} className="text-white fill-white" /> : item.type === 'allocation' ? <TrendingUp size={16} className="text-turquoise" /> : item.isProfit ? <Sparkles size={16} className="text-turquoise" /> : <TrendingDown size={16} className="text-cotton-candy" />}
                         </div>
                         <div className="flex-1 min-w-0">
                           <p className="text-blueberry dark:text-white font-bold text-sm">
-                            {tx.type === 'allocation' ? 'Nạp quỹ' : tx.type === 'profit' ? 'Lợi nhuận' : 'Rút quỹ (chi tiêu)'}
+                            {item.type === 'allocation' ? 'Nạp quỹ' : item.isProfit ? 'Lợi nhuận' : 'Rút quỹ (chi tiêu)'}
                             {isInitial && <span className="ml-1.5 text-[10px] font-bold text-turquoise bg-turquoise/20 px-1.5 py-0.5 rounded-full align-middle">Nạp ban đầu</span>}
                           </p>
                           <p className="text-steel dark:text-light-grey text-xs">
-                            {tx.type === 'profit' ? `Lợi nhuận của ngày ${new Date(tx.date || tx.created_at).toLocaleDateString('vi-VN')}` : stripPeriodTag(tx.note) || new Date(tx.date || tx.created_at).toLocaleString('vi-VN')}
+                            {item.isProfit ? item.note : stripPeriodTag(item.note) || new Date(item.date || item.created_at).toLocaleString('vi-VN')}
                           </p>
-                          {tx.balanceAfter !== undefined && <p className="text-steel dark:text-light-grey text-xs">Số dư: {formatMoney(tx.balanceAfter)}</p>}
+                          {item.balanceAfter !== undefined && <p className="text-steel dark:text-light-grey text-xs">Số dư: {formatMoney(item.balanceAfter)}</p>}
                         </div>
-                        <p className={`font-bold text-sm flex-shrink-0 ${tx.type === 'expense' ? 'text-cotton-candy' : 'text-turquoise'}`}>{tx.type === 'expense' ? '-' : '+'}{formatMoney(tx.amount)}</p>
+                        <p className={`font-bold text-sm flex-shrink-0 ${item.type === 'expense' ? 'text-cotton-candy' : 'text-turquoise'}`}>{item.type === 'expense' ? '-' : '+'}{formatMoney(item.amount)}</p>
                       </div>
                     );
                   })}
@@ -2633,8 +2789,8 @@ function Accounts({ setScreen, accounts, transactions, onOpenAccount, reload, on
   const [showCreate, setShowCreate] = useState(false);
   const totalBalance = accounts.reduce((s, a) => s + accountBalance(a, transactions), 0);
   return (
-    <div className={`min-h-screen relative bg-ice-cream dark:bg-night-sky flex justify-center ${sidebarCollapsed ? 'md:pl-20' : 'md:pl-64'} md:pt-20 transition-colors`}>
-      <div className="absolute inset-0 bg-gradient-primary md:hidden opacity-70" />
+    <div className={`min-h-screen relative bg-ice-cream dark:bg-[#1a1a2e] flex justify-center ${sidebarCollapsed ? 'md:pl-20' : 'md:pl-64'} md:pt-20 transition-colors`}>
+      <div className={`absolute inset-0 md:hidden ${theme === 'dark' ? 'bg-[#1a1a2e]' : 'bg-gradient-primary opacity-70'}`} />
       <div className="w-full max-w-sm md:hidden min-h-screen pb-28 relative">
         <div className="px-5 pt-8 flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -2646,7 +2802,7 @@ function Accounts({ setScreen, accounts, transactions, onOpenAccount, reload, on
         <div className="px-5 mt-4 text-center"><p className="text-white/80 text-sm font-semibold">Tổng tất cả tài khoản</p><p className="text-white text-3xl font-bold">{formatMoney(totalBalance)}</p></div>
         <div className="mt-6 bg-white dark:bg-[#1e1e32] rounded-[2.5rem] min-h-[70vh] px-5 pt-6 pb-6 shadow-soft">
           {accounts.length === 0 ? <p className="text-steel dark:text-light-grey text-sm text-center py-10">Chưa có ví nào. Bấm + để thêm ví đầu tiên.</p> : (
-            <div className="flex flex-col gap-3">
+            <div className="flex flex-col gap-3 scrollbar-hide">
               {accounts.map((acc) => (
                 <button key={acc.id} onClick={() => onOpenAccount(acc.id, 'accounts')} className="flex items-center gap-3 bg-ice-cream dark:bg-night-sky rounded-2xl p-4 text-left hover:bg-turquoise/5 transition">
                   <EmojiCircle emoji={acc.icon} size={44} bg="#E3D6FF" />
@@ -2717,7 +2873,7 @@ function AccountDetail({ account, transactions, categories, onBack, reload, soft
   }
 
   return (
-    <div className={`min-h-screen relative bg-ice-cream dark:bg-night-sky flex justify-center ${sidebarCollapsed ? 'md:pl-20' : 'md:pl-64'} md:pt-20 transition-colors`}>
+    <div className={`min-h-screen relative bg-ice-cream dark:bg-[#1a1a2e] flex justify-center ${sidebarCollapsed ? 'md:pl-20' : 'md:pl-64'} md:pt-20 transition-colors`}>
       <div className="w-full max-w-sm md:hidden min-h-screen pb-28 relative" style={{ background: 'linear-gradient(180deg,#0DBACC,#74ACEF,#C1DDFF)' }}>
         <div className="px-5 pt-8 flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -2749,7 +2905,7 @@ function AccountDetail({ account, transactions, categories, onBack, reload, soft
         <div className="mt-6 bg-white dark:bg-[#1e1e32] rounded-[2.5rem] min-h-[65vh] px-5 pt-6 pb-6 shadow-soft">
           <h2 className="text-blueberry dark:text-white font-extrabold text-lg mb-3">Lịch sử</h2>
           {history.length === 0 ? <p className="text-steel dark:text-light-grey text-sm text-center py-8">Chưa có giao dịch nào.</p> : (
-            <div className="flex flex-col divide-y divide-[rgba(189,189,203,0.2)] dark:divide-[rgba(189,189,203,0.1)]">
+            <div className="flex flex-col divide-y divide-[rgba(189,189,203,0.2)] dark:divide-[rgba(189,189,203,0.1)] scrollbar-hide">
               {history.map((tx) => {
                 const cat = categories.find((c) => c.id === tx.category_id);
                 const isDirectSet = tx.type === 'adjustment' && (tx.note || '').startsWith('[SET]');
@@ -2802,7 +2958,7 @@ function AccountDetail({ account, transactions, categories, onBack, reload, soft
             <div className="bg-white dark:bg-[#1e1e32] rounded-3xl p-6 shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)]">
               <h2 className="text-blueberry dark:text-white font-extrabold text-lg mb-4">Lịch sử</h2>
               {history.length === 0 ? <p className="text-steel dark:text-light-grey text-sm text-center py-8">Chưa có giao dịch nào.</p> : (
-                <div className="flex flex-col divide-y divide-[rgba(189,189,203,0.2)] dark:divide-[rgba(189,189,203,0.1)]">
+                <div className="flex flex-col divide-y divide-[rgba(189,189,203,0.2)] dark:divide-[rgba(189,189,203,0.1)] scrollbar-hide">
                   {history.map((tx) => {
                     const cat = categories.find((c) => c.id === tx.category_id);
                     const isDirectSet = tx.type === 'adjustment' && (tx.note || '').startsWith('[SET]');
@@ -2889,8 +3045,8 @@ function Goals({ setScreen, goals, loadingGoals, reload, softDelete, onAddClick,
   const pagedGoals = displayGoals.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
   return (
-    <div className={`min-h-screen relative bg-ice-cream dark:bg-night-sky flex justify-center ${sidebarCollapsed ? 'md:pl-20' : 'md:pl-64'} md:pt-20 transition-colors`}>
-      <div className="absolute inset-0 bg-gradient-secondary md:hidden opacity-70" />
+    <div className={`min-h-screen relative bg-ice-cream dark:bg-[#1a1a2e] flex justify-center ${sidebarCollapsed ? 'md:pl-20' : 'md:pl-64'} md:pt-20 transition-colors`}>
+      <div className={`absolute inset-0 md:hidden ${theme === 'dark' ? 'bg-[#1a1a2e]' : 'bg-gradient-secondary opacity-70'}`} />
       <div className="w-full max-w-sm md:hidden min-h-screen pb-28 relative">
         <div className="px-5 pt-8 flex items-center gap-3">
           <button onClick={() => setScreen('dashboard')} className="w-9 h-9 rounded-full bg-white/30 backdrop-blur flex items-center justify-center"><ArrowLeft size={18} className="text-white" /></button>
@@ -2903,7 +3059,7 @@ function Goals({ setScreen, goals, loadingGoals, reload, softDelete, onAddClick,
           </div>
           {loadingGoals ? <div className="flex justify-center py-6"><Loader2 size={22} className="animate-spin text-turquoise" /></div>
             : goals.length === 0 ? <p className="text-steel dark:text-light-grey text-sm text-center py-6">Chưa có mục tiêu nào.</p>
-            : <div className="flex flex-col gap-5">
+            : <div className="flex flex-col gap-5 scrollbar-hide">
                 {sortedGoals.map((goal) => {
                   const isDone = goal.status === 'Hoàn thành';
                   const pct = isDone ? 100 : (goal.target_amount ? Math.min(100, (goal.current_amount / goal.target_amount) * 100) : 0);
@@ -3298,7 +3454,7 @@ function Settings({ setScreen, categories, accounts, reload, softDelete, user, o
         <p className="text-sm text-steel dark:text-light-grey italic">Chưa có lịch sử nào.</p>
       )}
 
-      <div className="flex flex-col gap-2.5">
+      <div className="flex flex-col gap-2.5 scrollbar-hide">
         {logs?.map((log) => {
           const meta = ACTION_META[log.action_type] || { icon: Clock, color: 'text-steel bg-ice-cream dark:bg-[#2a2a44]' };
           const Icon = meta.icon;
@@ -3357,8 +3513,8 @@ function Settings({ setScreen, categories, accounts, reload, softDelete, user, o
   );
 
   return (
-    <div className={`min-h-screen relative bg-ice-cream dark:bg-night-sky flex justify-center ${sidebarCollapsed ? 'md:pl-20' : 'md:pl-64'} md:pt-20 transition-colors`}>
-      <div className="absolute inset-0 bg-gradient-secondary md:hidden opacity-70" />
+    <div className={`min-h-screen relative bg-ice-cream dark:bg-[#1a1a2e] flex justify-center ${sidebarCollapsed ? 'md:pl-20' : 'md:pl-64'} md:pt-20 transition-colors`}>
+      <div className={`absolute inset-0 md:hidden ${theme === 'dark' ? 'bg-[#1a1a2e]' : 'bg-gradient-secondary opacity-70'}`} />
       <div className="w-full max-w-sm md:hidden min-h-screen pb-28 relative">
         <div className="px-5 pt-8 flex items-center gap-3">
           <button onClick={() => setScreen('dashboard')} className="w-9 h-9 rounded-full bg-white/30 backdrop-blur flex items-center justify-center"><ArrowLeft size={18} className="text-white" /></button>
@@ -3372,7 +3528,7 @@ function Settings({ setScreen, categories, accounts, reload, softDelete, user, o
           <button onClick={() => setSection('history')} className={`flex-1 py-2 rounded-full text-sm font-bold ${section === 'history' ? 'bg-white dark:bg-[#2a2a44] text-blueberry dark:text-white shadow' : 'bg-white/30 text-white'}`}>Lịch sử</button>
         </div>
 
-        <div className="mt-4 bg-white dark:bg-[#1e1e32] rounded-[2.5rem] min-h-[76vh] px-5 pt-6 pb-6 shadow-soft">
+        <div className="mt-4 bg-white dark:bg-[#1e1e32] rounded-[2.5rem] min-h-[76vh] px-5 pt-6 pb-6 shadow-soft scrollbar-hide">
           {section === 'profile' && <ProfileSection user={user} onUpdated={onProfileUpdated} logActivity={logActivity} />}
           {section === 'categories' && <CategorySection categories={categories} reload={reload} softDelete={softDelete} />}
           {section === 'data' && ResetDataPanel}
@@ -3400,7 +3556,6 @@ function Settings({ setScreen, categories, accounts, reload, softDelete, user, o
           {section === 'history' && SystemHistoryPanel}
         </div>
       </div>
-
 
       <BottomNav screen="settings" setScreen={setScreen} onAddClick={onAddClick} displayName={displayName} avatarUrl={avatarUrl} theme={theme} toggleTheme={toggleTheme} openSettings={openSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} />
     </div>
@@ -3649,7 +3804,6 @@ function MainApp({ user, theme, toggleTheme }) {
       const batchId = crypto.randomUUID();
       const now = new Date().toISOString();
       const desc = `Reset toàn bộ dữ liệu (${accounts.length} ví, ${categories.length} danh mục, ${transactions.length} giao dịch, ${goals.length} mục tiêu)`;
-      // Đánh dấu ẩn (soft delete) thay vì xoá thật — dữ liệu vẫn còn trong database 30 ngày để khôi phục
       await supabase.from('transactions').update({ deleted_at: now, deleted_batch_id: batchId }).is('deleted_at', null);
       await supabase.from('goals').update({ deleted_at: now, deleted_batch_id: batchId }).is('deleted_at', null);
       await supabase.from('categories').update({ deleted_at: now, deleted_batch_id: batchId }).is('deleted_at', null);
@@ -3661,8 +3815,6 @@ function MainApp({ user, theme, toggleTheme }) {
     }
   }
 
-  // Dùng chung cho MỌI thao tác xoá 1 mục (ví, danh mục, mục tiêu...): ẩn đi thay vì xoá thật,
-  // ghi log kèm batchId để có thể khôi phục trong 30 ngày.
   async function softDelete(table, id, description, actionType) {
     const batchId = crypto.randomUUID();
     const now = new Date().toISOString();
@@ -3674,7 +3826,6 @@ function MainApp({ user, theme, toggleTheme }) {
   async function restoreLog(log) {
     const { batchId, tables } = log.payload || {};
     if (!batchId || !tables?.length) return;
-    // Bật lại đúng những dòng đã bị ẩn bởi thao tác này (khớp deleted_batch_id) ở từng bảng liên quan
     await Promise.all(tables.map((t) => supabase.from(t).update({ deleted_at: null, deleted_batch_id: null }).eq('deleted_batch_id', batchId)));
     await supabase.from('system_logs').update({ restored_at: new Date().toISOString() }).eq('id', log.id);
     await loadAll();
@@ -3708,8 +3859,6 @@ function MainApp({ user, theme, toggleTheme }) {
 /* ==============================================================================
    17. ROOT APP
    ============================================================================== */
-// TODO: dán URL ảnh nền của bạn vào đây, ví dụ '/bg-savanna.jpg' hoặc link ảnh online.
-// Để trống thì màn hình vẫn đẹp với nền gradient màu thương hiệu bên dưới.
 const AUTH_BG_IMAGE = '';
 
 function AuthScreen() {
@@ -3760,8 +3909,6 @@ function AuthScreen() {
 
   return (
     <div className="min-h-screen relative overflow-hidden flex items-center justify-center px-4 sm:px-6 py-10">
-      {/* ===== Nền: đặt ảnh vào AUTH_BG_IMAGE ở trên. Có ảnh → chỉ làm tối nhẹ trung tính để giữ màu ảnh gốc.
-           Không có ảnh → dùng gradient màu thương hiệu làm nền tạm. ===== */}
       <div className="absolute inset-0">
         {AUTH_BG_IMAGE ? (
           <>
@@ -3780,22 +3927,18 @@ function AuthScreen() {
       <div className="absolute -top-20 -left-20 w-72 h-72 rounded-full bg-turquoise-light/25 blur-3xl" />
       <div className="absolute bottom-10 -right-16 w-60 h-60 rounded-full bg-lavender-light/25 blur-3xl" />
 
-      {/* ===== Card đăng nhập ===== */}
       <div className="relative w-full max-w-sm">
         <div
           className="relative rounded-[1.75rem] overflow-hidden bg-white/40 backdrop-blur-[42px] backdrop-saturate-[180%] border border-white/80 p-6"
           style={{ boxShadow: 'inset 0 2px 1px rgba(255,255,255,0.9), inset 0 -2px 24px rgba(255,255,255,0.3), inset 0 0 50px rgba(255,255,255,0.12), 0 30px 70px -10px rgba(48,49,80,0.5)' }}
         >
-          {/* lớp kính bóng: gradient sáng mờ dần + quầng sáng loang tạo cảm giác khúc xạ ánh sáng như liquid glass */}
           <div className="pointer-events-none absolute inset-0 z-0 bg-gradient-to-b from-white/65 via-white/10 to-transparent" />
           <div className="pointer-events-none absolute -top-24 -left-20 z-0 w-64 h-64 rounded-full bg-white/55 blur-3xl" />
           <div className="pointer-events-none absolute -bottom-28 -right-16 z-0 w-60 h-60 rounded-full bg-turquoise/30 blur-3xl" />
           <div className="pointer-events-none absolute top-1/3 -right-14 z-0 w-40 h-40 rounded-full bg-cotton-candy/25 blur-3xl" />
           <div className="pointer-events-none absolute bottom-1/4 -left-14 z-0 w-36 h-36 rounded-full bg-lavender/20 blur-3xl" />
-          {/* 2 vệt sáng chéo mô phỏng ánh sáng phản chiếu trên mặt kính cong, đậm hơn để rõ chất liquid glass */}
           <div className="pointer-events-none absolute -top-1/2 -left-1/4 z-0 w-[140%] h-[80%] rotate-[-18deg] bg-gradient-to-b from-white/55 via-white/0 to-transparent" />
           <div className="pointer-events-none absolute -bottom-1/3 -right-1/4 z-0 w-[100%] h-[60%] rotate-[-18deg] bg-gradient-to-t from-white/25 via-white/0 to-transparent" />
-          {/* viền sáng bo tròn phía trên cùng để có cảm giác mép kính bắt sáng */}
           <div className="pointer-events-none absolute inset-x-0 top-0 z-0 h-px bg-gradient-to-r from-transparent via-white to-transparent" />
 
           <div className="relative z-10">
@@ -3910,7 +4053,6 @@ export default function App() {
 
   function toggleTheme() { setTheme((t) => (t === 'dark' ? 'light' : 'dark')); }
 
-  // Inject Fincheck styles
   useEffect(() => {
     const styleTag = document.createElement('style');
     styleTag.innerHTML = fincheckStyles;
@@ -3919,7 +4061,7 @@ export default function App() {
   }, []);
 
   if (session === undefined) {
-    return <div className="min-h-screen flex items-center justify-center bg-ice-cream dark:bg-night-sky"><Loader2 size={28} className="animate-spin text-turquoise" /></div>;
+    return <div className="min-h-screen flex items-center justify-center bg-ice-cream dark:bg-[#1a1a2e]"><Loader2 size={28} className="animate-spin text-turquoise" /></div>;
   }
   if (!session) return <AuthScreen />;
   return <MainApp user={session.user} theme={theme} toggleTheme={toggleTheme} />;
