@@ -674,8 +674,12 @@ function AddTransaction({ onClose, accounts, categories, transactions, onSaved }
   const categoryType = type === 'income' ? 'income' : 'expense';
   const categoryList = categories.filter((c) => c.type === categoryType);
   const activeCat = categories.find((c) => c.id === selectedCategory);
-  const isFundCategory = type === 'expense' && !!activeCat?.is_fund;
   const overLimit = type === 'expense' && activeCat?.monthly_limit && Number(amount) > Number(activeCat.monthly_limit);
+
+  // "Quỹ / Danh mục" và "Nguồn tiền" là 2 lựa chọn loại trừ lẫn nhau (XOR).
+  // Chỉ áp dụng khi type === 'expense', vì đây là type duy nhất hiển thị cả 2 khu vực cùng lúc.
+  const isCategoryLocked = type === 'expense' && !!expenseSource; // khóa "Quỹ / Danh mục" khi đã chọn Nguồn tiền
+  const isSourceLocked = type === 'expense' && !!selectedCategory; // khóa "Nguồn tiền" khi đã chọn Quỹ / Danh mục
 
   const usesPeriod = type === 'income' || type === 'allocation' || (type === 'expense' && expenseSource === 'income');
   const pool = usesPeriod ? periodPool(transactions || [], selectedPeriod) : null;
@@ -698,12 +702,14 @@ function AddTransaction({ onClose, accounts, categories, transactions, onSaved }
   }
 
   function handleCategoryChange(id) {
-    setSelectedCategory(id);
+    if (isCategoryLocked) return; // đang bị khóa vì đã chọn Nguồn tiền
+    setSelectedCategory((prev) => (prev === id ? null : id));
     setExpenseSource(null);
   }
 
   function handleExpenseSourceSelect(source) {
-    setExpenseSource(source);
+    if (isSourceLocked) return; // đang bị khóa vì đã chọn Quỹ / Danh mục
+    setExpenseSource((prev) => (prev === source ? null : source));
     setSelectedCategory(null);
   }
 
@@ -719,7 +725,14 @@ function AddTransaction({ onClose, accounts, categories, transactions, onSaved }
 
   async function handleSave() {
     if (!amount || Number(amount) === 0) { alert('Vui lòng nhập số tiền'); return; }
-    if (!selectedCategory) { alert('Vui lòng chọn danh mục'); return; }
+
+    if (type === 'expense') {
+      // Quỹ / Danh mục và Nguồn tiền là 2 lựa chọn loại trừ lẫn nhau (XOR) — bắt buộc chọn đúng 1 trong 2.
+      if (selectedCategory && expenseSource) { alert('Chỉ được chọn một trong hai: Quỹ / Danh mục hoặc Nguồn tiền.'); return; }
+      if (!selectedCategory && !expenseSource) { alert('Vui lòng chọn Quỹ / Danh mục hoặc Nguồn tiền.'); return; }
+    } else {
+      if (!selectedCategory) { alert('Vui lòng chọn danh mục'); return; }
+    }
 
     let accountIdToSave = null;
     let noteToSave = note || null;
@@ -731,11 +744,10 @@ function AddTransaction({ onClose, accounts, categories, transactions, onSaved }
       if (!selectedPeriod) { alert('Vui lòng chọn Kỳ (nguồn thu nhập để nạp quỹ)'); return; }
       noteToSave = tagPeriodNote(selectedPeriod, note);
     } else if (type === 'expense') {
-      if (!expenseSource) { alert('Vui lòng chọn Nguồn tiền: Thu nhập hoặc 1 ví'); return; }
       if (expenseSource === 'income') {
         if (!selectedPeriod) { alert('Vui lòng chọn Kỳ'); return; }
         noteToSave = tagPeriodNote(selectedPeriod, note);
-      } else {
+      } else if (expenseSource) {
         accountIdToSave = expenseSource;
       }
     }
@@ -782,12 +794,22 @@ function AddTransaction({ onClose, accounts, categories, transactions, onSaved }
         <div className="px-5 mt-8">
           <p className="text-blueberry dark:text-white font-bold text-sm mb-3">{type === 'income' ? 'Danh mục thu nhập' : 'Quỹ / Danh mục'} <span className="text-cotton-candy">*</span></p>
           {categoryList.length === 0 ? <p className="text-steel dark:text-light-grey text-sm">Chưa có danh mục. Vào Cài đặt để thêm.</p> : (
-            <div className="grid grid-cols-4 sm:grid-cols-5 gap-3">
+            <div
+              className={`grid grid-cols-4 sm:grid-cols-5 gap-3 transition-opacity ${isCategoryLocked ? 'opacity-45 pointer-events-none' : ''}`}
+              style={isCategoryLocked ? { cursor: 'not-allowed' } : undefined}
+              aria-disabled={isCategoryLocked}
+            >
               {categoryList.map((cat) => {
                 const active = selectedCategory === cat.id;
                 const willExceed = type === 'expense' && cat.monthly_limit && Number(amount) > Number(cat.monthly_limit);
                 return (
-                  <button key={cat.id} onClick={() => handleCategoryChange(cat.id)} className="flex flex-col items-center gap-1.5">
+                  <button
+                    key={cat.id}
+                    onClick={() => handleCategoryChange(cat.id)}
+                    disabled={isCategoryLocked}
+                    className="flex flex-col items-center gap-1.5"
+                    style={isCategoryLocked ? { cursor: 'not-allowed' } : undefined}
+                  >
                     <EmojiCircle emoji={cat.icon} size={48} active={active} activeColor={willExceed ? '#F18AB5' : '#0DBACC'} />
                     <span className={`text-[11px] text-center leading-tight ${active ? 'text-blueberry dark:text-white font-semibold' : 'text-steel dark:text-light-grey'}`}>{cat.name}</span>
                   </button>
@@ -795,30 +817,45 @@ function AddTransaction({ onClose, accounts, categories, transactions, onSaved }
               })}
             </div>
           )}
+          {isCategoryLocked && <p className="text-steel dark:text-light-grey text-xs mt-2">Đã chọn Nguồn tiền — bỏ chọn Nguồn tiền để chọn Quỹ / Danh mục.</p>}
         </div>
 
         {type === 'expense' && (
           <div className="px-5 mt-8">
             <p className="text-blueberry dark:text-white font-bold text-sm mb-3">Nguồn tiền <span className="text-cotton-candy">*</span></p>
-            {isFundCategory && <p className="text-steel dark:text-light-grey text-xs mb-3">Rút từ quỹ "{activeCat.name}" — chọn ví nhận tiền.</p>}
-            <div className="grid grid-cols-4 sm:grid-cols-5 gap-3">
-              {!isFundCategory && (
-                <button onClick={() => handleExpenseSourceSelect('income')} className="flex flex-col items-center gap-1.5">
-                  <EmojiCircle emoji="💵" size={48} active={expenseSource === 'income'} activeColor="#0DBACC" />
-                  <span className={`text-[11px] text-center leading-tight ${expenseSource === 'income' ? 'text-blueberry dark:text-white font-semibold' : 'text-steel dark:text-light-grey'}`}>Thu nhập</span>
-                </button>
-              )}
+            <div
+              className={`grid grid-cols-4 sm:grid-cols-5 gap-3 transition-opacity ${isSourceLocked ? 'opacity-45 pointer-events-none' : ''}`}
+              style={isSourceLocked ? { cursor: 'not-allowed' } : undefined}
+              aria-disabled={isSourceLocked}
+            >
+              <button
+                onClick={() => handleExpenseSourceSelect('income')}
+                disabled={isSourceLocked}
+                className="flex flex-col items-center gap-1.5"
+                style={isSourceLocked ? { cursor: 'not-allowed' } : undefined}
+              >
+                <EmojiCircle emoji="💵" size={48} active={expenseSource === 'income'} activeColor="#0DBACC" />
+                <span className={`text-[11px] text-center leading-tight ${expenseSource === 'income' ? 'text-blueberry dark:text-white font-semibold' : 'text-steel dark:text-light-grey'}`}>Thu nhập</span>
+              </button>
               {accounts.map((acc) => {
                 const active = expenseSource === acc.id;
                 return (
-                  <button key={acc.id} onClick={() => handleExpenseSourceSelect(acc.id)} className="flex flex-col items-center gap-1.5">
+                  <button
+                    key={acc.id}
+                    onClick={() => handleExpenseSourceSelect(acc.id)}
+                    disabled={isSourceLocked}
+                    className="flex flex-col items-center gap-1.5"
+                    style={isSourceLocked ? { cursor: 'not-allowed' } : undefined}
+                  >
                     <EmojiCircle emoji={acc.icon} size={48} active={active} activeColor="#0DBACC" />
                     <span className={`text-[11px] text-center leading-tight ${active ? 'text-blueberry dark:text-white font-semibold' : 'text-steel dark:text-light-grey'}`}>{acc.name}</span>
                   </button>
                 );
               })}
             </div>
-            <p className="text-steel dark:text-light-grey text-xs mt-2">Chỉ được chọn 1 nguồn tiền cho khoản chi này.</p>
+            {isSourceLocked
+              ? <p className="text-steel dark:text-light-grey text-xs mt-2">Đã chọn Quỹ / Danh mục — bỏ chọn Quỹ / Danh mục để chọn Nguồn tiền.</p>
+              : <p className="text-steel dark:text-light-grey text-xs mt-2">Chỉ được chọn 1 trong 2: Quỹ / Danh mục hoặc Nguồn tiền.</p>}
           </div>
         )}
 
