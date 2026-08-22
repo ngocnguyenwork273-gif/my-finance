@@ -109,6 +109,7 @@ const NAV_ITEMS = [
   { key: 'funds', icon: PiggyBank, label: 'Quản lý quỹ' },
   { key: 'accounts', icon: Wallet, label: 'Quản lý ví' },
   { key: 'goals', icon: Sparkles, label: 'Mục tiêu' },
+  { key: 'reports', icon: BarChart3, label: 'Báo cáo' },
   { key: 'settings', icon: SettingsIcon, label: 'Cài đặt' },
 ];
 
@@ -1574,6 +1575,9 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
               <>
                 <div className="fixed inset-0 z-30" onClick={() => setShowAccountMenu(false)} />
                 <div className="absolute top-14 right-0 bg-white dark:bg-[#1e1e32] rounded-2xl shadow-card border-0 dark:border dark:border-[rgba(189,189,203,0.1)] py-1.5 w-52 z-40">
+                  <button onClick={() => { setShowAccountMenu(false); setScreen('reports'); }} className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-blueberry dark:text-white hover:bg-ice-cream dark:hover:bg-night-sky/30">
+                    <BarChart3 size={15} /> Báo cáo &amp; Phân tích
+                  </button>
                   <button onClick={() => { setShowAccountMenu(false); openSettings ? openSettings('profile') : setScreen('settings'); }} className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-blueberry dark:text-white hover:bg-ice-cream dark:hover:bg-night-sky/30">
                     <UserCog size={15} /> Cài đặt
                   </button>
@@ -3357,7 +3361,740 @@ function Goals({ setScreen, goals, loadingGoals, reload, softDelete, onAddClick,
 }
 
 /* ==============================================================================
-   14. SETTINGS
+   14. REPORT & ANALYSIS
+   ============================================================================== */
+const REPORT_PRESETS = [
+  { key: 'this_month', label: 'Tháng này' },
+  { key: 'last_month', label: 'Tháng trước' },
+  { key: '3m', label: '3 tháng' },
+  { key: '6m', label: '6 tháng' },
+  { key: '1y', label: '1 năm' },
+  { key: 'custom', label: 'Tùy chỉnh' },
+];
+const REPORT_PALETTE = ['#0DBACC', '#74ACEF', '#F18AB5', '#9F7FE0', '#B4F1F1', '#C1DDFF', '#FFCDDB', '#E3D6FF'];
+const WEEKDAY_LABELS_MON_FIRST = ['T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN'];
+const TIME_OF_DAY_BUCKETS = [
+  { key: 'morning', label: 'Buổi sáng', test: (h) => h >= 5 && h <= 10 },
+  { key: 'noon', label: 'Buổi trưa', test: (h) => h >= 11 && h <= 13 },
+  { key: 'afternoon', label: 'Buổi chiều', test: (h) => h >= 14 && h <= 17 },
+  { key: 'evening', label: 'Buổi tối', test: (h) => h >= 18 && h <= 22 },
+  { key: 'night', label: 'Ban đêm', test: (h) => h >= 23 || h <= 4 },
+];
+
+function startOfDay(d) { const x = new Date(d); x.setHours(0, 0, 0, 0); return x; }
+function endOfDay(d) { const x = new Date(d); x.setHours(23, 59, 59, 999); return x; }
+function addMonths(d, n) { const x = new Date(d); x.setMonth(x.getMonth() + n); return x; }
+function txDate(t) { return new Date(t.date || t.created_at); }
+function reportPctChange(cur, prev) { return prev > 0 ? ((cur - prev) / prev) * 100 : null; }
+
+function getPresetRange(preset, customStart, customEnd) {
+  const now = new Date();
+  if (preset === 'last_month') {
+    const start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const end = new Date(now.getFullYear(), now.getMonth(), 0);
+    return { start: startOfDay(start), end: endOfDay(end) };
+  }
+  if (preset === '3m' || preset === '6m' || preset === '1y') {
+    const months = preset === '3m' ? 3 : preset === '6m' ? 6 : 12;
+    return { start: startOfDay(addMonths(now, -months)), end: endOfDay(now) };
+  }
+  if (preset === 'custom' && customStart && customEnd) {
+    const s = startOfDay(new Date(customStart));
+    const e = endOfDay(new Date(customEnd));
+    if (e >= s) return { start: s, end: e };
+  }
+  return { start: startOfDay(new Date(now.getFullYear(), now.getMonth(), 1)), end: endOfDay(now) };
+}
+function getPrevRange(start, end) {
+  const durationMs = end.getTime() - start.getTime();
+  const prevEnd = new Date(start.getTime() - 1);
+  const prevStart = new Date(prevEnd.getTime() - durationMs);
+  return { start: prevStart, end: prevEnd };
+}
+function buildReportBuckets(s, e) {
+  const days = Math.round((e - s) / 86400000) + 1;
+  if (days <= 45) {
+    return Array.from({ length: days }, (_, i) => {
+      const bs = new Date(s); bs.setDate(bs.getDate() + i); bs.setHours(0, 0, 0, 0);
+      const be = new Date(bs); be.setHours(23, 59, 59, 999);
+      return { label: `${bs.getDate()}/${bs.getMonth() + 1}`, start: bs, end: be };
+    });
+  }
+  const buckets = [];
+  let cursor = new Date(s.getFullYear(), s.getMonth(), 1);
+  while (cursor <= e) {
+    const bs = cursor < s ? s : new Date(cursor);
+    const monthEnd = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 0, 23, 59, 59, 999);
+    const be = monthEnd > e ? e : monthEnd;
+    buckets.push({ label: `Th${cursor.getMonth() + 1}/${String(cursor.getFullYear()).slice(2)}`, start: bs, end: be });
+    cursor = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 1);
+  }
+  return buckets;
+}
+function reportEmptyState(text) {
+  return <p className="text-steel dark:text-light-grey text-sm text-center py-8">{text}</p>;
+}
+
+function ReportDelta({ cur, prev, goodUp = true, suffix = 'so với kỳ trước', isPoint = false }) {
+  const diff = isPoint ? (prev === null || prev === undefined ? null : cur - prev) : reportPctChange(cur, prev);
+  if (diff === null) return <span className="text-steel dark:text-light-grey text-xs font-semibold">Chưa có dữ liệu kỳ trước</span>;
+  const isUp = diff >= 0;
+  const isGood = isUp === goodUp;
+  const Icon = isUp ? TrendingUp : TrendingDown;
+  return (
+    <span className={`inline-flex items-center gap-0.5 text-xs font-semibold ${isGood ? 'text-turquoise' : 'text-cotton-candy'}`}>
+      <Icon size={12} />{Math.abs(Math.round(diff))}{isPoint ? 'đ' : '%'} {suffix}
+    </span>
+  );
+}
+
+function ReportSectionHeader({ title, subtitle }) {
+  return (
+    <div className="mb-4">
+      <h2 className="text-blueberry dark:text-white font-extrabold text-base md:text-lg">{title}</h2>
+      {subtitle && <p className="text-steel dark:text-light-grey text-xs md:text-sm mt-0.5">{subtitle}</p>}
+    </div>
+  );
+}
+
+function ReportCard({ children, className = '' }) {
+  return <div className={`bg-white dark:bg-[#1e1e32] rounded-2xl md:rounded-3xl shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)] p-4 md:p-6 ${className}`}>{children}</div>;
+}
+
+function Reports({ setScreen, transactions, categories, accounts, goals, onAddClick, displayName, avatarUrl, theme, toggleTheme, openSettings, sidebarCollapsed, toggleSidebar }) {
+  const [preset, setPreset] = useState('this_month');
+  const [customStart, setCustomStart] = useState('');
+  const [customEnd, setCustomEnd] = useState('');
+  const [compareOn, setCompareOn] = useState(true);
+  const [showIncomeLine, setShowIncomeLine] = useState(true);
+  const [showExpenseLine, setShowExpenseLine] = useState(true);
+  const [showNetLine, setShowNetLine] = useState(true);
+  const [breakdownSearch, setBreakdownSearch] = useState('');
+  const [breakdownExpanded, setBreakdownExpanded] = useState(false);
+
+  const { start, end } = getPresetRange(preset, customStart, customEnd);
+  const { start: prevStart, end: prevEnd } = getPrevRange(start, end);
+  const days = Math.max(1, Math.round((end - start) / 86400000) + 1);
+  const prevDays = Math.max(1, Math.round((prevEnd - prevStart) / 86400000) + 1);
+
+  const inRange = (t, s, e) => { const d = txDate(t); return d >= s && d <= e; };
+  const curTx = transactions.filter((t) => inRange(t, start, end));
+  const prevTx = transactions.filter((t) => inRange(t, prevStart, prevEnd));
+  const sumType = (txs, type) => txs.filter((t) => t.type === type).reduce((s, t) => s + Number(t.amount), 0);
+
+  const curIncome = sumType(curTx, 'income');
+  const curExpense = sumType(curTx, 'expense');
+  const curAlloc = sumType(curTx, 'allocation');
+  const prevIncome = sumType(prevTx, 'income');
+  const prevExpense = sumType(prevTx, 'expense');
+  const prevAlloc = sumType(prevTx, 'allocation');
+  const curNet = curIncome - curExpense;
+  const prevNet = prevIncome - prevExpense;
+  const curSavingsRate = curIncome > 0 ? ((curIncome - curExpense) / curIncome) * 100 : 0;
+  const prevSavingsRate = prevIncome > 0 ? ((prevIncome - prevExpense) / prevIncome) * 100 : 0;
+
+  const hasCurData = curTx.length > 0;
+  const hasPrevData = prevTx.length > 0;
+
+  const overviewCards = [
+    { label: 'Tổng thu nhập', cur: curIncome, prev: prevIncome, goodUp: true, icon: TrendingUp, color: 'bg-turquoise' },
+    { label: 'Tổng chi tiêu', cur: curExpense, prev: prevExpense, goodUp: false, icon: TrendingDown, color: 'bg-cotton-candy' },
+    { label: 'Dòng tiền ròng', cur: curNet, prev: prevNet, goodUp: true, icon: Wallet, color: 'bg-baby-blue' },
+    { label: 'Tỷ lệ tiết kiệm', cur: curSavingsRate, prev: prevSavingsRate, goodUp: true, icon: PiggyBank, color: 'bg-lavender', isPct: true },
+    { label: 'Đã phân bổ vào quỹ', cur: curAlloc, prev: prevAlloc, goodUp: true, icon: Target, color: 'bg-turquoise' },
+  ];
+
+  // ---- Cash flow buckets ----
+  const buckets = buildReportBuckets(start, end);
+  const bucketData = buckets.map((b) => {
+    const bTx = transactions.filter((t) => inRange(t, b.start, b.end));
+    const inc = sumType(bTx, 'income'); const exp = sumType(bTx, 'expense');
+    return { ...b, income: inc, expense: exp, net: inc - exp };
+  });
+  const maxBucketVal = Math.max(...bucketData.map((b) => b.income), ...bucketData.map((b) => b.expense), ...bucketData.map((b) => Math.abs(b.net)), 1);
+  function toPoints(values) {
+    const w = 600, h = 140, pad = 6;
+    return values.map((v, i) => {
+      const x = values.length > 1 ? pad + (i / (values.length - 1)) * (w - pad * 2) : w / 2;
+      const y = h - pad - ((v + maxBucketVal) / (maxBucketVal * 2)) * (h - pad * 2);
+      return `${x},${y}`;
+    }).join(' ');
+  }
+
+  // ---- Spending analysis by category ----
+  const expenseCats = categories.filter((c) => c.type === 'expense');
+  const incomeCats = categories.filter((c) => c.type === 'income');
+  function categoryAmount(catId, txList, type) {
+    return txList.filter((t) => t.category_id === catId && t.type === type).reduce((s, t) => s + Number(t.amount), 0);
+  }
+  const spendingByCat = expenseCats
+    .map((c) => ({ ...c, cur: categoryAmount(c.id, curTx, 'expense'), prev: categoryAmount(c.id, prevTx, 'expense') }))
+    .filter((c) => c.cur > 0)
+    .sort((a, b) => b.cur - a.cur);
+  const totalSpendingCat = spendingByCat.reduce((s, c) => s + c.cur, 0) || 1;
+
+  // ---- Spending trend: biggest movers ----
+  const spendingMovers = expenseCats
+    .map((c) => ({ ...c, cur: categoryAmount(c.id, curTx, 'expense'), prev: categoryAmount(c.id, prevTx, 'expense') }))
+    .filter((c) => c.cur > 0 || c.prev > 0)
+    .map((c) => ({ ...c, change: reportPctChange(c.cur, c.prev) }))
+    .filter((c) => c.change !== null)
+    .sort((a, b) => b.change - a.change);
+  const topIncreasing = spendingMovers.filter((c) => c.change > 0).slice(0, 3);
+  const topDecreasing = [...spendingMovers].filter((c) => c.change < 0).sort((a, b) => a.change - b.change).slice(0, 3);
+
+  // ---- Spending behavior ----
+  const curExpenseTx = curTx.filter((t) => t.type === 'expense');
+  const avgPerDay = curExpense / days;
+  const avgTransactionValue = curExpenseTx.length > 0 ? curExpense / curExpenseTx.length : 0;
+  const largestTx = curExpenseTx.reduce((max, t) => (Number(t.amount) > Number(max?.amount || 0) ? t : max), null);
+  const largestTxCat = largestTx ? categories.find((c) => c.id === largestTx.category_id) : null;
+  const dayTotals = {};
+  curExpenseTx.forEach((t) => { const key = startOfDay(txDate(t)).getTime(); dayTotals[key] = (dayTotals[key] || 0) + Number(t.amount); });
+  const dayCounts = {};
+  curExpenseTx.forEach((t) => { const key = startOfDay(txDate(t)).getTime(); dayCounts[key] = (dayCounts[key] || 0) + 1; });
+  const mostExpensiveDayKey = Object.keys(dayTotals).sort((a, b) => dayTotals[b] - dayTotals[a])[0];
+  const mostActiveDayKey = Object.keys(dayCounts).sort((a, b) => dayCounts[b] - dayCounts[a])[0];
+  const catCounts = {};
+  curExpenseTx.forEach((t) => { catCounts[t.category_id] = (catCounts[t.category_id] || 0) + 1; });
+  const mostFrequentCatId = Object.keys(catCounts).sort((a, b) => catCounts[b] - catCounts[a])[0];
+  const mostFrequentCat = categories.find((c) => c.id === mostFrequentCatId);
+
+  const weekdayTotals = Array(7).fill(0);
+  curExpenseTx.forEach((t) => { const jsDay = txDate(t).getDay(); const idx = jsDay === 0 ? 6 : jsDay - 1; weekdayTotals[idx] += Number(t.amount); });
+  const maxWeekdayVal = Math.max(...weekdayTotals, 1);
+  const busiestWeekdayIdx = weekdayTotals.indexOf(Math.max(...weekdayTotals));
+
+  const timeOfDayTotals = TIME_OF_DAY_BUCKETS.map((b) => ({
+    ...b,
+    total: curExpenseTx.filter((t) => b.test(txDate(t).getHours())).reduce((s, t) => s + Number(t.amount), 0),
+  }));
+  const hasTimeSpread = timeOfDayTotals.some((b) => b.total > 0);
+  const maxTimeOfDayVal = Math.max(...timeOfDayTotals.map((b) => b.total), 1);
+
+  // ---- Savings trend (last 6 calendar months) ----
+  const now = new Date();
+  const savingsTrend = Array.from({ length: 6 }, (_, i) => {
+    const d = new Date(now.getFullYear(), now.getMonth() - (5 - i), 1);
+    const mStart = new Date(d.getFullYear(), d.getMonth(), 1);
+    const mEnd = new Date(d.getFullYear(), d.getMonth() + 1, 0, 23, 59, 59, 999);
+    const mTx = transactions.filter((t) => inRange(t, mStart, mEnd));
+    const mInc = sumType(mTx, 'income'); const mExp = sumType(mTx, 'expense');
+    const rate = mInc > 0 ? Math.max(0, Math.min(100, ((mInc - mExp) / mInc) * 100)) : 0;
+    return { label: `Th${d.getMonth() + 1}`, rate };
+  });
+
+  // ---- Fund performance ----
+  const funds = categories.filter((c) => c.is_fund);
+  const fundRows = funds.map((f) => {
+    const balance = fundBalanceWithProfit(f, transactions);
+    const target = Number(f.target_amount || 0);
+    const progress = target > 0 ? Math.min(100, (balance / target) * 100) : null;
+    return { ...f, balance, target, progress };
+  }).sort((a, b) => b.balance - a.balance);
+  const totalFundBalance = fundRows.reduce((s, f) => s + f.balance, 0);
+  const totalFundTarget = fundRows.reduce((s, f) => s + f.target, 0);
+  const overallFundProgress = totalFundTarget > 0 ? Math.min(100, (totalFundBalance / totalFundTarget) * 100) : null;
+
+  // ---- Asset / account analysis ----
+  const accountRows = accounts.map((a) => ({ ...a, balance: accountBalance(a, transactions) }));
+  const totalAccountBalance = accountRows.reduce((s, a) => s + a.balance, 0);
+  const totalAssets = totalAccountBalance + totalFundBalance;
+  const assetGroups = ACCOUNT_TYPES.map((type) => ({
+    ...type,
+    total: accountRows.filter((a) => a.type === type.value).reduce((s, a) => s + a.balance, 0),
+  })).filter((g) => g.total > 0);
+  if (totalFundBalance > 0) assetGroups.push({ value: 'fund', label: 'Quỹ', total: totalFundBalance });
+  assetGroups.sort((a, b) => b.total - a.total);
+  const totalAssetsForPct = totalAssets || 1;
+
+  // ---- Goal performance ----
+  const goalRows = (goals || []).map((g) => {
+    const isDone = g.status === 'Hoàn thành';
+    const pct = isDone ? 100 : (g.target_amount ? Math.min(100, (Number(g.current_amount || 0) / Number(g.target_amount)) * 100) : 0);
+    return { ...g, isDone, pct };
+  });
+  const completedGoals = goalRows.filter((g) => g.isDone).length;
+  const activeGoalRows = goalRows.filter((g) => !g.isDone);
+  const avgCompletion = goalRows.length > 0 ? goalRows.reduce((s, g) => s + g.pct, 0) / goalRows.length : 0;
+  const closestGoals = [...activeGoalRows].sort((a, b) => b.pct - a.pct).slice(0, 3);
+  const behindGoals = [...activeGoalRows].sort((a, b) => a.pct - b.pct).slice(0, 3);
+
+  // ---- Insights ----
+  const insights = [];
+  const expenseChangePct = reportPctChange(curExpense, prevExpense);
+  if (expenseChangePct !== null && Math.abs(expenseChangePct) >= 5) {
+    insights.push(expenseChangePct < 0
+      ? { type: 'positive', text: `Chi tiêu kỳ này giảm ${Math.abs(Math.round(expenseChangePct))}% so với kỳ trước.` }
+      : { type: 'warning', text: `Chi tiêu kỳ này tăng ${Math.round(expenseChangePct)}% so với kỳ trước.` });
+  }
+  const incomeChangePct = reportPctChange(curIncome, prevIncome);
+  if (incomeChangePct !== null && Math.abs(incomeChangePct) >= 5) {
+    insights.push(incomeChangePct > 0
+      ? { type: 'positive', text: `Thu nhập kỳ này tăng ${Math.round(incomeChangePct)}% so với kỳ trước.` }
+      : { type: 'attention', text: `Thu nhập kỳ này giảm ${Math.abs(Math.round(incomeChangePct))}% so với kỳ trước.` });
+  }
+  if (topIncreasing[0] && topIncreasing[0].change >= 15) {
+    insights.push({ type: 'attention', text: `Chi tiêu ${topIncreasing[0].name} tăng ${Math.round(topIncreasing[0].change)}% và đang là danh mục tăng nhanh nhất.` });
+  }
+  if (spendingByCat[0] && spendingByCat[0].cur / totalSpendingCat >= 0.35) {
+    insights.push({ type: 'warning', text: `Chi tiêu ${spendingByCat[0].name} đang chiếm tới ${Math.round((spendingByCat[0].cur / totalSpendingCat) * 100)}% tổng chi tiêu.` });
+  }
+  if (curExpenseTx.length >= 5 && busiestWeekdayIdx !== -1 && weekdayTotals[busiestWeekdayIdx] > 0) {
+    insights.push({ type: 'observation', text: `Bạn thường chi tiêu nhiều nhất vào ${WEEKDAY_LABELS_MON_FIRST[busiestWeekdayIdx] === 'T7' || WEEKDAY_LABELS_MON_FIRST[busiestWeekdayIdx] === 'CN' ? 'cuối tuần' : `thứ ${WEEKDAY_LABELS_MON_FIRST[busiestWeekdayIdx].replace('T', '')}`}.` });
+  }
+  closestGoals.forEach((g) => {
+    if (g.pct >= 70) insights.push({ type: 'goal', text: `Mục tiêu ${g.name} đã hoàn thành ${Math.round(g.pct)}%.` });
+  });
+  if (prevSavingsRate > 0 && curSavingsRate - prevSavingsRate >= 5) {
+    insights.push({ type: 'positive', text: `Tỷ lệ tiết kiệm cải thiện thêm ${Math.round(curSavingsRate - prevSavingsRate)} điểm % so với kỳ trước.` });
+  }
+  const insightStyle = {
+    positive: { emoji: '🟢', class: 'border-turquoise/30 bg-turquoise-light/30 dark:bg-turquoise/10' },
+    attention: { emoji: '🟡', class: 'border-lavender/30 bg-lavender-light/30 dark:bg-lavender/10' },
+    observation: { emoji: '🔵', class: 'border-baby-blue/30 bg-baby-blue-light/30 dark:bg-baby-blue/10' },
+    goal: { emoji: '🟢', class: 'border-turquoise/30 bg-turquoise-light/30 dark:bg-turquoise/10' },
+    warning: { emoji: '⚠️', class: 'border-cotton-candy/30 bg-cotton-candy-light/30 dark:bg-cotton-candy/10' },
+  };
+
+  // ---- Detailed breakdown ----
+  const allCats = [...incomeCats, ...expenseCats];
+  const breakdownRows = allCats.map((c) => {
+    const type = c.type;
+    const curAmt = categoryAmount(c.id, curTx, type);
+    const prevAmt = categoryAmount(c.id, prevTx, type);
+    const allocAmt = c.is_fund ? categoryAmount(c.id, curTx, 'allocation') : 0;
+    const prevAllocAmt = c.is_fund ? categoryAmount(c.id, prevTx, 'allocation') : 0;
+    const count = curTx.filter((t) => t.category_id === c.id).length;
+    return { ...c, count, income: type === 'income' ? curAmt : 0, expense: type === 'expense' ? curAmt : 0, allocation: allocAmt, total: curAmt + allocAmt, prevTotal: prevAmt + prevAllocAmt };
+  }).filter((c) => c.count > 0);
+  const totalBreakdown = breakdownRows.reduce((s, c) => s + c.total, 0) || 1;
+  const filteredBreakdown = breakdownRows
+    .filter((c) => (c.name || '').toLowerCase().includes(breakdownSearch.toLowerCase()))
+    .sort((a, b) => b.total - a.total);
+  const displayedBreakdown = breakdownExpanded ? filteredBreakdown : filteredBreakdown.slice(0, 8);
+
+  const rangeLabel = `${start.getDate()}/${start.getMonth() + 1}/${start.getFullYear()} - ${end.getDate()}/${end.getMonth() + 1}/${end.getFullYear()}`;
+
+  return (
+    <div className={`min-h-screen relative bg-ice-cream dark:bg-[#1a1a2e] flex ${sidebarCollapsed ? 'md:pl-20' : 'md:pl-64'} md:pt-20 transition-colors`}>
+      <div className="w-full min-h-screen pb-28 md:pb-12 relative">
+        <div className="px-5 md:px-8 pt-8 md:pt-8 max-w-6xl mx-auto">
+          {/* Header */}
+          <div className="flex items-center justify-between mb-1">
+            <button onClick={() => setScreen('dashboard')} className="md:hidden w-9 h-9 rounded-full bg-white dark:bg-[#1e1e32] shadow-soft flex items-center justify-center text-blueberry dark:text-white">
+              <ArrowLeft size={16} />
+            </button>
+            <h1 className="text-blueberry dark:text-white text-xl md:text-2xl font-extrabold flex items-center gap-2"><BarChart3 size={20} className="text-turquoise" /> Report &amp; Analysis</h1>
+            <span className="md:hidden w-9" />
+          </div>
+          <p className="text-steel dark:text-light-grey text-sm mb-5">Hiểu rõ dòng tiền và thói quen tài chính của bạn</p>
+
+          {/* Period filter */}
+          <div className="flex flex-wrap items-center gap-2 mb-2">
+            <div className="flex flex-wrap gap-1.5 bg-white dark:bg-[#1e1e32] rounded-full p-1 shadow-soft">
+              {REPORT_PRESETS.map((p) => (
+                <button key={p.key} onClick={() => setPreset(p.key)}
+                  className={`px-3 py-1.5 rounded-full text-xs font-bold transition ${preset === p.key ? 'bg-gradient-primary text-white' : 'text-steel dark:text-light-grey'}`}>
+                  {p.label}
+                </button>
+              ))}
+            </div>
+            <label className="flex items-center gap-2 ml-auto bg-white dark:bg-[#1e1e32] rounded-full px-3.5 py-2 shadow-soft cursor-pointer select-none">
+              <input type="checkbox" checked={compareOn} onChange={(e) => setCompareOn(e.target.checked)} className="accent-turquoise w-3.5 h-3.5" />
+              <span className="text-xs font-bold text-blueberry dark:text-white">So sánh với kỳ trước</span>
+            </label>
+          </div>
+          {preset === 'custom' && (
+            <div className="flex items-center gap-2 mb-3">
+              <input type="date" value={customStart} onChange={(e) => setCustomStart(e.target.value)} className="bg-white dark:bg-[#1e1e32] rounded-xl px-3 py-2 text-xs font-semibold outline-none text-blueberry dark:text-white shadow-soft" />
+              <span className="text-steel dark:text-light-grey text-xs">đến</span>
+              <input type="date" value={customEnd} onChange={(e) => setCustomEnd(e.target.value)} className="bg-white dark:bg-[#1e1e32] rounded-xl px-3 py-2 text-xs font-semibold outline-none text-blueberry dark:text-white shadow-soft" />
+            </div>
+          )}
+          <p className="text-steel dark:text-light-grey text-xs mb-6">{rangeLabel}</p>
+
+          <div className="flex flex-col gap-6">
+            {/* SECTION 01 - OVERVIEW */}
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+              {overviewCards.map((c) => (
+                <div key={c.label} className="bg-white dark:bg-[#1e1e32] rounded-2xl shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)] p-3.5">
+                  <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${c.color} mb-2.5`}><c.icon size={14} className="text-white" /></div>
+                  <p className="text-steel dark:text-light-grey text-[11px] font-semibold mb-1 leading-tight">{c.label}</p>
+                  <p className="text-blueberry dark:text-white text-base font-bold mb-1">{c.isPct ? `${Math.round(c.cur)}%` : formatMoney(c.cur)}</p>
+                  {compareOn && <ReportDelta cur={c.cur} prev={c.prev} goodUp={c.goodUp} isPoint={!!c.isPct} />}
+                </div>
+              ))}
+            </div>
+
+            {/* SECTION 02 - CASH FLOW ANALYSIS */}
+            <ReportCard>
+              <div className="flex items-start justify-between flex-wrap gap-2">
+                <ReportSectionHeader title="Cash Flow Analysis" subtitle="Dòng tiền của bạn đang thay đổi như thế nào?" />
+                <div className="flex items-center gap-3 text-xs font-semibold">
+                  <label className="flex items-center gap-1.5 cursor-pointer text-blueberry dark:text-white"><input type="checkbox" checked={showIncomeLine} onChange={(e) => setShowIncomeLine(e.target.checked)} className="accent-turquoise" />Thu nhập</label>
+                  <label className="flex items-center gap-1.5 cursor-pointer text-blueberry dark:text-white"><input type="checkbox" checked={showExpenseLine} onChange={(e) => setShowExpenseLine(e.target.checked)} className="accent-cotton-candy" />Chi tiêu</label>
+                  <label className="flex items-center gap-1.5 cursor-pointer text-blueberry dark:text-white"><input type="checkbox" checked={showNetLine} onChange={(e) => setShowNetLine(e.target.checked)} className="accent-lavender" />Net</label>
+                </div>
+              </div>
+              {!hasCurData ? reportEmptyState('Chưa có đủ dữ liệu để phân tích. Thêm giao dịch để bắt đầu xem báo cáo.') : (
+                <>
+                  <svg viewBox="0 0 600 140" className="w-full h-36 md:h-44" preserveAspectRatio="none">
+                    <line x1="0" y1="70" x2="600" y2="70" stroke="currentColor" className="text-light-grey/30 dark:text-light-grey/10" strokeWidth="1" />
+                    {showIncomeLine && <polyline fill="none" stroke="#0DBACC" strokeWidth="2.5" points={toPoints(bucketData.map((b) => b.income))} />}
+                    {showExpenseLine && <polyline fill="none" stroke="#F18AB5" strokeWidth="2.5" points={toPoints(bucketData.map((b) => b.expense))} />}
+                    {showNetLine && <polyline fill="none" stroke="#9F7FE0" strokeWidth="2" strokeDasharray="4 3" points={toPoints(bucketData.map((b) => b.net))} />}
+                  </svg>
+                  <div className="flex justify-between text-[10px] text-steel dark:text-light-grey mt-1 px-1">
+                    <span>{buckets[0]?.label}</span>
+                    {buckets.length > 2 && <span>{buckets[Math.floor(buckets.length / 2)]?.label}</span>}
+                    <span>{buckets[buckets.length - 1]?.label}</span>
+                  </div>
+                  {compareOn && hasPrevData && (incomeChangePct !== null || expenseChangePct !== null) && (
+                    <p className="text-blueberry dark:text-white text-xs mt-4 bg-ice-cream dark:bg-night-sky rounded-xl px-3.5 py-2.5">
+                      {incomeChangePct !== null && <>Thu nhập kỳ này {incomeChangePct >= 0 ? 'cao hơn' : 'thấp hơn'} kỳ trước {Math.abs(Math.round(incomeChangePct))}%. </>}
+                      {expenseChangePct !== null && <>Chi tiêu {expenseChangePct >= 0 ? 'tăng' : 'giảm'} {Math.abs(Math.round(expenseChangePct))}% nhưng Net Cash Flow {curNet >= prevNet ? 'vẫn tăng' : 'giảm'}.</>}
+                    </p>
+                  )}
+                </>
+              )}
+            </ReportCard>
+
+            {/* SECTION 03 - SPENDING ANALYSIS */}
+            <ReportCard>
+              <ReportSectionHeader title="Spending Analysis" subtitle="Tiền của bạn đang đi đâu?" />
+              {spendingByCat.length === 0 ? reportEmptyState('Chưa có chi tiêu nào trong kỳ này.') : (
+                <div className="flex flex-col md:flex-row gap-6 md:gap-10 items-center md:items-start">
+                  <svg width="160" height="160" viewBox="0 0 150 150" className="-rotate-90 flex-shrink-0">
+                    {(() => {
+                      const radius = 60, circumference = 2 * Math.PI * radius; let cumulative = 0;
+                      return spendingByCat.map((c, i) => {
+                        const pct = c.cur / totalSpendingCat; const dash = pct * circumference; const offset = cumulative; cumulative += dash;
+                        return <circle key={c.id} cx="75" cy="75" r={radius} fill="none" stroke={REPORT_PALETTE[i % REPORT_PALETTE.length]} strokeWidth="16" strokeDasharray={`${dash} ${circumference - dash}`} strokeDashoffset={-offset} />;
+                      });
+                    })()}
+                  </svg>
+                  <div className="flex-1 w-full min-w-0">
+                    <p className="text-steel dark:text-light-grey text-xs font-bold mb-2 uppercase tracking-wide">Top Spending Categories</p>
+                    <div className="flex flex-col gap-2.5 max-h-72 overflow-y-auto scrollbar-hide pr-1">
+                      {spendingByCat.map((c, i) => (
+                        <div key={c.id} className="flex items-center gap-2.5">
+                          <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: REPORT_PALETTE[i % REPORT_PALETTE.length] }} />
+                          <EmojiCircle emoji={c.icon} size={26} />
+                          <div className="min-w-0 flex-1">
+                            <p className="text-blueberry dark:text-white text-sm font-semibold truncate">{c.name}</p>
+                            {compareOn && <ReportDelta cur={c.cur} prev={c.prev} goodUp={false} />}
+                          </div>
+                          <div className="text-right flex-shrink-0">
+                            <p className="text-blueberry dark:text-white text-sm font-bold">{formatMoney(c.cur)}</p>
+                            <p className="text-steel dark:text-light-grey text-[11px]">{Math.round((c.cur / totalSpendingCat) * 100)}%</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </ReportCard>
+
+            {/* SECTION 04 - SPENDING TREND */}
+            <ReportCard>
+              <ReportSectionHeader title="Spending Trend" subtitle="Danh mục nào đang tăng hoặc giảm theo thời gian?" />
+              {!compareOn || spendingMovers.length === 0 ? reportEmptyState('Bật "So sánh với kỳ trước" và thêm giao dịch để xem xu hướng.') : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                  <div>
+                    <p className="text-turquoise text-xs font-bold mb-2.5 uppercase tracking-wide">Tăng nhiều nhất</p>
+                    {topIncreasing.length === 0 ? <p className="text-steel dark:text-light-grey text-xs">Không có danh mục nào tăng.</p> : (
+                      <div className="flex flex-col gap-2">
+                        {topIncreasing.map((c) => (
+                          <div key={c.id} className="flex items-center justify-between bg-ice-cream dark:bg-night-sky rounded-xl px-3.5 py-2.5">
+                            <span className="flex items-center gap-2 text-sm font-semibold text-blueberry dark:text-white"><EmojiCircle emoji={c.icon} size={22} />{c.name}</span>
+                            <span className="text-cotton-candy text-sm font-bold">+{Math.round(c.change)}%</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <div>
+                    <p className="text-baby-blue text-xs font-bold mb-2.5 uppercase tracking-wide">Giảm nhiều nhất</p>
+                    {topDecreasing.length === 0 ? <p className="text-steel dark:text-light-grey text-xs">Không có danh mục nào giảm.</p> : (
+                      <div className="flex flex-col gap-2">
+                        {topDecreasing.map((c) => (
+                          <div key={c.id} className="flex items-center justify-between bg-ice-cream dark:bg-night-sky rounded-xl px-3.5 py-2.5">
+                            <span className="flex items-center gap-2 text-sm font-semibold text-blueberry dark:text-white"><EmojiCircle emoji={c.icon} size={22} />{c.name}</span>
+                            <span className="text-turquoise text-sm font-bold">{Math.round(c.change)}%</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </ReportCard>
+
+            {/* SECTION 05 - SPENDING BEHAVIOR */}
+            <ReportCard>
+              <ReportSectionHeader title="Spending Behavior" subtitle="Bạn thường tiêu tiền như thế nào?" />
+              {curExpenseTx.length === 0 ? reportEmptyState('Chưa có đủ dữ liệu để phân tích hành vi chi tiêu.') : (
+                <>
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-6">
+                    <div className="bg-ice-cream dark:bg-night-sky rounded-xl p-3.5"><p className="text-steel dark:text-light-grey text-[11px] font-semibold mb-1">Trung bình/ngày</p><p className="text-blueberry dark:text-white font-bold text-sm">{formatMoney(avgPerDay)}</p></div>
+                    <div className="bg-ice-cream dark:bg-night-sky rounded-xl p-3.5"><p className="text-steel dark:text-light-grey text-[11px] font-semibold mb-1">TB / giao dịch</p><p className="text-blueberry dark:text-white font-bold text-sm">{formatMoney(avgTransactionValue)}</p></div>
+                    <div className="bg-ice-cream dark:bg-night-sky rounded-xl p-3.5"><p className="text-steel dark:text-light-grey text-[11px] font-semibold mb-1">Giao dịch lớn nhất</p><p className="text-blueberry dark:text-white font-bold text-sm">{largestTx ? formatMoney(Number(largestTx.amount)) : '—'}</p>{largestTxCat && <p className="text-steel dark:text-light-grey text-[11px] truncate">{largestTxCat.name}</p>}</div>
+                    <div className="bg-ice-cream dark:bg-night-sky rounded-xl p-3.5"><p className="text-steel dark:text-light-grey text-[11px] font-semibold mb-1">Ngày chi nhiều nhất</p><p className="text-blueberry dark:text-white font-bold text-sm">{mostExpensiveDayKey ? new Date(Number(mostExpensiveDayKey)).toLocaleDateString('vi-VN') : '—'}</p></div>
+                    <div className="bg-ice-cream dark:bg-night-sky rounded-xl p-3.5"><p className="text-steel dark:text-light-grey text-[11px] font-semibold mb-1">Ngày giao dịch nhiều nhất</p><p className="text-blueberry dark:text-white font-bold text-sm">{mostActiveDayKey ? new Date(Number(mostActiveDayKey)).toLocaleDateString('vi-VN') : '—'}</p></div>
+                    <div className="bg-ice-cream dark:bg-night-sky rounded-xl p-3.5"><p className="text-steel dark:text-light-grey text-[11px] font-semibold mb-1">Danh mục hay dùng nhất</p><p className="text-blueberry dark:text-white font-bold text-sm truncate">{mostFrequentCat ? mostFrequentCat.name : '—'}</p></div>
+                  </div>
+                  <p className="text-steel dark:text-light-grey text-xs font-bold mb-2.5 uppercase tracking-wide">Spending by Day of Week</p>
+                  <div className="flex items-end gap-2.5 md:gap-4 h-24 mb-6">
+                    {weekdayTotals.map((v, i) => (
+                      <div key={i} className="flex-1 flex flex-col items-center justify-end h-full">
+                        <div className="w-full rounded-t-md bg-gradient-primary" style={{ height: `${Math.max(3, (v / maxWeekdayVal) * 100)}%` }} title={formatMoney(v)} />
+                        <span className="text-[10px] text-steel dark:text-light-grey mt-1.5">{WEEKDAY_LABELS_MON_FIRST[i]}</span>
+                      </div>
+                    ))}
+                  </div>
+                  {hasTimeSpread && (
+                    <>
+                      <p className="text-steel dark:text-light-grey text-xs font-bold mb-2.5 uppercase tracking-wide">Spending by Time Period</p>
+                      <div className="flex items-end gap-2.5 md:gap-4 h-20">
+                        {timeOfDayTotals.map((b) => (
+                          <div key={b.key} className="flex-1 flex flex-col items-center justify-end h-full">
+                            <div className="w-full rounded-t-md bg-gradient-secondary" style={{ height: `${Math.max(3, (b.total / maxTimeOfDayVal) * 100)}%` }} title={formatMoney(b.total)} />
+                            <span className="text-[10px] text-steel dark:text-light-grey mt-1.5 text-center leading-tight">{b.label}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </>
+              )}
+            </ReportCard>
+
+            {/* SECTION 06 & 07 - SAVINGS + FUND PERFORMANCE */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <ReportCard>
+                <ReportSectionHeader title="Savings &amp; Accumulation" />
+                <div className="flex items-center gap-5 mb-5">
+                  <MiniRing pct={curSavingsRate} color="#0DBACC" label="Savings rate" />
+                  <div>
+                    <p className="text-blueberry dark:text-white font-bold text-lg">{Math.round(curSavingsRate)}%</p>
+                    {compareOn && <ReportDelta cur={curSavingsRate} prev={prevSavingsRate} isPoint goodUp={true} />}
+                  </div>
+                </div>
+                <ProgressBar pct={curSavingsRate} />
+                <div className="grid grid-cols-2 gap-3 mt-4">
+                  <div><p className="text-steel dark:text-light-grey text-[11px] font-semibold">Đã tiết kiệm (kỳ này)</p><p className="text-blueberry dark:text-white font-bold text-sm">{formatMoney(curNet)}</p></div>
+                  <div><p className="text-steel dark:text-light-grey text-[11px] font-semibold">Đã phân bổ vào quỹ</p><p className="text-blueberry dark:text-white font-bold text-sm">{formatMoney(curAlloc)}</p></div>
+                </div>
+                <p className="text-steel dark:text-light-grey text-xs font-bold mt-5 mb-2.5 uppercase tracking-wide">Savings Trend (6 tháng)</p>
+                <div className="flex items-end gap-2 h-16">
+                  {savingsTrend.map((m, i) => (
+                    <div key={i} className="flex-1 flex flex-col items-center justify-end h-full">
+                      <div className="w-full rounded-t-md bg-lavender" style={{ height: `${Math.max(3, m.rate)}%` }} title={`${Math.round(m.rate)}%`} />
+                      <span className="text-[10px] text-steel dark:text-light-grey mt-1">{m.label}</span>
+                    </div>
+                  ))}
+                </div>
+              </ReportCard>
+
+              <ReportCard>
+                <ReportSectionHeader title="Fund Performance" />
+                {fundRows.length === 0 ? reportEmptyState('Chưa có quỹ nào.') : (
+                  <>
+                    <div className="flex items-center justify-between mb-4 bg-ice-cream dark:bg-night-sky rounded-xl px-3.5 py-2.5">
+                      <div><p className="text-steel dark:text-light-grey text-[11px] font-semibold">Tổng số dư quỹ</p><p className="text-blueberry dark:text-white font-bold text-sm">{formatMoney(totalFundBalance)}</p></div>
+                      {overallFundProgress !== null && <MiniRing pct={overallFundProgress} color="#9F7FE0" label="Tổng tiến độ" />}
+                    </div>
+                    <div className="flex flex-col gap-2.5 max-h-56 overflow-y-auto scrollbar-hide pr-1">
+                      {fundRows.map((f) => (
+                        <div key={f.id} className="flex items-center gap-2.5">
+                          <EmojiCircle emoji={f.icon} size={26} />
+                          <div className="min-w-0 flex-1">
+                            <p className="text-blueberry dark:text-white text-sm font-semibold truncate">{f.name}</p>
+                            {f.progress !== null ? <ProgressBar pct={f.progress} colorClass="bg-lavender" /> : <p className="text-steel dark:text-light-grey text-[11px]">Chưa đặt mục tiêu</p>}
+                          </div>
+                          <div className="text-right flex-shrink-0">
+                            <p className="text-blueberry dark:text-white text-xs font-bold">{formatMoney(f.balance)}</p>
+                            {f.target > 0 && <p className="text-steel dark:text-light-grey text-[10px]">/ {formatMoney(f.target)}</p>}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </ReportCard>
+            </div>
+
+            {/* SECTION 08 & 09 - ASSETS + GOALS */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <ReportCard>
+                <ReportSectionHeader title="Where Is Your Money?" />
+                {assetGroups.length === 0 ? reportEmptyState('Chưa có tài sản nào.') : (
+                  <>
+                    <p className="text-blueberry dark:text-white font-bold text-lg mb-4">{formatMoney(totalAssets)}<span className="text-steel dark:text-light-grey text-xs font-semibold ml-2">Tổng tài sản</span></p>
+                    <div className="flex flex-col gap-2.5">
+                      {assetGroups.map((g, i) => (
+                        <div key={g.value} className="flex items-center gap-3">
+                          <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: REPORT_PALETTE[i % REPORT_PALETTE.length] }} />
+                          <span className="text-blueberry dark:text-white text-sm font-semibold flex-1 truncate">{g.label}</span>
+                          <span className="text-blueberry dark:text-white text-sm font-bold">{formatMoney(g.total)}</span>
+                          <span className="text-steel dark:text-light-grey text-xs w-10 text-right">{Math.round((g.total / totalAssetsForPct) * 100)}%</span>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </ReportCard>
+
+              <ReportCard>
+                <ReportSectionHeader title="Goal Performance" />
+                {goalRows.length === 0 ? reportEmptyState('Chưa có mục tiêu nào.') : (
+                  <>
+                    <div className="grid grid-cols-3 gap-2 mb-4 text-center">
+                      <div className="bg-ice-cream dark:bg-night-sky rounded-xl py-2.5"><p className="text-blueberry dark:text-white font-bold">{goalRows.length}</p><p className="text-steel dark:text-light-grey text-[10px] font-semibold">Tổng số</p></div>
+                      <div className="bg-ice-cream dark:bg-night-sky rounded-xl py-2.5"><p className="text-turquoise font-bold">{completedGoals}</p><p className="text-steel dark:text-light-grey text-[10px] font-semibold">Hoàn thành</p></div>
+                      <div className="bg-ice-cream dark:bg-night-sky rounded-xl py-2.5"><p className="text-blueberry dark:text-white font-bold">{Math.round(avgCompletion)}%</p><p className="text-steel dark:text-light-grey text-[10px] font-semibold">TB tiến độ</p></div>
+                    </div>
+                    {closestGoals.length > 0 && (
+                      <>
+                        <p className="text-turquoise text-xs font-bold mb-2 uppercase tracking-wide">Gần hoàn thành nhất</p>
+                        <div className="flex flex-col gap-2 mb-4">
+                          {closestGoals.map((g) => (
+                            <div key={g.id} className="flex items-center justify-between text-sm">
+                              <span className="text-blueberry dark:text-white font-semibold truncate flex-1">{g.name}</span>
+                              <span className="text-blueberry dark:text-white font-bold ml-2">{Math.round(g.pct)}%</span>
+                            </div>
+                          ))}
+                        </div>
+                      </>
+                    )}
+                    {behindGoals.length > 0 && (
+                      <>
+                        <p className="text-cotton-candy text-xs font-bold mb-2 uppercase tracking-wide">Đang chậm tiến độ</p>
+                        <div className="flex flex-col gap-2">
+                          {behindGoals.map((g) => (
+                            <div key={g.id} className="flex items-center justify-between text-sm">
+                              <span className="text-blueberry dark:text-white font-semibold truncate flex-1">{g.name}</span>
+                              <span className="text-blueberry dark:text-white font-bold ml-2">{Math.round(g.pct)}%</span>
+                            </div>
+                          ))}
+                        </div>
+                      </>
+                    )}
+                  </>
+                )}
+              </ReportCard>
+            </div>
+
+            {/* SECTION 10 - PERIOD COMPARISON */}
+            {compareOn && (
+              <ReportCard>
+                <ReportSectionHeader title="Period Comparison" />
+                {!hasPrevData ? reportEmptyState('Chưa có dữ liệu kỳ trước để so sánh.') : (
+                  <div className="overflow-x-auto scrollbar-hide">
+                    <table className="w-full text-sm min-w-[480px]">
+                      <thead>
+                        <tr className="text-left text-steel dark:text-light-grey text-xs font-semibold">
+                          <th className="pb-2.5 font-semibold">Metric</th>
+                          <th className="pb-2.5 font-semibold text-right">Kỳ trước</th>
+                          <th className="pb-2.5 font-semibold text-right">Kỳ này</th>
+                          <th className="pb-2.5 font-semibold text-right">Thay đổi</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {[
+                          { label: 'Thu nhập', cur: curIncome, prev: prevIncome, goodUp: true },
+                          { label: 'Chi tiêu', cur: curExpense, prev: prevExpense, goodUp: false },
+                          { label: 'Dòng tiền ròng', cur: curNet, prev: prevNet, goodUp: true },
+                          { label: 'Tỷ lệ tiết kiệm', cur: curSavingsRate, prev: prevSavingsRate, goodUp: true, isPct: true },
+                          { label: 'Phân bổ vào quỹ', cur: curAlloc, prev: prevAlloc, goodUp: true },
+                          { label: 'Chi tiêu TB/ngày', cur: curExpense / days, prev: prevExpense / prevDays, goodUp: false },
+                        ].map((row) => (
+                          <tr key={row.label} className="border-t border-light-grey/15 dark:border-light-grey/10">
+                            <td className="py-2.5 text-blueberry dark:text-white font-semibold">{row.label}</td>
+                            <td className="py-2.5 text-right text-steel dark:text-light-grey">{row.isPct ? `${Math.round(row.prev)}%` : formatMoney(row.prev)}</td>
+                            <td className="py-2.5 text-right text-blueberry dark:text-white font-bold">{row.isPct ? `${Math.round(row.cur)}%` : formatMoney(row.cur)}</td>
+                            <td className="py-2.5 text-right"><ReportDelta cur={row.cur} prev={row.prev} goodUp={row.goodUp} isPoint={!!row.isPct} /></td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </ReportCard>
+            )}
+
+            {/* SECTION 11 - FINANCIAL INSIGHTS */}
+            <ReportCard>
+              <ReportSectionHeader title="Financial Insights" />
+              {insights.length === 0 ? reportEmptyState('Chưa có đủ dữ liệu để tạo insight.') : (
+                <div className="flex flex-col gap-2.5">
+                  {insights.map((ins, i) => (
+                    <div key={i} className={`flex items-start gap-2.5 rounded-xl border px-3.5 py-2.5 ${insightStyle[ins.type].class}`}>
+                      <span className="text-base leading-none mt-0.5">{insightStyle[ins.type].emoji}</span>
+                      <p className="text-blueberry dark:text-white text-sm font-medium">{ins.text}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </ReportCard>
+
+            {/* SECTION 12 - DETAILED BREAKDOWN */}
+            <ReportCard>
+              <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
+                <ReportSectionHeader title="Detailed Breakdown" />
+                <div className="flex items-center gap-2 bg-ice-cream dark:bg-night-sky rounded-full px-3.5 py-2">
+                  <Search size={14} className="text-steel dark:text-light-grey" />
+                  <input value={breakdownSearch} onChange={(e) => setBreakdownSearch(e.target.value)} placeholder="Tìm danh mục..." className="bg-transparent outline-none text-xs flex-1 text-blueberry dark:text-white" />
+                </div>
+              </div>
+              {displayedBreakdown.length === 0 ? reportEmptyState('Không có dữ liệu phù hợp.') : (
+                <div className="overflow-x-auto scrollbar-hide">
+                  <table className="w-full text-sm min-w-[600px]">
+                    <thead>
+                      <tr className="text-left text-steel dark:text-light-grey text-xs font-semibold">
+                        <th className="pb-2.5 font-semibold">Danh mục</th>
+                        <th className="pb-2.5 font-semibold text-right">Giao dịch</th>
+                        <th className="pb-2.5 font-semibold text-right">Thu nhập</th>
+                        <th className="pb-2.5 font-semibold text-right">Chi tiêu</th>
+                        <th className="pb-2.5 font-semibold text-right">Phân bổ</th>
+                        <th className="pb-2.5 font-semibold text-right">Tỷ trọng</th>
+                        <th className="pb-2.5 font-semibold text-right">Thay đổi</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {displayedBreakdown.map((c) => (
+                        <tr key={c.id} className="border-t border-light-grey/15 dark:border-light-grey/10">
+                          <td className="py-2.5 text-blueberry dark:text-white font-semibold flex items-center gap-2"><EmojiCircle emoji={c.icon} size={22} />{c.name}</td>
+                          <td className="py-2.5 text-right text-steel dark:text-light-grey">{c.count}</td>
+                          <td className="py-2.5 text-right text-blueberry dark:text-white">{c.income > 0 ? formatMoney(c.income) : '—'}</td>
+                          <td className="py-2.5 text-right text-blueberry dark:text-white">{c.expense > 0 ? formatMoney(c.expense) : '—'}</td>
+                          <td className="py-2.5 text-right text-blueberry dark:text-white">{c.allocation > 0 ? formatMoney(c.allocation) : '—'}</td>
+                          <td className="py-2.5 text-right text-steel dark:text-light-grey">{Math.round((c.total / totalBreakdown) * 100)}%</td>
+                          <td className="py-2.5 text-right"><ReportDelta cur={c.total} prev={c.prevTotal} goodUp={c.type !== 'expense'} isPoint={false} /></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              {filteredBreakdown.length > 8 && (
+                <button onClick={() => setBreakdownExpanded((v) => !v)} className="mt-4 text-turquoise text-sm font-bold">
+                  {breakdownExpanded ? 'Thu gọn' : `Xem tất cả (${filteredBreakdown.length})`}
+                </button>
+              )}
+            </ReportCard>
+          </div>
+        </div>
+      </div>
+      <BottomNav screen="reports" setScreen={setScreen} onAddClick={onAddClick} displayName={displayName} avatarUrl={avatarUrl} theme={theme} toggleTheme={toggleTheme} openSettings={openSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} />
+    </div>
+  );
+}
+
+/* ==============================================================================
+   15. SETTINGS
    ============================================================================== */
 function Settings({ setScreen, categories, accounts, reload, softDelete, user, onProfileUpdated, onAddClick, theme, toggleTheme, initialSection, openSettings, sidebarCollapsed, toggleSidebar, onResetData, resettingData, logs, logActivity, restoreLog }) {
   const displayName = user?.user_metadata?.first_name || user?.user_metadata?.full_name;
@@ -3587,7 +4324,7 @@ function Settings({ setScreen, categories, accounts, reload, softDelete, user, o
 }
 
 /* ==============================================================================
-   15. SETTINGS SUB-COMPONENTS
+   16. SETTINGS SUB-COMPONENTS
    ============================================================================== */
 function ProfileSection({ user, onUpdated, logActivity }) {
   const [firstName, setFirstName] = useState(user?.user_metadata?.first_name || '');
@@ -3765,7 +4502,7 @@ function CategorySection({ categories, reload, softDelete }) {
 }
 
 /* ==============================================================================
-   16. MAIN APP
+   17. MAIN APP
    ============================================================================== */
 function MainApp({ user, theme, toggleTheme }) {
   const [screen, setScreen] = useState('dashboard');
@@ -3875,13 +4612,14 @@ function MainApp({ user, theme, toggleTheme }) {
   }
   if (screen === 'funds') return <><Funds setScreen={setScreen} categories={categories} transactions={transactions} onOpenFund={openFund} reload={loadAll} onAddClick={() => setShowAdd(true)} displayName={displayName} avatarUrl={avatarUrl} theme={theme} toggleTheme={toggleTheme} openSettings={goToSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} />{showAdd && <AddTransaction onClose={() => setShowAdd(false)} accounts={accounts} categories={categories} transactions={transactions} onSaved={loadAll} />}</>;
   if (screen === 'goals') return <><Goals setScreen={setScreen} goals={goals} loadingGoals={loadingGoals} reload={loadAll} softDelete={softDelete} onAddClick={() => setShowAdd(true)} displayName={displayName} avatarUrl={avatarUrl} theme={theme} toggleTheme={toggleTheme} openSettings={goToSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} />{showAdd && <AddTransaction onClose={() => setShowAdd(false)} accounts={accounts} categories={categories} transactions={transactions} onSaved={loadAll} />}</>;
+  if (screen === 'reports') return <><Reports setScreen={setScreen} transactions={transactions} categories={categories} accounts={accounts} goals={goals} onAddClick={() => setShowAdd(true)} displayName={displayName} avatarUrl={avatarUrl} theme={theme} toggleTheme={toggleTheme} openSettings={goToSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} />{showAdd && <AddTransaction onClose={() => setShowAdd(false)} accounts={accounts} categories={categories} transactions={transactions} onSaved={loadAll} />}</>;
   if (screen === 'accounts') return <><Accounts setScreen={setScreen} accounts={accounts} transactions={transactions} onOpenAccount={openAccount} reload={loadAll} onAddClick={() => setShowAdd(true)} displayName={displayName} avatarUrl={avatarUrl} theme={theme} toggleTheme={toggleTheme} openSettings={goToSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} />{showAdd && <AddTransaction onClose={() => setShowAdd(false)} accounts={accounts} categories={categories} transactions={transactions} onSaved={loadAll} />}</>;
   if (screen === 'settings') return <><Settings setScreen={setScreen} categories={categories} accounts={accounts} reload={loadAll} softDelete={softDelete} user={currentUser} onProfileUpdated={refreshUser} onAddClick={() => setShowAdd(true)} theme={theme} toggleTheme={toggleTheme} initialSection={settingsSection} openSettings={goToSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} onResetData={resetAllData} resettingData={resettingData} logs={logs} logActivity={logActivity} restoreLog={restoreLog} />{showAdd && <AddTransaction onClose={() => setShowAdd(false)} accounts={accounts} categories={categories} transactions={transactions} onSaved={loadAll} />}</>;
   return <><Dashboard setScreen={setScreen} transactions={transactions} categories={categories} accounts={accounts} goals={goals} loading={loading} displayName={displayName} avatarUrl={avatarUrl} onAddClick={() => setShowAdd(true)} theme={theme} toggleTheme={toggleTheme} onOpenFund={(id) => openFund(id, 'dashboard')} onOpenAccount={openAccount} reload={loadAll} openSettings={goToSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} />{showAdd && <AddTransaction onClose={() => setShowAdd(false)} accounts={accounts} categories={categories} transactions={transactions} onSaved={loadAll} />}</>;
 }
 
 /* ==============================================================================
-   17. ROOT APP
+   18. ROOT APP
    ============================================================================== */
 const AUTH_BG_IMAGE = '';
 
