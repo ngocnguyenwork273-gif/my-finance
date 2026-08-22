@@ -1,7 +1,7 @@
 /* ==============================================================================
    01. IMPORTS
    ============================================================================== */
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, Fragment } from 'react';
 import { supabase } from './supabaseClient';
 import {
   Home, Sparkles, Plus, BarChart3, Settings as SettingsIcon, TrendingUp, TrendingDown, PiggyBank, HeartPulse,
@@ -566,9 +566,9 @@ function BottomNav({ screen, setScreen, onAddClick, displayName, avatarUrl, them
 
       <div className={`hidden md:flex flex-col fixed left-0 top-0 h-screen ${sidebarCollapsed ? 'w-20 px-2' : 'w-64 px-5'} bg-white dark:bg-[#1e1e32] border-r border-[rgba(189,189,203,0.2)] dark:border-[rgba(189,189,203,0.1)] py-6 z-20 transition-all duration-200`}>
         <div className={`flex items-center mb-8 ${sidebarCollapsed ? 'justify-center px-0' : 'gap-2 px-1'}`}>
-          <div className="w-9 h-9 rounded-xl bg-gradient-primary flex items-center justify-center flex-shrink-0">
+          <button onClick={toggleSidebar} title={sidebarCollapsed ? 'Mở rộng menu' : 'Thu gọn menu'} className="w-9 h-9 rounded-xl bg-gradient-primary flex items-center justify-center flex-shrink-0 hover:opacity-90 transition">
             <Wallet size={17} className="text-white" />
-          </div>
+          </button>
           {!sidebarCollapsed && <span className="font-extrabold text-blueberry dark:text-white text-lg">Fincheck</span>}
         </div>
 
@@ -582,10 +582,6 @@ function BottomNav({ screen, setScreen, onAddClick, displayName, avatarUrl, them
         </div>
 
         <div className={`mt-auto flex flex-col gap-3 ${sidebarCollapsed ? 'items-center' : ''}`}>
-          <button onClick={toggleSidebar} title={sidebarCollapsed ? 'Mở rộng menu' : 'Thu gọn menu'}
-            className={`flex items-center rounded-xl text-sm font-medium text-steel dark:text-light-grey hover:bg-ice-cream dark:hover:bg-night-sky/30 transition ${sidebarCollapsed ? 'justify-center px-0 py-2.5 w-10' : 'gap-3 px-3 py-2.5'}`}>
-            {sidebarCollapsed ? <ChevronRight size={17} /> : <><ChevronLeft size={17} />Thu gọn</>}
-          </button>
           {sidebarCollapsed ? (
             <button onClick={toggleTheme} className="w-8 h-8 rounded-full flex items-center justify-center bg-ice-cream dark:bg-night-sky text-steel dark:text-light-grey">
               {theme === 'dark' ? <Sun size={15} /> : <Moon size={15} />}
@@ -1247,7 +1243,18 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
   const weekDayLabels = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'];
 
   const walletScrollRef = useRef(null);
+  const walletContainerRef = useRef(null);
   const [walletIndex, setWalletIndex] = useState(0);
+  const [walletViewport, setWalletViewport] = useState(288);
+  useEffect(() => {
+    const el = walletContainerRef.current;
+    if (!el) return;
+    const measure = () => setWalletViewport(el.offsetWidth || 288);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   const breakdownBuckets = (() => {
     if (breakdownPeriod === 'week') {
@@ -1554,7 +1561,7 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
   const sortedGroupKeys = Object.keys(groupedRecentTx).sort((a, b) => new Date(b) - new Date(a));
 
   return (
-    <div className={`min-h-screen relative bg-ice-cream dark:bg-[#1a1a2e] flex justify-center ${sidebarCollapsed ? 'md:pl-20' : 'md:pl-64'} md:pt-20 transition-colors`}>
+    <div className={`min-h-screen relative bg-ice-cream dark:bg-[#1a1a2e] flex ${sidebarCollapsed ? 'md:pl-20' : 'md:pl-64'} md:pt-20 transition-colors`}>
       <div className={`absolute inset-0 md:hidden ${theme === 'dark' ? 'bg-[#1a1a2e]' : 'bg-gradient-hero opacity-70'}`} />
       <div className="w-full max-w-sm md:hidden min-h-screen pb-28 relative">
         <div className="px-5 pt-8 flex items-center justify-between">
@@ -1568,10 +1575,7 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
                 <div className="fixed inset-0 z-30" onClick={() => setShowAccountMenu(false)} />
                 <div className="absolute top-14 right-0 bg-white dark:bg-[#1e1e32] rounded-2xl shadow-card border-0 dark:border dark:border-[rgba(189,189,203,0.1)] py-1.5 w-52 z-40">
                   <button onClick={() => { setShowAccountMenu(false); openSettings ? openSettings('profile') : setScreen('settings'); }} className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-blueberry dark:text-white hover:bg-ice-cream dark:hover:bg-night-sky/30">
-                    <UserCog size={15} /> Cài đặt tài khoản
-                  </button>
-                  <button onClick={() => { setShowAccountMenu(false); openSettings ? openSettings('categories') : setScreen('settings'); }} className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-blueberry dark:text-white hover:bg-ice-cream dark:hover:bg-night-sky/30">
-                    <SlidersHorizontal size={15} /> Cài đặt hệ thống
+                    <UserCog size={15} /> Cài đặt
                   </button>
                   <div className="h-px bg-light-grey/20 dark:bg-light-grey/10 my-1.5" />
                   <button onClick={async () => { setShowAccountMenu(false); await supabase.auth.signOut(); }} className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-cotton-candy hover:bg-cotton-candy-light dark:hover:bg-night-sky/30">
@@ -1586,10 +1590,10 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
           <p className="text-white/70 text-xs font-semibold">Tổng tài sản</p>
           <p className="text-white text-3xl font-bold">{formatMoney(totalAssets)}</p>
         </div>
-        <div className="mt-6 px-5 flex gap-3 overflow-x-auto pb-2 scrollbar-hide">
+        <div className="mt-6 px-5 flex gap-3 overflow-x-auto pb-2 scrollbar-hide hide-scrollbar" style={{ WebkitOverflowScrolling: 'touch', scrollSnapType: 'x mandatory', scrollPaddingLeft: 20 }}>
           {fundCategories.length === 0 ? <p className="text-white/70 text-sm">Đánh dấu danh mục là "Quỹ" trong Cài đặt để hiện ở đây.</p>
             : fundCategories.map((f) => (
-              <button key={f.id} onClick={() => onOpenFund(f.id)} className="min-w-[150px] text-left bg-white/90 backdrop-blur rounded-3xl p-4 shadow-lg shadow-black/5 flex-shrink-0">
+              <button key={f.id} onClick={() => onOpenFund(f.id)} style={{ scrollSnapAlign: 'start' }} className="min-w-[150px] text-left bg-white/90 dark:bg-[#2a2a44]/90 backdrop-blur rounded-3xl p-4 shadow-lg shadow-black/5 flex-shrink-0">
                 <EmojiCircle emoji={f.icon} size={36} active activeColor="#0DBACC" />
                 <p className="text-steel dark:text-light-grey text-xs mt-3 font-semibold">{f.name}</p>
                 <p className="text-blueberry dark:text-white font-bold text-base">{formatMoney(fundBalanceWithProfit(f, transactions))}</p>
@@ -1709,7 +1713,7 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
       </div>
 
       {/* Desktop version giữ nguyên */}
-      <div className="hidden md:block w-full max-w-[1400px] px-8 py-8">
+      <div className={`hidden md:block w-full ${sidebarCollapsed ? 'max-w-[1580px]' : 'max-w-[1400px]'} px-8 py-8`}>
         <div className="flex items-center justify-between mb-6">
           <h1 className="text-blueberry dark:text-white text-2xl font-extrabold">Dashboard</h1>
           <button onClick={() => setShowAddWidget(true)} className="bg-gradient-primary text-white rounded-full pl-3 pr-4 py-2 text-sm font-bold flex items-center gap-1.5 shadow-md shadow-turquoise/30">
@@ -1805,19 +1809,19 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
                   <span className="text-xs font-bold">Chưa có ví nào — bấm để thêm ví đầu tiên</span>
                 </button>
               ) : (
-                <div className="w-full">
+                <div className="w-full" ref={walletContainerRef}>
                   <div className="mb-2">
                     {(() => {
-                      const cardWidth = 288;
-                      const viewport = cardWidth;
+                      const cardWidth = walletViewport;
+                      const viewport = walletViewport;
                       const stackTotalWidth = Math.max(viewport, (accounts.length * cardWidth));
                       return (
                         <div className="relative" style={{ width: viewport }}>
-                          <div ref={walletScrollRef} className="hide-scrollbar overflow-x-auto scrollbar-hide" style={{ width: viewport, scrollSnapType: 'x mandatory', WebkitOverflowScrolling: 'touch', paddingLeft: 12, scrollPaddingLeft: 12 }}>
+                          <div ref={walletScrollRef} className="hide-scrollbar overflow-x-auto scrollbar-hide" style={{ width: viewport, scrollSnapType: 'x mandatory', WebkitOverflowScrolling: 'touch' }}>
                             <div className="flex items-start" style={{ width: stackTotalWidth }}>
                             {accounts.map((acc, i) => {
                               return (
-                                <div key={acc.id} style={{ scrollSnapAlign: 'center', marginLeft: 0 }}>
+                                <div key={acc.id} style={{ scrollSnapAlign: 'start', marginLeft: 0 }}>
                                   <button
                                     id={`wallet-card-${acc.id}`}
                                     onClick={() => onOpenAccount(acc.id, 'dashboard')}
@@ -1838,14 +1842,6 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
                             })}
                             </div>
                           </div>
-                          <button onClick={() => scrollToCardIndex(Math.max(0, walletIndex - 1))} disabled={walletIndex <= 0}
-                            className={`absolute left-2 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full flex items-center justify-center bg-white dark:bg-[#2a2a44] shadow ${walletIndex <= 0 ? 'opacity-40 cursor-not-allowed' : ''}`}>
-                            <ChevronLeft size={16} />
-                          </button>
-                          <button onClick={() => scrollToCardIndex(Math.min(accounts.length - 1, walletIndex + 1))} disabled={walletIndex >= accounts.length - 1}
-                            className={`absolute right-2 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full flex items-center justify-center bg-white dark:bg-[#2a2a44] shadow ${walletIndex >= accounts.length - 1 ? 'opacity-40 cursor-not-allowed' : ''}`}>
-                            <ChevronRight size={16} />
-                          </button>
                         </div>
                       );
                     })()}
@@ -2118,7 +2114,7 @@ function Funds({ setScreen, categories, transactions, onOpenFund, reload, onAddC
   const editingInitialAmount = editingFirstAllocation ? Number(editingFirstAllocation.amount) : 0;
 
   return (
-    <div className={`min-h-screen relative bg-ice-cream dark:bg-[#1a1a2e] flex justify-center ${sidebarCollapsed ? 'md:pl-20' : 'md:pl-64'} md:pt-20 transition-colors`}>
+    <div className={`min-h-screen relative bg-ice-cream dark:bg-[#1a1a2e] flex ${sidebarCollapsed ? 'md:pl-20' : 'md:pl-64'} md:pt-20 transition-colors`}>
       <div className={`absolute inset-0 md:hidden ${theme === 'dark' ? 'bg-[#1a1a2e]' : 'bg-gradient-secondary opacity-70'}`} />
       <div className="w-full max-w-sm md:hidden min-h-screen pb-28 relative">
         <div className="px-5 pt-8">
@@ -2182,7 +2178,7 @@ function Funds({ setScreen, categories, transactions, onOpenFund, reload, onAddC
       </div>
 
       {/* Desktop version giữ nguyên */}
-      <div className="hidden md:block w-full max-w-[1400px] px-8 py-8" onClick={() => { setOpenMenuId(null); setShowFilterMenu(false); setShowSortMenu(false); }}>
+      <div className={`hidden md:block w-full ${sidebarCollapsed ? 'max-w-[1580px]' : 'max-w-[1400px]'} px-8 py-8`} onClick={() => { setOpenMenuId(null); setShowFilterMenu(false); setShowSortMenu(false); }}>
         <h1 className="text-blueberry dark:text-white text-2xl font-extrabold mb-6">Quản lý quỹ</h1>
 
         <div className="grid grid-cols-4 gap-4 mb-6">
@@ -2477,6 +2473,9 @@ function FundDetail({ category, transactions, onBack, reload, softDelete, setScr
         displayDate: displayDate,
       };
     })
+    // Chỉ hiển thị dòng lợi nhuận khi thời điểm thực tế đã tới đúng ngày credit (displayDate),
+    // tránh việc dòng lợi nhuận bị "lộ" sớm 1-nhiều ngày trước khi thực sự được ghi nhận
+    .filter(d => d.displayDate <= new Date())
   ].sort((a, b) => {
     // Giao dịch nạp/rút: sắp theo "date" (ngày nghiệp vụ, giống allHistory) chứ KHÔNG phải created_at
     // (created_at là thời điểm lưu vào DB, có thể khác ngày nghiệp vụ nếu nhập bù/chỉnh sửa sau)
@@ -2522,7 +2521,7 @@ function FundDetail({ category, transactions, onBack, reload, softDelete, setScr
   };
 
   return (
-    <div className={`min-h-screen relative bg-ice-cream dark:bg-[#1a1a2e] flex justify-center ${sidebarCollapsed ? 'md:pl-20' : 'md:pl-64'} md:pt-20 transition-colors`}>
+    <div className={`min-h-screen relative bg-ice-cream dark:bg-[#1a1a2e] flex ${sidebarCollapsed ? 'md:pl-20' : 'md:pl-64'} md:pt-20 transition-colors`}>
       <div className="w-full max-w-sm md:hidden min-h-screen pb-28 relative bg-ice-cream dark:bg-[#1a1a2e]">
         <div className="h-56 relative"
           style={{
@@ -2597,35 +2596,54 @@ function FundDetail({ category, transactions, onBack, reload, softDelete, setScr
           {displayHistory.length === 0 ? (
             <p className="text-steel dark:text-light-grey text-sm text-center py-8">Chưa có hoạt động nào.</p>
           ) : (
-            <div className="flex flex-col gap-2.5 scrollbar-hide">
-              {displayHistory.map((item) => {
-                const isProfit = item.isProfit;
-                const isAlloc = item.type === 'allocation';
-                const isInitial = isAlloc && firstAllocation && item.id === firstAllocation.id;
-                const label = isAlloc ? 'Góp quỹ' : isProfit ? 'Lợi nhuận' : 'Rút quỹ';
-                const iconBg = isAlloc ? 'bg-turquoise/10' : isProfit ? 'bg-turquoise/10' : 'bg-cotton-candy/10';
-                const amountColor = item.type === 'expense' ? 'text-cotton-candy' : 'text-turquoise';
-                const timeDisplay = formatDisplayTime(item);
-                const dateDisplay = new Date(item.date || item.created_at).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric' });
+            <div className="flex flex-col scrollbar-hide">
+              {(() => {
+                let lastDateKey = null;
+                return displayHistory.map((item) => {
+                  const isProfit = item.isProfit;
+                  const isAlloc = item.type === 'allocation';
+                  const isInitial = isAlloc && firstAllocation && item.id === firstAllocation.id;
+                  const label = isAlloc ? 'Góp quỹ' : isProfit ? 'Nhận lợi nhuận tự động' : 'Rút quỹ';
+                  const iconBg = item.type === 'expense' ? 'bg-cotton-candy/10' : 'bg-turquoise/10';
+                  const amountColor = item.type === 'expense' ? 'text-cotton-candy' : 'text-turquoise';
+                  const timeDisplay = formatDisplayTime(item);
+                  // Nhóm theo ngày thực hiện thực tế: giao dịch dùng "date" (thời điểm thật khi bấm nạp/rút),
+                  // lợi nhuận dùng "created_at" (= ngày được credit theo quy tắc)
+                  const itemDate = new Date(isProfit ? item.created_at : (item.date || item.created_at));
+                  const dateKey = itemDate.toDateString();
+                  const showHeader = dateKey !== lastDateKey;
+                  lastDateKey = dateKey;
+                  const noteText = isProfit ? item.note : stripPeriodTag(item.note);
 
-                return (
-                  <div key={item.id} className={`rounded-2xl p-4 shadow-soft ${isInitial ? 'bg-turquoise/10 border-2 border-turquoise' : 'bg-white dark:bg-[#1e1e32]'}`}>
-                    <div className="flex items-center gap-3">
-                      <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${isInitial ? 'bg-turquoise' : iconBg}`}>
-                        {isInitial ? <Star size={16} className="text-white fill-white" /> : isAlloc ? <TrendingUp size={16} className="text-turquoise" /> : isProfit ? <Sparkles size={16} className="text-turquoise" /> : <TrendingDown size={16} className="text-cotton-candy" />}
+                  return (
+                    <Fragment key={item.id}>
+                      {showHeader && (
+                        <div className="-mx-5 px-5 py-2 mt-3 first:mt-0 bg-steel/5 dark:bg-white/5">
+                          <p className="text-blueberry dark:text-white font-extrabold text-sm">
+                            {itemDate.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric' })}
+                          </p>
+                        </div>
+                      )}
+                      <div className={`flex items-start gap-3 py-3 border-b border-[rgba(189,189,203,0.15)] last:border-b-0 ${isInitial ? 'bg-turquoise/10 -mx-2 px-2 rounded-xl border border-turquoise' : ''}`}>
+                        <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5 ${isInitial ? 'bg-turquoise' : iconBg}`}>
+                          {isInitial ? <Star size={16} className="text-white fill-white" /> : isAlloc ? <TrendingUp size={16} className="text-turquoise" /> : isProfit ? <Sparkles size={16} className="text-turquoise" /> : <TrendingDown size={16} className="text-cotton-candy" />}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center justify-between gap-2">
+                            <p className="text-blueberry dark:text-white font-bold text-sm truncate">
+                              {label}{isInitial && <span className="ml-1.5 text-[10px] font-bold text-turquoise bg-turquoise/20 px-1.5 py-0.5 rounded-full align-middle">Nạp ban đầu</span>}
+                            </p>
+                            <p className={`font-bold text-sm flex-shrink-0 ${amountColor}`}>{item.type === 'expense' ? '-' : '+'}{formatMoney(item.amount)}</p>
+                          </div>
+                          <p className="text-steel dark:text-light-grey text-xs mt-0.5">{timeDisplay}</p>
+                          {noteText && <p className="text-steel dark:text-light-grey text-xs mt-0.5 truncate">{noteText}</p>}
+                          {item.balanceAfter !== undefined && <p className="text-steel dark:text-light-grey text-xs mt-0.5">Số dư: {formatMoney(item.balanceAfter)}</p>}
+                        </div>
                       </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-steel dark:text-light-grey text-xs">{dateDisplay} · {timeDisplay}</p>
-                        <p className="text-blueberry dark:text-white font-bold text-sm">{label}{isInitial && <span className="ml-1.5 text-[10px] font-bold text-turquoise bg-turquoise/20 px-1.5 py-0.5 rounded-full align-middle">Nạp ban đầu</span>}</p>
-                      </div>
-                      <p className={`font-bold text-sm flex-shrink-0 ${amountColor}`}>{item.type === 'expense' ? '-' : '+'}{formatMoney(item.amount)}</p>
-                    </div>
-                    {isProfit && <p className="text-steel dark:text-light-grey text-xs mt-2 pl-[52px] truncate">{item.note || `Lợi nhuận ngày ${new Date(item.date).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' })}`}</p>}
-                    {!isProfit && stripPeriodTag(item.note) && <p className="text-steel dark:text-light-grey text-xs mt-2 pl-[52px] truncate">{stripPeriodTag(item.note)}</p>}
-                    {item.balanceAfter !== undefined && <p className="text-steel dark:text-light-grey text-xs mt-1 pl-[52px]">Số dư: {formatMoney(item.balanceAfter)}</p>}
-                  </div>
-                );
-              })}
+                    </Fragment>
+                  );
+                });
+              })()}
             </div>
           )}
 
@@ -2647,7 +2665,7 @@ function FundDetail({ category, transactions, onBack, reload, softDelete, setScr
       </div>
 
       {/* Desktop version giữ nguyên cấu trúc, áp dụng logic tương tự */}
-      <div className="hidden md:block w-full max-w-4xl px-8 py-8">
+      <div className={`hidden md:block w-full ${sidebarCollapsed ? 'max-w-[1076px]' : 'max-w-4xl'} px-8 py-8`}>
         <div className="flex items-center justify-between mb-6">
           <div className="flex items-center gap-3">
             <button onClick={onBack} className="w-9 h-9 rounded-full bg-white dark:bg-[#2a2a44] flex items-center justify-center shadow-soft"><ArrowLeft size={18} className="text-blueberry dark:text-white" /></button>
@@ -2788,8 +2806,9 @@ function FundDetail({ category, transactions, onBack, reload, softDelete, setScr
 function Accounts({ setScreen, accounts, transactions, onOpenAccount, reload, onAddClick, displayName, avatarUrl, theme, toggleTheme, openSettings, sidebarCollapsed, toggleSidebar }) {
   const [showCreate, setShowCreate] = useState(false);
   const totalBalance = accounts.reduce((s, a) => s + accountBalance(a, transactions), 0);
+  const totalExcludingGold = accounts.filter((a) => a.type !== 'gold').reduce((s, a) => s + accountBalance(a, transactions), 0);
   return (
-    <div className={`min-h-screen relative bg-ice-cream dark:bg-[#1a1a2e] flex justify-center ${sidebarCollapsed ? 'md:pl-20' : 'md:pl-64'} md:pt-20 transition-colors`}>
+    <div className={`min-h-screen relative bg-ice-cream dark:bg-[#1a1a2e] flex ${sidebarCollapsed ? 'md:pl-20' : 'md:pl-64'} md:pt-20 transition-colors`}>
       <div className={`absolute inset-0 md:hidden ${theme === 'dark' ? 'bg-[#1a1a2e]' : 'bg-gradient-primary opacity-70'}`} />
       <div className="w-full max-w-sm md:hidden min-h-screen pb-28 relative">
         <div className="px-5 pt-8 flex items-center justify-between">
@@ -2799,7 +2818,11 @@ function Accounts({ setScreen, accounts, transactions, onOpenAccount, reload, on
           </div>
           <button onClick={() => setShowCreate(true)} className="w-9 h-9 rounded-full bg-white/30 backdrop-blur flex items-center justify-center"><Plus size={18} className="text-white" /></button>
         </div>
-        <div className="px-5 mt-4 text-center"><p className="text-white/80 text-sm font-semibold">Tổng tất cả tài khoản</p><p className="text-white text-3xl font-bold">{formatMoney(totalBalance)}</p></div>
+        <div className="px-5 mt-4 text-center">
+          <p className="text-white/80 text-sm font-semibold">Tổng tất cả tài khoản</p>
+          <p className="text-white text-3xl font-bold">{formatMoney(totalBalance)}</p>
+          <p className="text-white/70 text-xs font-semibold mt-1">Tổng tất cả trừ vàng: {formatMoney(totalExcludingGold)}</p>
+        </div>
         <div className="mt-6 bg-white dark:bg-[#1e1e32] rounded-[2.5rem] min-h-[70vh] px-5 pt-6 pb-6 shadow-soft">
           {accounts.length === 0 ? <p className="text-steel dark:text-light-grey text-sm text-center py-10">Chưa có ví nào. Bấm + để thêm ví đầu tiên.</p> : (
             <div className="flex flex-col gap-3 scrollbar-hide">
@@ -2815,11 +2838,12 @@ function Accounts({ setScreen, accounts, transactions, onOpenAccount, reload, on
         </div>
       </div>
 
-      <div className="hidden md:block w-full max-w-[1200px] px-8 py-8">
+      <div className={`hidden md:block w-full ${sidebarCollapsed ? 'max-w-[1380px]' : 'max-w-[1200px]'} px-8 py-8`}>
         <div className="flex items-center justify-between mb-2">
           <div>
             <h1 className="text-blueberry dark:text-white text-2xl font-extrabold">Quản lý ví</h1>
             <p className="text-steel dark:text-light-grey text-sm mt-1">Tổng tất cả tài khoản: <span className="text-blueberry dark:text-white font-bold">{formatMoney(totalBalance)}</span></p>
+            <p className="text-steel dark:text-light-grey text-sm mt-0.5">Tổng tất cả trừ vàng: <span className="text-blueberry dark:text-white font-bold">{formatMoney(totalExcludingGold)}</span></p>
           </div>
           <button onClick={() => setShowCreate(true)} className="bg-gradient-primary text-white rounded-full px-5 py-2.5 text-sm font-bold flex items-center gap-2 shadow-md shadow-turquoise/30">
             <Plus size={16} /> Thêm ví mới
@@ -2873,7 +2897,7 @@ function AccountDetail({ account, transactions, categories, onBack, reload, soft
   }
 
   return (
-    <div className={`min-h-screen relative bg-ice-cream dark:bg-[#1a1a2e] flex justify-center ${sidebarCollapsed ? 'md:pl-20' : 'md:pl-64'} md:pt-20 transition-colors`}>
+    <div className={`min-h-screen relative bg-ice-cream dark:bg-[#1a1a2e] flex ${sidebarCollapsed ? 'md:pl-20' : 'md:pl-64'} md:pt-20 transition-colors`}>
       <div className="w-full max-w-sm md:hidden min-h-screen pb-28 relative" style={{ background: 'linear-gradient(180deg,#0DBACC,#74ACEF,#C1DDFF)' }}>
         <div className="px-5 pt-8 flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -2930,7 +2954,7 @@ function AccountDetail({ account, transactions, categories, onBack, reload, soft
         </div>
       </div>
 
-      <div className="hidden md:block w-full max-w-4xl px-8 py-8">
+      <div className={`hidden md:block w-full ${sidebarCollapsed ? 'max-w-[1076px]' : 'max-w-4xl'} px-8 py-8`}>
         <div className="flex items-center justify-between mb-6">
           <div className="flex items-center gap-3">
             <button onClick={onBack} className="w-9 h-9 rounded-full bg-white dark:bg-[#2a2a44] flex items-center justify-center shadow-soft"><ArrowLeft size={18} className="text-blueberry dark:text-white" /></button>
@@ -3045,7 +3069,7 @@ function Goals({ setScreen, goals, loadingGoals, reload, softDelete, onAddClick,
   const pagedGoals = displayGoals.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
   return (
-    <div className={`min-h-screen relative bg-ice-cream dark:bg-[#1a1a2e] flex justify-center ${sidebarCollapsed ? 'md:pl-20' : 'md:pl-64'} md:pt-20 transition-colors`}>
+    <div className={`min-h-screen relative bg-ice-cream dark:bg-[#1a1a2e] flex ${sidebarCollapsed ? 'md:pl-20' : 'md:pl-64'} md:pt-20 transition-colors`}>
       <div className={`absolute inset-0 md:hidden ${theme === 'dark' ? 'bg-[#1a1a2e]' : 'bg-gradient-secondary opacity-70'}`} />
       <div className="w-full max-w-sm md:hidden min-h-screen pb-28 relative">
         <div className="px-5 pt-8 flex items-center gap-3">
@@ -3090,7 +3114,7 @@ function Goals({ setScreen, goals, loadingGoals, reload, softDelete, onAddClick,
         <BottomNav screen="goals" setScreen={setScreen} onAddClick={onAddClick} displayName={displayName} avatarUrl={avatarUrl} theme={theme} toggleTheme={toggleTheme} openSettings={openSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} />
       </div>
 
-      <div className="hidden md:block w-full max-w-[1400px] px-8 py-8" onClick={() => { setOpenMenuId(null); setShowFilterMenu(false); setShowSortMenu(false); }}>
+      <div className={`hidden md:block w-full ${sidebarCollapsed ? 'max-w-[1580px]' : 'max-w-[1400px]'} px-8 py-8`} onClick={() => { setOpenMenuId(null); setShowFilterMenu(false); setShowSortMenu(false); }}>
         <h1 className="text-blueberry dark:text-white text-2xl font-extrabold mb-6">Mục tiêu</h1>
 
         <div className="grid grid-cols-4 gap-4 mb-6">
@@ -3513,7 +3537,7 @@ function Settings({ setScreen, categories, accounts, reload, softDelete, user, o
   );
 
   return (
-    <div className={`min-h-screen relative bg-ice-cream dark:bg-[#1a1a2e] flex justify-center ${sidebarCollapsed ? 'md:pl-20' : 'md:pl-64'} md:pt-20 transition-colors`}>
+    <div className={`min-h-screen relative bg-ice-cream dark:bg-[#1a1a2e] flex ${sidebarCollapsed ? 'md:pl-20' : 'md:pl-64'} md:pt-20 transition-colors`}>
       <div className={`absolute inset-0 md:hidden ${theme === 'dark' ? 'bg-[#1a1a2e]' : 'bg-gradient-secondary opacity-70'}`} />
       <div className="w-full max-w-sm md:hidden min-h-screen pb-28 relative">
         <div className="px-5 pt-8 flex items-center gap-3">
@@ -3536,7 +3560,7 @@ function Settings({ setScreen, categories, accounts, reload, softDelete, user, o
         </div>
       </div>
 
-      <div className="hidden md:block w-full max-w-3xl px-8 py-8">
+      <div className={`hidden md:block w-full ${sidebarCollapsed ? 'max-w-[948px]' : 'max-w-3xl'} px-8 py-8`}>
         <div className="flex items-center justify-between mb-6">
           <h1 className="text-blueberry dark:text-white text-2xl font-extrabold">Cài đặt</h1>
           <button onClick={handleLogout} className="flex items-center gap-2 bg-white dark:bg-[#2a2a44] text-cotton-candy rounded-full px-4 py-2 text-sm font-bold shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)]"><LogOut size={15} /> Đăng xuất</button>
@@ -4048,6 +4072,9 @@ export default function App() {
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', theme === 'dark');
+    // Ép các phần tử gốc trình duyệt (scrollbar, input, select, date picker...)
+    // theo đúng theme app đã chọn, không để chúng tự lấy theo theme hệ thống
+    document.documentElement.style.colorScheme = theme === 'dark' ? 'dark' : 'light';
     localStorage.setItem('theme', theme);
   }, [theme]);
 
