@@ -3366,9 +3366,9 @@ function Goals({ setScreen, goals, loadingGoals, reload, softDelete, onAddClick,
 const REPORT_PRESETS = [
   { key: 'this_month', label: 'Tháng này' },
   { key: 'last_month', label: 'Tháng trước' },
-  { key: '3m', label: '3 tháng' },
-  { key: '6m', label: '6 tháng' },
-  { key: '1y', label: '1 năm' },
+  { key: '3m', label: '3 tháng gần đây' },
+  { key: '6m', label: '6 tháng gần đây' },
+  { key: '1y', label: 'Năm nay' },
   { key: 'custom', label: 'Tùy chỉnh' },
 ];
 const REPORT_PALETTE = ['#0DBACC', '#74ACEF', '#F18AB5', '#9F7FE0', '#B4F1F1', '#C1DDFF', '#FFCDDB', '#E3D6FF'];
@@ -3394,9 +3394,12 @@ function getPresetRange(preset, customStart, customEnd) {
     const end = new Date(now.getFullYear(), now.getMonth(), 0);
     return { start: startOfDay(start), end: endOfDay(end) };
   }
-  if (preset === '3m' || preset === '6m' || preset === '1y') {
-    const months = preset === '3m' ? 3 : preset === '6m' ? 6 : 12;
+  if (preset === '3m' || preset === '6m') {
+    const months = preset === '3m' ? 3 : 6;
     return { start: startOfDay(addMonths(now, -months)), end: endOfDay(now) };
+  }
+  if (preset === '1y') {
+    return { start: startOfDay(new Date(now.getFullYear(), 0, 1)), end: endOfDay(now) };
   }
   if (preset === 'custom' && customStart && customEnd) {
     const s = startOfDay(new Date(customStart));
@@ -3466,213 +3469,138 @@ function Reports({ setScreen, transactions, categories, accounts, goals, onAddCl
   const [customStart, setCustomStart] = useState('');
   const [customEnd, setCustomEnd] = useState('');
   const [compareOn, setCompareOn] = useState(true);
-  const [showIncomeLine, setShowIncomeLine] = useState(true);
-  const [showExpenseLine, setShowExpenseLine] = useState(true);
-  const [showNetLine, setShowNetLine] = useState(true);
-  const [breakdownSearch, setBreakdownSearch] = useState('');
-  const [breakdownExpanded, setBreakdownExpanded] = useState(false);
+  const [trendMonths, setTrendMonths] = useState(6);
 
   const { start, end } = getPresetRange(preset, customStart, customEnd);
   const { start: prevStart, end: prevEnd } = getPrevRange(start, end);
   const days = Math.max(1, Math.round((end - start) / 86400000) + 1);
-  const prevDays = Math.max(1, Math.round((prevEnd - prevStart) / 86400000) + 1);
 
   const inRange = (t, s, e) => { const d = txDate(t); return d >= s && d <= e; };
   const curTx = transactions.filter((t) => inRange(t, start, end));
   const prevTx = transactions.filter((t) => inRange(t, prevStart, prevEnd));
   const sumType = (txs, type) => txs.filter((t) => t.type === type).reduce((s, t) => s + Number(t.amount), 0);
-
-  const curIncome = sumType(curTx, 'income');
-  const curExpense = sumType(curTx, 'expense');
-  const curAlloc = sumType(curTx, 'allocation');
-  const prevIncome = sumType(prevTx, 'income');
-  const prevExpense = sumType(prevTx, 'expense');
-  const prevAlloc = sumType(prevTx, 'allocation');
-  const curNet = curIncome - curExpense;
-  const prevNet = prevIncome - prevExpense;
-  const curSavingsRate = curIncome > 0 ? ((curIncome - curExpense) / curIncome) * 100 : 0;
-  const prevSavingsRate = prevIncome > 0 ? ((prevIncome - prevExpense) / prevIncome) * 100 : 0;
-
-  const hasCurData = curTx.length > 0;
-  const hasPrevData = prevTx.length > 0;
-
-  const overviewCards = [
-    { label: 'Tổng thu nhập', cur: curIncome, prev: prevIncome, goodUp: true, icon: TrendingUp, color: 'bg-turquoise' },
-    { label: 'Tổng chi tiêu', cur: curExpense, prev: prevExpense, goodUp: false, icon: TrendingDown, color: 'bg-cotton-candy' },
-    { label: 'Dòng tiền ròng', cur: curNet, prev: prevNet, goodUp: true, icon: Wallet, color: 'bg-baby-blue' },
-    { label: 'Tỷ lệ tiết kiệm', cur: curSavingsRate, prev: prevSavingsRate, goodUp: true, icon: PiggyBank, color: 'bg-lavender', isPct: true },
-    { label: 'Đã phân bổ vào quỹ', cur: curAlloc, prev: prevAlloc, goodUp: true, icon: Target, color: 'bg-turquoise' },
-  ];
-
-  // ---- Cash flow buckets ----
-  const buckets = buildReportBuckets(start, end);
-  const bucketData = buckets.map((b) => {
-    const bTx = transactions.filter((t) => inRange(t, b.start, b.end));
-    const inc = sumType(bTx, 'income'); const exp = sumType(bTx, 'expense');
-    return { ...b, income: inc, expense: exp, net: inc - exp };
-  });
-  const maxBucketVal = Math.max(...bucketData.map((b) => b.income), ...bucketData.map((b) => b.expense), ...bucketData.map((b) => Math.abs(b.net)), 1);
-  function toPoints(values) {
-    const w = 600, h = 140, pad = 6;
-    return values.map((v, i) => {
-      const x = values.length > 1 ? pad + (i / (values.length - 1)) * (w - pad * 2) : w / 2;
-      const y = h - pad - ((v + maxBucketVal) / (maxBucketVal * 2)) * (h - pad * 2);
-      return `${x},${y}`;
-    }).join(' ');
-  }
-
-  // ---- Spending analysis by category ----
-  const expenseCats = categories.filter((c) => c.type === 'expense');
-  const incomeCats = categories.filter((c) => c.type === 'income');
   function categoryAmount(catId, txList, type) {
     return txList.filter((t) => t.category_id === catId && t.type === type).reduce((s, t) => s + Number(t.amount), 0);
   }
+
+  // ---- Số liệu cốt lõi: Thu nhập -> Góp quỹ -> Chi tiêu -> Còn lại ----
+  const curIncome = sumType(curTx, 'income');
+  const curExpense = sumType(curTx, 'expense');
+  const curAlloc = sumType(curTx, 'allocation');
+  const curRemain = curIncome - curAlloc - curExpense;
+
+  const prevIncome = sumType(prevTx, 'income');
+  const prevExpense = sumType(prevTx, 'expense');
+  const prevAlloc = sumType(prevTx, 'allocation');
+  const prevRemain = prevIncome - prevAlloc - prevExpense;
+
+  const hasCurData = curTx.length > 0;
+  const hasPrevData = prevTx.length > 0;
+  const hasIncome = curIncome > 0;
+  const prevHasIncome = prevIncome > 0;
+
+  const allocRatePct = hasIncome ? (curAlloc / curIncome) * 100 : null;
+  const expenseRatePct = hasIncome ? (curExpense / curIncome) * 100 : null;
+  const remainRatePct = hasIncome ? (curRemain / curIncome) * 100 : null;
+  const prevAllocRatePct = prevHasIncome ? (prevAlloc / prevIncome) * 100 : null;
+  const prevExpenseRatePct = prevHasIncome ? (prevExpense / prevIncome) * 100 : null;
+
+  // ---- Đóng góp vào từng quỹ trong kỳ ----
+  const fundCats = categories.filter((c) => c.is_fund);
+  const fundContribRows = fundCats.map((f) => {
+    const amount = categoryAmount(f.id, curTx, 'allocation');
+    const prevAmount = categoryAmount(f.id, prevTx, 'allocation');
+    const balance = fundBalanceWithProfit(f, transactions);
+    const target = Number(f.target_amount || 0);
+    const progress = target > 0 ? Math.min(100, (balance / target) * 100) : null;
+    return { ...f, amount, prevAmount, balance, target, progress };
+  }).filter((f) => f.amount > 0).sort((a, b) => b.amount - a.amount);
+  const totalFundContrib = fundContribRows.reduce((s, f) => s + f.amount, 0) || 1;
+  const mostFundedRow = fundContribRows[0] || null;
+  const leastFundedRow = fundContribRows.length > 0 ? fundContribRows[fundContribRows.length - 1] : null;
+
+  // ---- Chi tiêu theo danh mục ----
+  const expenseCats = categories.filter((c) => c.type === 'expense');
   const spendingByCat = expenseCats
     .map((c) => ({ ...c, cur: categoryAmount(c.id, curTx, 'expense'), prev: categoryAmount(c.id, prevTx, 'expense') }))
     .filter((c) => c.cur > 0)
     .sort((a, b) => b.cur - a.cur);
   const totalSpendingCat = spendingByCat.reduce((s, c) => s + c.cur, 0) || 1;
-
-  // ---- Spending trend: biggest movers ----
-  const spendingMovers = expenseCats
-    .map((c) => ({ ...c, cur: categoryAmount(c.id, curTx, 'expense'), prev: categoryAmount(c.id, prevTx, 'expense') }))
-    .filter((c) => c.cur > 0 || c.prev > 0)
-    .map((c) => ({ ...c, change: reportPctChange(c.cur, c.prev) }))
-    .filter((c) => c.change !== null)
-    .sort((a, b) => b.change - a.change);
-  const topIncreasing = spendingMovers.filter((c) => c.change > 0).slice(0, 3);
-  const topDecreasing = [...spendingMovers].filter((c) => c.change < 0).sort((a, b) => a.change - b.change).slice(0, 3);
-
-  // ---- Spending behavior ----
   const curExpenseTx = curTx.filter((t) => t.type === 'expense');
   const avgPerDay = curExpense / days;
-  const avgTransactionValue = curExpenseTx.length > 0 ? curExpense / curExpenseTx.length : 0;
-  const largestTx = curExpenseTx.reduce((max, t) => (Number(t.amount) > Number(max?.amount || 0) ? t : max), null);
-  const largestTxCat = largestTx ? categories.find((c) => c.id === largestTx.category_id) : null;
-  const dayTotals = {};
-  curExpenseTx.forEach((t) => { const key = startOfDay(txDate(t)).getTime(); dayTotals[key] = (dayTotals[key] || 0) + Number(t.amount); });
-  const dayCounts = {};
-  curExpenseTx.forEach((t) => { const key = startOfDay(txDate(t)).getTime(); dayCounts[key] = (dayCounts[key] || 0) + 1; });
-  const mostExpensiveDayKey = Object.keys(dayTotals).sort((a, b) => dayTotals[b] - dayTotals[a])[0];
-  const mostActiveDayKey = Object.keys(dayCounts).sort((a, b) => dayCounts[b] - dayCounts[a])[0];
-  const catCounts = {};
-  curExpenseTx.forEach((t) => { catCounts[t.category_id] = (catCounts[t.category_id] || 0) + 1; });
-  const mostFrequentCatId = Object.keys(catCounts).sort((a, b) => catCounts[b] - catCounts[a])[0];
-  const mostFrequentCat = categories.find((c) => c.id === mostFrequentCatId);
 
-  const weekdayTotals = Array(7).fill(0);
-  curExpenseTx.forEach((t) => { const jsDay = txDate(t).getDay(); const idx = jsDay === 0 ? 6 : jsDay - 1; weekdayTotals[idx] += Number(t.amount); });
-  const maxWeekdayVal = Math.max(...weekdayTotals, 1);
-  const busiestWeekdayIdx = weekdayTotals.indexOf(Math.max(...weekdayTotals));
-
-  const timeOfDayTotals = TIME_OF_DAY_BUCKETS.map((b) => ({
-    ...b,
-    total: curExpenseTx.filter((t) => b.test(txDate(t).getHours())).reduce((s, t) => s + Number(t.amount), 0),
-  }));
-  const hasTimeSpread = timeOfDayTotals.some((b) => b.total > 0);
-  const maxTimeOfDayVal = Math.max(...timeOfDayTotals.map((b) => b.total), 1);
-
-  // ---- Savings trend (last 6 calendar months) ----
+  // ---- Xu hướng phân bổ nhiều tháng ----
   const now = new Date();
-  const savingsTrend = Array.from({ length: 6 }, (_, i) => {
-    const d = new Date(now.getFullYear(), now.getMonth() - (5 - i), 1);
+  const trendData = Array.from({ length: trendMonths }, (_, i) => {
+    const d = new Date(now.getFullYear(), now.getMonth() - (trendMonths - 1 - i), 1);
     const mStart = new Date(d.getFullYear(), d.getMonth(), 1);
     const mEnd = new Date(d.getFullYear(), d.getMonth() + 1, 0, 23, 59, 59, 999);
     const mTx = transactions.filter((t) => inRange(t, mStart, mEnd));
-    const mInc = sumType(mTx, 'income'); const mExp = sumType(mTx, 'expense');
-    const rate = mInc > 0 ? Math.max(0, Math.min(100, ((mInc - mExp) / mInc) * 100)) : 0;
-    return { label: `Th${d.getMonth() + 1}`, rate };
+    const mInc = sumType(mTx, 'income');
+    const mAlloc = sumType(mTx, 'allocation');
+    const mExp = sumType(mTx, 'expense');
+    return { label: `Th${d.getMonth() + 1}`, income: mInc, alloc: mAlloc, expense: mExp, remain: mInc - mAlloc - mExp };
   });
+  const hasTrendData = trendData.some((t) => t.income > 0 || t.alloc > 0 || t.expense > 0);
+  const trendMax = Math.max(...trendData.map((t) => t.income), ...trendData.map((t) => t.alloc), ...trendData.map((t) => t.expense), ...trendData.map((t) => Math.abs(t.remain)), 1);
+  function trendPoints(values) {
+    const w = 600, h = 120, pad = 6;
+    return values.map((v, i) => {
+      const x = values.length > 1 ? pad + (i / (values.length - 1)) * (w - pad * 2) : w / 2;
+      const y = h - pad - ((v + trendMax) / (trendMax * 2)) * (h - pad * 2);
+      return `${x},${y}`;
+    }).join(' ');
+  }
 
-  // ---- Fund performance ----
-  const funds = categories.filter((c) => c.is_fund);
-  const fundRows = funds.map((f) => {
-    const balance = fundBalanceWithProfit(f, transactions);
-    const target = Number(f.target_amount || 0);
-    const progress = target > 0 ? Math.min(100, (balance / target) * 100) : null;
-    return { ...f, balance, target, progress };
-  }).sort((a, b) => b.balance - a.balance);
-  const totalFundBalance = fundRows.reduce((s, f) => s + f.balance, 0);
-  const totalFundTarget = fundRows.reduce((s, f) => s + f.target, 0);
-  const overallFundProgress = totalFundTarget > 0 ? Math.min(100, (totalFundBalance / totalFundTarget) * 100) : null;
-
-  // ---- Asset / account analysis ----
-  const accountRows = accounts.map((a) => ({ ...a, balance: accountBalance(a, transactions) }));
-  const totalAccountBalance = accountRows.reduce((s, a) => s + a.balance, 0);
-  const totalAssets = totalAccountBalance + totalFundBalance;
-  const assetGroups = ACCOUNT_TYPES.map((type) => ({
-    ...type,
-    total: accountRows.filter((a) => a.type === type.value).reduce((s, a) => s + a.balance, 0),
-  })).filter((g) => g.total > 0);
-  if (totalFundBalance > 0) assetGroups.push({ value: 'fund', label: 'Quỹ', total: totalFundBalance });
-  assetGroups.sort((a, b) => b.total - a.total);
-  const totalAssetsForPct = totalAssets || 1;
-
-  // ---- Goal performance ----
+  // ---- Mục tiêu ----
   const goalRows = (goals || []).map((g) => {
     const isDone = g.status === 'Hoàn thành';
     const pct = isDone ? 100 : (g.target_amount ? Math.min(100, (Number(g.current_amount || 0) / Number(g.target_amount)) * 100) : 0);
     return { ...g, isDone, pct };
-  });
-  const completedGoals = goalRows.filter((g) => g.isDone).length;
-  const activeGoalRows = goalRows.filter((g) => !g.isDone);
-  const avgCompletion = goalRows.length > 0 ? goalRows.reduce((s, g) => s + g.pct, 0) / goalRows.length : 0;
-  const closestGoals = [...activeGoalRows].sort((a, b) => b.pct - a.pct).slice(0, 3);
-  const behindGoals = [...activeGoalRows].sort((a, b) => a.pct - b.pct).slice(0, 3);
+  }).sort((a, b) => b.pct - a.pct);
+  const completedGoalsCount = goalRows.filter((g) => g.isDone).length;
 
-  // ---- Insights ----
+  // ---- Nhận xét tháng này ----
   const insights = [];
-  const expenseChangePct = reportPctChange(curExpense, prevExpense);
-  if (expenseChangePct !== null && Math.abs(expenseChangePct) >= 5) {
-    insights.push(expenseChangePct < 0
-      ? { type: 'positive', text: `Chi tiêu kỳ này giảm ${Math.abs(Math.round(expenseChangePct))}% so với kỳ trước.` }
-      : { type: 'warning', text: `Chi tiêu kỳ này tăng ${Math.round(expenseChangePct)}% so với kỳ trước.` });
+  if (hasIncome && allocRatePct !== null) {
+    insights.push({ type: 'positive', text: `${Math.round(allocRatePct)}% thu nhập tháng này đã được phân bổ vào các quỹ.` });
   }
-  const incomeChangePct = reportPctChange(curIncome, prevIncome);
-  if (incomeChangePct !== null && Math.abs(incomeChangePct) >= 5) {
-    insights.push(incomeChangePct > 0
-      ? { type: 'positive', text: `Thu nhập kỳ này tăng ${Math.round(incomeChangePct)}% so với kỳ trước.` }
-      : { type: 'attention', text: `Thu nhập kỳ này giảm ${Math.abs(Math.round(incomeChangePct))}% so với kỳ trước.` });
+  if (mostFundedRow) {
+    insights.push({ type: 'positive', text: `Bạn đã dành ${formatMoney(mostFundedRow.amount)} cho ${mostFundedRow.name}, chiếm ${Math.round((mostFundedRow.amount / totalFundContrib) * 100)}% tổng số tiền góp quỹ.` });
   }
-  if (topIncreasing[0] && topIncreasing[0].change >= 15) {
-    insights.push({ type: 'attention', text: `Chi tiêu ${topIncreasing[0].name} tăng ${Math.round(topIncreasing[0].change)}% và đang là danh mục tăng nhanh nhất.` });
+  if (hasIncome && expenseRatePct !== null) {
+    insights.push({ type: 'observation', text: `Chi tiêu tháng này chiếm ${Math.round(expenseRatePct)}% tổng thu nhập.` });
+  }
+  if (hasCurData) {
+    insights.push({ type: curRemain >= 0 ? 'attention' : 'warning', text: curRemain >= 0 ? `Tiền còn lại sau khi góp quỹ và chi tiêu là ${formatMoney(curRemain)}.` : `Chi tiêu và góp quỹ kỳ này đã vượt quá thu nhập ${formatMoney(Math.abs(curRemain))}.` });
+  }
+  if (compareOn && hasPrevData && fundContribRows.length > 0) {
+    const biggestIncrease = [...fundContribRows].sort((a, b) => (b.amount - b.prevAmount) - (a.amount - a.prevAmount))[0];
+    if (biggestIncrease && biggestIncrease.amount - biggestIncrease.prevAmount > 0) {
+      insights.push({ type: 'observation', text: `Khoản góp vào ${biggestIncrease.name} tăng ${formatMoney(biggestIncrease.amount - biggestIncrease.prevAmount)} so với kỳ trước.` });
+    }
   }
   if (spendingByCat[0] && spendingByCat[0].cur / totalSpendingCat >= 0.35) {
     insights.push({ type: 'warning', text: `Chi tiêu ${spendingByCat[0].name} đang chiếm tới ${Math.round((spendingByCat[0].cur / totalSpendingCat) * 100)}% tổng chi tiêu.` });
-  }
-  if (curExpenseTx.length >= 5 && busiestWeekdayIdx !== -1 && weekdayTotals[busiestWeekdayIdx] > 0) {
-    insights.push({ type: 'observation', text: `Bạn thường chi tiêu nhiều nhất vào ${WEEKDAY_LABELS_MON_FIRST[busiestWeekdayIdx] === 'T7' || WEEKDAY_LABELS_MON_FIRST[busiestWeekdayIdx] === 'CN' ? 'cuối tuần' : `thứ ${WEEKDAY_LABELS_MON_FIRST[busiestWeekdayIdx].replace('T', '')}`}.` });
-  }
-  closestGoals.forEach((g) => {
-    if (g.pct >= 70) insights.push({ type: 'goal', text: `Mục tiêu ${g.name} đã hoàn thành ${Math.round(g.pct)}%.` });
-  });
-  if (prevSavingsRate > 0 && curSavingsRate - prevSavingsRate >= 5) {
-    insights.push({ type: 'positive', text: `Tỷ lệ tiết kiệm cải thiện thêm ${Math.round(curSavingsRate - prevSavingsRate)} điểm % so với kỳ trước.` });
   }
   const insightStyle = {
     positive: { emoji: '🟢', class: 'border-turquoise/30 bg-turquoise-light/30 dark:bg-turquoise/10' },
     attention: { emoji: '🟡', class: 'border-lavender/30 bg-lavender-light/30 dark:bg-lavender/10' },
     observation: { emoji: '🔵', class: 'border-baby-blue/30 bg-baby-blue-light/30 dark:bg-baby-blue/10' },
-    goal: { emoji: '🟢', class: 'border-turquoise/30 bg-turquoise-light/30 dark:bg-turquoise/10' },
     warning: { emoji: '⚠️', class: 'border-cotton-candy/30 bg-cotton-candy-light/30 dark:bg-cotton-candy/10' },
   };
 
-  // ---- Detailed breakdown ----
-  const allCats = [...incomeCats, ...expenseCats];
-  const breakdownRows = allCats.map((c) => {
-    const type = c.type;
-    const curAmt = categoryAmount(c.id, curTx, type);
-    const prevAmt = categoryAmount(c.id, prevTx, type);
-    const allocAmt = c.is_fund ? categoryAmount(c.id, curTx, 'allocation') : 0;
-    const prevAllocAmt = c.is_fund ? categoryAmount(c.id, prevTx, 'allocation') : 0;
-    const count = curTx.filter((t) => t.category_id === c.id).length;
-    return { ...c, count, income: type === 'income' ? curAmt : 0, expense: type === 'expense' ? curAmt : 0, allocation: allocAmt, total: curAmt + allocAmt, prevTotal: prevAmt + prevAllocAmt };
-  }).filter((c) => c.count > 0);
-  const totalBreakdown = breakdownRows.reduce((s, c) => s + c.total, 0) || 1;
-  const filteredBreakdown = breakdownRows
-    .filter((c) => (c.name || '').toLowerCase().includes(breakdownSearch.toLowerCase()))
-    .sort((a, b) => b.total - a.total);
-  const displayedBreakdown = breakdownExpanded ? filteredBreakdown : filteredBreakdown.slice(0, 8);
+  // ---- Bảng chi tiết phân bổ thu nhập ----
+  const detailRows = [
+    ...fundContribRows.map((f) => ({
+      key: f.id, name: f.name, icon: f.icon, amount: f.amount, prevAmount: f.prevAmount,
+      pctIncome: hasIncome ? (f.amount / curIncome) * 100 : null,
+      pctAlloc: (f.amount / totalFundContrib) * 100,
+      goodUp: true,
+    })),
+    { key: 'expense', name: 'Chi tiêu', icon: '💸', amount: curExpense, prevAmount: prevExpense, pctIncome: expenseRatePct, pctAlloc: null, goodUp: false },
+    { key: 'remain', name: 'Còn lại', icon: '🟢', amount: curRemain, prevAmount: prevRemain, pctIncome: remainRatePct, pctAlloc: null, goodUp: true },
+  ];
 
   const rangeLabel = `${start.getDate()}/${start.getMonth() + 1}/${start.getFullYear()} - ${end.getDate()}/${end.getMonth() + 1}/${end.getFullYear()}`;
 
@@ -3685,10 +3613,10 @@ function Reports({ setScreen, transactions, categories, accounts, goals, onAddCl
             <button onClick={() => setScreen('dashboard')} className="md:hidden w-9 h-9 rounded-full bg-white dark:bg-[#1e1e32] shadow-soft flex items-center justify-center text-blueberry dark:text-white">
               <ArrowLeft size={16} />
             </button>
-            <h1 className="text-blueberry dark:text-white text-xl md:text-2xl font-extrabold flex items-center gap-2"><BarChart3 size={20} className="text-turquoise" /> Report &amp; Analysis</h1>
+            <h1 className="text-blueberry dark:text-white text-xl md:text-2xl font-extrabold flex items-center gap-2"><BarChart3 size={20} className="text-turquoise" /> Báo cáo &amp; Phân tích</h1>
             <span className="md:hidden w-9" />
           </div>
-          <p className="text-steel dark:text-light-grey text-sm mb-5">Hiểu rõ dòng tiền và thói quen tài chính của bạn</p>
+          <p className="text-steel dark:text-light-grey text-sm mb-5">Xem dòng tiền của bạn đã được phân bổ như thế nào</p>
 
           {/* Period filter */}
           <div className="flex flex-wrap items-center gap-2 mb-2">
@@ -3715,68 +3643,151 @@ function Reports({ setScreen, transactions, categories, accounts, goals, onAddCl
           <p className="text-steel dark:text-light-grey text-xs mb-6">{rangeLabel}</p>
 
           <div className="flex flex-col gap-6">
-            {/* SECTION 01 - OVERVIEW */}
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-              {overviewCards.map((c) => (
-                <div key={c.label} className="bg-white dark:bg-[#1e1e32] rounded-2xl shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)] p-3.5">
-                  <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${c.color} mb-2.5`}><c.icon size={14} className="text-white" /></div>
-                  <p className="text-steel dark:text-light-grey text-[11px] font-semibold mb-1 leading-tight">{c.label}</p>
-                  <p className="text-blueberry dark:text-white text-base font-bold mb-1">{c.isPct ? `${Math.round(c.cur)}%` : formatMoney(c.cur)}</p>
-                  {compareOn && <ReportDelta cur={c.cur} prev={c.prev} goodUp={c.goodUp} isPoint={!!c.isPct} />}
-                </div>
-              ))}
-            </div>
-
-            {/* SECTION 02 - CASH FLOW ANALYSIS */}
+            {/* SECTION 01 - TỔNG QUAN THU NHẬP */}
             <ReportCard>
-              <div className="flex items-start justify-between flex-wrap gap-2">
-                <ReportSectionHeader title="Cash Flow Analysis" subtitle="Dòng tiền của bạn đang thay đổi như thế nào?" />
-                <div className="flex items-center gap-3 text-xs font-semibold">
-                  <label className="flex items-center gap-1.5 cursor-pointer text-blueberry dark:text-white"><input type="checkbox" checked={showIncomeLine} onChange={(e) => setShowIncomeLine(e.target.checked)} className="accent-turquoise" />Thu nhập</label>
-                  <label className="flex items-center gap-1.5 cursor-pointer text-blueberry dark:text-white"><input type="checkbox" checked={showExpenseLine} onChange={(e) => setShowExpenseLine(e.target.checked)} className="accent-cotton-candy" />Chi tiêu</label>
-                  <label className="flex items-center gap-1.5 cursor-pointer text-blueberry dark:text-white"><input type="checkbox" checked={showNetLine} onChange={(e) => setShowNetLine(e.target.checked)} className="accent-lavender" />Net</label>
-                </div>
-              </div>
-              {!hasCurData ? reportEmptyState('Chưa có đủ dữ liệu để phân tích. Thêm giao dịch để bắt đầu xem báo cáo.') : (
-                <>
-                  <svg viewBox="0 0 600 140" className="w-full h-36 md:h-44" preserveAspectRatio="none">
-                    <line x1="0" y1="70" x2="600" y2="70" stroke="currentColor" className="text-light-grey/30 dark:text-light-grey/10" strokeWidth="1" />
-                    {showIncomeLine && <polyline fill="none" stroke="#0DBACC" strokeWidth="2.5" points={toPoints(bucketData.map((b) => b.income))} />}
-                    {showExpenseLine && <polyline fill="none" stroke="#F18AB5" strokeWidth="2.5" points={toPoints(bucketData.map((b) => b.expense))} />}
-                    {showNetLine && <polyline fill="none" stroke="#9F7FE0" strokeWidth="2" strokeDasharray="4 3" points={toPoints(bucketData.map((b) => b.net))} />}
-                  </svg>
-                  <div className="flex justify-between text-[10px] text-steel dark:text-light-grey mt-1 px-1">
-                    <span>{buckets[0]?.label}</span>
-                    {buckets.length > 2 && <span>{buckets[Math.floor(buckets.length / 2)]?.label}</span>}
-                    <span>{buckets[buckets.length - 1]?.label}</span>
+              <ReportSectionHeader title="Thu nhập tháng này" subtitle="Toàn bộ thu nhập kỳ này đã đi đâu, chỉ nhìn thoáng qua" />
+              {!hasCurData ? reportEmptyState('Chưa có giao dịch nào trong kỳ này. Thêm giao dịch để bắt đầu xem báo cáo.') : (
+                <div className="max-w-md mx-auto">
+                  <div className="text-center mb-4">
+                    <p className="text-steel dark:text-light-grey text-xs font-semibold uppercase tracking-wide mb-1">Tổng thu nhập</p>
+                    <p className="text-blueberry dark:text-white text-3xl md:text-4xl font-extrabold">{formatMoney(curIncome)}</p>
+                    {compareOn && <div className="mt-1 flex justify-center"><ReportDelta cur={curIncome} prev={prevIncome} goodUp={true} /></div>}
                   </div>
-                  {compareOn && hasPrevData && (incomeChangePct !== null || expenseChangePct !== null) && (
-                    <p className="text-blueberry dark:text-white text-xs mt-4 bg-ice-cream dark:bg-night-sky rounded-xl px-3.5 py-2.5">
-                      {incomeChangePct !== null && <>Thu nhập kỳ này {incomeChangePct >= 0 ? 'cao hơn' : 'thấp hơn'} kỳ trước {Math.abs(Math.round(incomeChangePct))}%. </>}
-                      {expenseChangePct !== null && <>Chi tiêu {expenseChangePct >= 0 ? 'tăng' : 'giảm'} {Math.abs(Math.round(expenseChangePct))}% nhưng Net Cash Flow {curNet >= prevNet ? 'vẫn tăng' : 'giảm'}.</>}
-                    </p>
+                  <div className="flex justify-center mb-3"><ChevronDown size={18} className="text-light-grey" /></div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="bg-turquoise-light/40 dark:bg-turquoise/10 rounded-2xl p-4 text-center">
+                      <p className="text-steel dark:text-light-grey text-[11px] font-semibold mb-1">Đã góp vào quỹ</p>
+                      <p className="text-blueberry dark:text-white text-lg font-bold">{formatMoney(curAlloc)}</p>
+                      {compareOn && <div className="flex justify-center mt-0.5"><ReportDelta cur={curAlloc} prev={prevAlloc} goodUp={true} /></div>}
+                    </div>
+                    <div className="bg-cotton-candy-light/40 dark:bg-cotton-candy/10 rounded-2xl p-4 text-center">
+                      <p className="text-steel dark:text-light-grey text-[11px] font-semibold mb-1">Đã chi tiêu</p>
+                      <p className="text-blueberry dark:text-white text-lg font-bold">{formatMoney(curExpense)}</p>
+                      {compareOn && <div className="flex justify-center mt-0.5"><ReportDelta cur={curExpense} prev={prevExpense} goodUp={false} /></div>}
+                    </div>
+                  </div>
+                  <div className="flex justify-center my-3"><ChevronDown size={18} className="text-light-grey" /></div>
+                  <div className="bg-lavender-light/40 dark:bg-lavender/10 border-2 border-lavender/30 rounded-2xl p-4 text-center">
+                    <p className="text-steel dark:text-light-grey text-[11px] font-semibold mb-1">Còn lại</p>
+                    <p className={`text-xl font-extrabold ${curRemain >= 0 ? 'text-blueberry dark:text-white' : 'text-cotton-candy'}`}>{curRemain < 0 ? '-' : ''}{formatMoney(curRemain)}</p>
+                    {compareOn && <div className="flex justify-center mt-0.5"><ReportDelta cur={curRemain} prev={prevRemain} goodUp={true} /></div>}
+                  </div>
+                </div>
+              )}
+            </ReportCard>
+
+            {/* SECTION 02 - PHÂN BỔ THU NHẬP */}
+            <ReportCard>
+              <ReportSectionHeader title="Thu nhập được phân bổ như thế nào?" />
+              {!hasIncome ? reportEmptyState('Chưa có thu nhập nào trong kỳ này.') : curRemain < 0 ? (
+                <div className="rounded-xl border border-cotton-candy/30 bg-cotton-candy-light/30 dark:bg-cotton-candy/10 px-4 py-3 text-sm text-blueberry dark:text-white font-medium">
+                  Kỳ này bạn đã góp quỹ và chi tiêu vượt quá thu nhập {formatMoney(Math.abs(curRemain))}, nên chưa thể hiển thị biểu đồ phân bổ.
+                </div>
+              ) : (
+                <div className="flex flex-col md:flex-row gap-6 md:gap-10 items-center md:items-start">
+                  <svg width="160" height="160" viewBox="0 0 150 150" className="-rotate-90 flex-shrink-0">
+                    {(() => {
+                      const radius = 60, circumference = 2 * Math.PI * radius; let cumulative = 0;
+                      return [
+                        { label: 'Góp quỹ', value: curAlloc, color: '#0DBACC' },
+                        { label: 'Chi tiêu', value: curExpense, color: '#F18AB5' },
+                        { label: 'Còn lại', value: curRemain, color: '#9F7FE0' },
+                      ].filter((s) => s.value > 0).map((s) => {
+                        const pct = s.value / curIncome; const dash = pct * circumference; const offset = cumulative; cumulative += dash;
+                        return <circle key={s.label} cx="75" cy="75" r={radius} fill="none" stroke={s.color} strokeWidth="16" strokeDasharray={`${dash} ${circumference - dash}`} strokeDashoffset={-offset} />;
+                      });
+                    })()}
+                  </svg>
+                  <div className="flex-1 w-full min-w-0 flex flex-col gap-3.5">
+                    {[
+                      { label: 'Góp vào quỹ', value: curAlloc, color: '#0DBACC' },
+                      { label: 'Chi tiêu', value: curExpense, color: '#F18AB5' },
+                      { label: 'Còn lại', value: curRemain, color: '#9F7FE0' },
+                    ].map((s) => (
+                      <div key={s.label} className="flex items-center gap-3">
+                        <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: s.color }} />
+                        <span className="text-blueberry dark:text-white text-sm font-semibold flex-1">{s.label}</span>
+                        <span className="text-blueberry dark:text-white text-sm font-bold">{formatMoney(s.value)}</span>
+                        <span className="text-steel dark:text-light-grey text-xs w-10 text-right">{Math.round((s.value / curIncome) * 100)}%</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </ReportCard>
+
+            {/* SECTION 03 - ĐÃ GÓP VÀO CÁC QUỸ + PHÂN TÍCH QUỸ */}
+            <ReportCard>
+              <ReportSectionHeader title="Đã góp vào các quỹ" subtitle="Thu nhập tháng này đã được phân bổ vào từng quỹ như thế nào?" />
+              {fundContribRows.length === 0 ? reportEmptyState('Chưa có khoản góp quỹ nào trong kỳ này.') : (
+                <>
+                  <div className="flex flex-wrap items-center gap-3 mb-5 bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3">
+                    <div><p className="text-steel dark:text-light-grey text-[11px] font-semibold">Tổng đã góp vào quỹ</p><p className="text-blueberry dark:text-white font-bold text-base">{formatMoney(curAlloc)}</p></div>
+                    <div className="ml-auto text-right"><p className="text-steel dark:text-light-grey text-[11px] font-semibold">Số quỹ đã góp</p><p className="text-blueberry dark:text-white font-bold text-base">{fundContribRows.length} quỹ</p></div>
+                  </div>
+                  <div className="flex flex-col gap-4">
+                    {fundContribRows.map((f) => (
+                      <div key={f.id} className="flex items-start gap-3">
+                        <EmojiCircle emoji={f.icon} size={32} />
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center justify-between gap-2">
+                            <p className="text-blueberry dark:text-white text-sm font-semibold truncate">{f.name}</p>
+                            <p className="text-blueberry dark:text-white text-sm font-bold flex-shrink-0">{formatMoney(f.amount)}</p>
+                          </div>
+                          <div className="flex items-center justify-between gap-2 mt-0.5">
+                            <p className="text-steel dark:text-light-grey text-[11px]">{Math.round((f.amount / totalFundContrib) * 100)}% tổng tiền góp quỹ</p>
+                            {compareOn && <ReportDelta cur={f.amount} prev={f.prevAmount} goodUp={true} />}
+                          </div>
+                          {f.progress !== null && (
+                            <div className="mt-1.5">
+                              <ProgressBar pct={f.progress} colorClass="bg-lavender" />
+                              <p className="text-steel dark:text-light-grey text-[10px] mt-0.5">Tiến độ mục tiêu {Math.round(f.progress)}%</p>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  {fundContribRows.length > 1 && mostFundedRow && leastFundedRow && mostFundedRow.id !== leastFundedRow.id && (
+                    <div className="grid grid-cols-2 gap-3 mt-5 pt-4 border-t border-light-grey/15 dark:border-light-grey/10">
+                      <div className="bg-turquoise-light/30 dark:bg-turquoise/10 rounded-xl p-3">
+                        <p className="text-steel dark:text-light-grey text-[10px] font-semibold mb-1.5">Góp nhiều nhất</p>
+                        <p className="text-blueberry dark:text-white text-sm font-bold flex items-center gap-1.5"><EmojiCircle emoji={mostFundedRow.icon} size={20} /><span className="truncate">{mostFundedRow.name}</span></p>
+                        <p className="text-blueberry dark:text-white text-xs font-semibold mt-1">{formatMoney(mostFundedRow.amount)}</p>
+                      </div>
+                      <div className="bg-baby-blue-light/30 dark:bg-baby-blue/10 rounded-xl p-3">
+                        <p className="text-steel dark:text-light-grey text-[10px] font-semibold mb-1.5">Góp ít nhất</p>
+                        <p className="text-blueberry dark:text-white text-sm font-bold flex items-center gap-1.5"><EmojiCircle emoji={leastFundedRow.icon} size={20} /><span className="truncate">{leastFundedRow.name}</span></p>
+                        <p className="text-blueberry dark:text-white text-xs font-semibold mt-1">{formatMoney(leastFundedRow.amount)}</p>
+                      </div>
+                    </div>
                   )}
                 </>
               )}
             </ReportCard>
 
-            {/* SECTION 03 - SPENDING ANALYSIS */}
+            {/* SECTION 04 - CHI TIÊU THÁNG NÀY */}
             <ReportCard>
-              <ReportSectionHeader title="Spending Analysis" subtitle="Tiền của bạn đang đi đâu?" />
-              {spendingByCat.length === 0 ? reportEmptyState('Chưa có chi tiêu nào trong kỳ này.') : (
-                <div className="flex flex-col md:flex-row gap-6 md:gap-10 items-center md:items-start">
-                  <svg width="160" height="160" viewBox="0 0 150 150" className="-rotate-90 flex-shrink-0">
-                    {(() => {
-                      const radius = 60, circumference = 2 * Math.PI * radius; let cumulative = 0;
-                      return spendingByCat.map((c, i) => {
-                        const pct = c.cur / totalSpendingCat; const dash = pct * circumference; const offset = cumulative; cumulative += dash;
-                        return <circle key={c.id} cx="75" cy="75" r={radius} fill="none" stroke={REPORT_PALETTE[i % REPORT_PALETTE.length]} strokeWidth="16" strokeDasharray={`${dash} ${circumference - dash}`} strokeDashoffset={-offset} />;
-                      });
-                    })()}
-                  </svg>
-                  <div className="flex-1 w-full min-w-0">
-                    <p className="text-steel dark:text-light-grey text-xs font-bold mb-2 uppercase tracking-wide">Top Spending Categories</p>
-                    <div className="flex flex-col gap-2.5 max-h-72 overflow-y-auto scrollbar-hide pr-1">
+              <ReportSectionHeader title="Chi tiêu tháng này" subtitle="Tiền của bạn đang đi đâu?" />
+              {curExpenseTx.length === 0 ? reportEmptyState('Chưa có chi tiêu nào trong kỳ này.') : (
+                <>
+                  <div className="grid grid-cols-3 gap-3 mb-6">
+                    <div className="bg-ice-cream dark:bg-night-sky rounded-xl p-3.5 text-center"><p className="text-steel dark:text-light-grey text-[11px] font-semibold mb-1">Tổng chi tiêu</p><p className="text-blueberry dark:text-white font-bold text-sm">{formatMoney(curExpense)}</p></div>
+                    <div className="bg-ice-cream dark:bg-night-sky rounded-xl p-3.5 text-center"><p className="text-steel dark:text-light-grey text-[11px] font-semibold mb-1">TB / ngày</p><p className="text-blueberry dark:text-white font-bold text-sm">{formatMoney(avgPerDay)}</p></div>
+                    <div className="bg-ice-cream dark:bg-night-sky rounded-xl p-3.5 text-center"><p className="text-steel dark:text-light-grey text-[11px] font-semibold mb-1">Giao dịch</p><p className="text-blueberry dark:text-white font-bold text-sm">{curExpenseTx.length} giao dịch</p></div>
+                  </div>
+                  <p className="text-steel dark:text-light-grey text-xs font-bold mb-3 uppercase tracking-wide">Chi tiêu theo danh mục</p>
+                  <div className="flex flex-col md:flex-row gap-6 md:gap-10 items-center md:items-start">
+                    <svg width="150" height="150" viewBox="0 0 150 150" className="-rotate-90 flex-shrink-0">
+                      {(() => {
+                        const radius = 60, circumference = 2 * Math.PI * radius; let cumulative = 0;
+                        return spendingByCat.map((c, i) => {
+                          const pct = c.cur / totalSpendingCat; const dash = pct * circumference; const offset = cumulative; cumulative += dash;
+                          return <circle key={c.id} cx="75" cy="75" r={radius} fill="none" stroke={REPORT_PALETTE[i % REPORT_PALETTE.length]} strokeWidth="16" strokeDasharray={`${dash} ${circumference - dash}`} strokeDashoffset={-offset} />;
+                        });
+                      })()}
+                    </svg>
+                    <div className="flex-1 w-full min-w-0 flex flex-col gap-2.5 max-h-64 overflow-y-auto scrollbar-hide pr-1">
                       {spendingByCat.map((c, i) => (
                         <div key={c.id} className="flex items-center gap-2.5">
                           <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: REPORT_PALETTE[i % REPORT_PALETTE.length] }} />
@@ -3793,210 +3804,44 @@ function Reports({ setScreen, transactions, categories, accounts, goals, onAddCl
                       ))}
                     </div>
                   </div>
-                </div>
-              )}
-            </ReportCard>
-
-            {/* SECTION 04 - SPENDING TREND */}
-            <ReportCard>
-              <ReportSectionHeader title="Spending Trend" subtitle="Danh mục nào đang tăng hoặc giảm theo thời gian?" />
-              {!compareOn || spendingMovers.length === 0 ? reportEmptyState('Bật "So sánh với kỳ trước" và thêm giao dịch để xem xu hướng.') : (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                  <div>
-                    <p className="text-turquoise text-xs font-bold mb-2.5 uppercase tracking-wide">Tăng nhiều nhất</p>
-                    {topIncreasing.length === 0 ? <p className="text-steel dark:text-light-grey text-xs">Không có danh mục nào tăng.</p> : (
-                      <div className="flex flex-col gap-2">
-                        {topIncreasing.map((c) => (
-                          <div key={c.id} className="flex items-center justify-between bg-ice-cream dark:bg-night-sky rounded-xl px-3.5 py-2.5">
-                            <span className="flex items-center gap-2 text-sm font-semibold text-blueberry dark:text-white"><EmojiCircle emoji={c.icon} size={22} />{c.name}</span>
-                            <span className="text-cotton-candy text-sm font-bold">+{Math.round(c.change)}%</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                  <div>
-                    <p className="text-baby-blue text-xs font-bold mb-2.5 uppercase tracking-wide">Giảm nhiều nhất</p>
-                    {topDecreasing.length === 0 ? <p className="text-steel dark:text-light-grey text-xs">Không có danh mục nào giảm.</p> : (
-                      <div className="flex flex-col gap-2">
-                        {topDecreasing.map((c) => (
-                          <div key={c.id} className="flex items-center justify-between bg-ice-cream dark:bg-night-sky rounded-xl px-3.5 py-2.5">
-                            <span className="flex items-center gap-2 text-sm font-semibold text-blueberry dark:text-white"><EmojiCircle emoji={c.icon} size={22} />{c.name}</span>
-                            <span className="text-turquoise text-sm font-bold">{Math.round(c.change)}%</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-            </ReportCard>
-
-            {/* SECTION 05 - SPENDING BEHAVIOR */}
-            <ReportCard>
-              <ReportSectionHeader title="Spending Behavior" subtitle="Bạn thường tiêu tiền như thế nào?" />
-              {curExpenseTx.length === 0 ? reportEmptyState('Chưa có đủ dữ liệu để phân tích hành vi chi tiêu.') : (
-                <>
-                  <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-6">
-                    <div className="bg-ice-cream dark:bg-night-sky rounded-xl p-3.5"><p className="text-steel dark:text-light-grey text-[11px] font-semibold mb-1">Trung bình/ngày</p><p className="text-blueberry dark:text-white font-bold text-sm">{formatMoney(avgPerDay)}</p></div>
-                    <div className="bg-ice-cream dark:bg-night-sky rounded-xl p-3.5"><p className="text-steel dark:text-light-grey text-[11px] font-semibold mb-1">TB / giao dịch</p><p className="text-blueberry dark:text-white font-bold text-sm">{formatMoney(avgTransactionValue)}</p></div>
-                    <div className="bg-ice-cream dark:bg-night-sky rounded-xl p-3.5"><p className="text-steel dark:text-light-grey text-[11px] font-semibold mb-1">Giao dịch lớn nhất</p><p className="text-blueberry dark:text-white font-bold text-sm">{largestTx ? formatMoney(Number(largestTx.amount)) : '—'}</p>{largestTxCat && <p className="text-steel dark:text-light-grey text-[11px] truncate">{largestTxCat.name}</p>}</div>
-                    <div className="bg-ice-cream dark:bg-night-sky rounded-xl p-3.5"><p className="text-steel dark:text-light-grey text-[11px] font-semibold mb-1">Ngày chi nhiều nhất</p><p className="text-blueberry dark:text-white font-bold text-sm">{mostExpensiveDayKey ? new Date(Number(mostExpensiveDayKey)).toLocaleDateString('vi-VN') : '—'}</p></div>
-                    <div className="bg-ice-cream dark:bg-night-sky rounded-xl p-3.5"><p className="text-steel dark:text-light-grey text-[11px] font-semibold mb-1">Ngày giao dịch nhiều nhất</p><p className="text-blueberry dark:text-white font-bold text-sm">{mostActiveDayKey ? new Date(Number(mostActiveDayKey)).toLocaleDateString('vi-VN') : '—'}</p></div>
-                    <div className="bg-ice-cream dark:bg-night-sky rounded-xl p-3.5"><p className="text-steel dark:text-light-grey text-[11px] font-semibold mb-1">Danh mục hay dùng nhất</p><p className="text-blueberry dark:text-white font-bold text-sm truncate">{mostFrequentCat ? mostFrequentCat.name : '—'}</p></div>
-                  </div>
-                  <p className="text-steel dark:text-light-grey text-xs font-bold mb-2.5 uppercase tracking-wide">Spending by Day of Week</p>
-                  <div className="flex items-end gap-2.5 md:gap-4 h-24 mb-6">
-                    {weekdayTotals.map((v, i) => (
-                      <div key={i} className="flex-1 flex flex-col items-center justify-end h-full">
-                        <div className="w-full rounded-t-md bg-gradient-primary" style={{ height: `${Math.max(3, (v / maxWeekdayVal) * 100)}%` }} title={formatMoney(v)} />
-                        <span className="text-[10px] text-steel dark:text-light-grey mt-1.5">{WEEKDAY_LABELS_MON_FIRST[i]}</span>
-                      </div>
-                    ))}
-                  </div>
-                  {hasTimeSpread && (
-                    <>
-                      <p className="text-steel dark:text-light-grey text-xs font-bold mb-2.5 uppercase tracking-wide">Spending by Time Period</p>
-                      <div className="flex items-end gap-2.5 md:gap-4 h-20">
-                        {timeOfDayTotals.map((b) => (
-                          <div key={b.key} className="flex-1 flex flex-col items-center justify-end h-full">
-                            <div className="w-full rounded-t-md bg-gradient-secondary" style={{ height: `${Math.max(3, (b.total / maxTimeOfDayVal) * 100)}%` }} title={formatMoney(b.total)} />
-                            <span className="text-[10px] text-steel dark:text-light-grey mt-1.5 text-center leading-tight">{b.label}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </>
-                  )}
                 </>
               )}
             </ReportCard>
 
-            {/* SECTION 06 & 07 - SAVINGS + FUND PERFORMANCE */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <ReportCard>
-                <ReportSectionHeader title="Savings &amp; Accumulation" />
-                <div className="flex items-center gap-5 mb-5">
-                  <MiniRing pct={curSavingsRate} color="#0DBACC" label="Savings rate" />
-                  <div>
-                    <p className="text-blueberry dark:text-white font-bold text-lg">{Math.round(curSavingsRate)}%</p>
-                    {compareOn && <ReportDelta cur={curSavingsRate} prev={prevSavingsRate} isPoint goodUp={true} />}
+            {/* SECTION 05 - CÒN LẠI SAU KHI PHÂN BỔ */}
+            <ReportCard>
+              <ReportSectionHeader title="Còn lại sau khi phân bổ" />
+              {!hasCurData ? reportEmptyState('Chưa có dữ liệu trong kỳ này.') : (
+                <>
+                  <div className="flex flex-col gap-2 text-sm mb-4">
+                    <div className="flex items-center justify-between"><span className="text-steel dark:text-light-grey font-semibold">Thu nhập</span><span className="text-blueberry dark:text-white font-bold">{formatMoney(curIncome)}</span></div>
+                    <div className="flex items-center justify-between"><span className="text-steel dark:text-light-grey font-semibold">− Góp quỹ</span><span className="text-blueberry dark:text-white font-bold">{formatMoney(curAlloc)}</span></div>
+                    <div className="flex items-center justify-between"><span className="text-steel dark:text-light-grey font-semibold">− Chi tiêu</span><span className="text-blueberry dark:text-white font-bold">{formatMoney(curExpense)}</span></div>
+                    <div className="h-px bg-light-grey/20 dark:bg-light-grey/10 my-1" />
+                    <div className="flex items-center justify-between"><span className="text-blueberry dark:text-white font-extrabold">Còn lại</span><span className={`font-extrabold text-lg ${curRemain >= 0 ? 'text-blueberry dark:text-white' : 'text-cotton-candy'}`}>{curRemain < 0 ? '-' : ''}{formatMoney(curRemain)}</span></div>
                   </div>
-                </div>
-                <ProgressBar pct={curSavingsRate} />
-                <div className="grid grid-cols-2 gap-3 mt-4">
-                  <div><p className="text-steel dark:text-light-grey text-[11px] font-semibold">Đã tiết kiệm (kỳ này)</p><p className="text-blueberry dark:text-white font-bold text-sm">{formatMoney(curNet)}</p></div>
-                  <div><p className="text-steel dark:text-light-grey text-[11px] font-semibold">Đã phân bổ vào quỹ</p><p className="text-blueberry dark:text-white font-bold text-sm">{formatMoney(curAlloc)}</p></div>
-                </div>
-                <p className="text-steel dark:text-light-grey text-xs font-bold mt-5 mb-2.5 uppercase tracking-wide">Savings Trend (6 tháng)</p>
-                <div className="flex items-end gap-2 h-16">
-                  {savingsTrend.map((m, i) => (
-                    <div key={i} className="flex-1 flex flex-col items-center justify-end h-full">
-                      <div className="w-full rounded-t-md bg-lavender" style={{ height: `${Math.max(3, m.rate)}%` }} title={`${Math.round(m.rate)}%`} />
-                      <span className="text-[10px] text-steel dark:text-light-grey mt-1">{m.label}</span>
+                  <div className="bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3.5">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-steel dark:text-light-grey text-xs font-semibold">Tỷ lệ còn lại</span>
+                      <span className="text-blueberry dark:text-white text-sm font-bold">{remainRatePct === null ? '--' : `${Math.round(remainRatePct)}%`}</span>
                     </div>
-                  ))}
-                </div>
-              </ReportCard>
+                    <ProgressBar pct={remainRatePct === null ? 0 : Math.max(0, remainRatePct)} colorClass={curRemain >= 0 ? 'bg-lavender' : 'bg-cotton-candy'} />
+                    <p className="text-steel dark:text-light-grey text-[11px] mt-2">{remainRatePct === null ? 'Chưa có dữ liệu thu nhập trong kỳ này.' : `${Math.round(remainRatePct)}% thu nhập chưa được sử dụng.`}</p>
+                  </div>
+                </>
+              )}
+            </ReportCard>
 
-              <ReportCard>
-                <ReportSectionHeader title="Fund Performance" />
-                {fundRows.length === 0 ? reportEmptyState('Chưa có quỹ nào.') : (
-                  <>
-                    <div className="flex items-center justify-between mb-4 bg-ice-cream dark:bg-night-sky rounded-xl px-3.5 py-2.5">
-                      <div><p className="text-steel dark:text-light-grey text-[11px] font-semibold">Tổng số dư quỹ</p><p className="text-blueberry dark:text-white font-bold text-sm">{formatMoney(totalFundBalance)}</p></div>
-                      {overallFundProgress !== null && <MiniRing pct={overallFundProgress} color="#9F7FE0" label="Tổng tiến độ" />}
-                    </div>
-                    <div className="flex flex-col gap-2.5 max-h-56 overflow-y-auto scrollbar-hide pr-1">
-                      {fundRows.map((f) => (
-                        <div key={f.id} className="flex items-center gap-2.5">
-                          <EmojiCircle emoji={f.icon} size={26} />
-                          <div className="min-w-0 flex-1">
-                            <p className="text-blueberry dark:text-white text-sm font-semibold truncate">{f.name}</p>
-                            {f.progress !== null ? <ProgressBar pct={f.progress} colorClass="bg-lavender" /> : <p className="text-steel dark:text-light-grey text-[11px]">Chưa đặt mục tiêu</p>}
-                          </div>
-                          <div className="text-right flex-shrink-0">
-                            <p className="text-blueberry dark:text-white text-xs font-bold">{formatMoney(f.balance)}</p>
-                            {f.target > 0 && <p className="text-steel dark:text-light-grey text-[10px]">/ {formatMoney(f.target)}</p>}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </>
-                )}
-              </ReportCard>
-            </div>
-
-            {/* SECTION 08 & 09 - ASSETS + GOALS */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <ReportCard>
-                <ReportSectionHeader title="Where Is Your Money?" />
-                {assetGroups.length === 0 ? reportEmptyState('Chưa có tài sản nào.') : (
-                  <>
-                    <p className="text-blueberry dark:text-white font-bold text-lg mb-4">{formatMoney(totalAssets)}<span className="text-steel dark:text-light-grey text-xs font-semibold ml-2">Tổng tài sản</span></p>
-                    <div className="flex flex-col gap-2.5">
-                      {assetGroups.map((g, i) => (
-                        <div key={g.value} className="flex items-center gap-3">
-                          <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: REPORT_PALETTE[i % REPORT_PALETTE.length] }} />
-                          <span className="text-blueberry dark:text-white text-sm font-semibold flex-1 truncate">{g.label}</span>
-                          <span className="text-blueberry dark:text-white text-sm font-bold">{formatMoney(g.total)}</span>
-                          <span className="text-steel dark:text-light-grey text-xs w-10 text-right">{Math.round((g.total / totalAssetsForPct) * 100)}%</span>
-                        </div>
-                      ))}
-                    </div>
-                  </>
-                )}
-              </ReportCard>
-
-              <ReportCard>
-                <ReportSectionHeader title="Goal Performance" />
-                {goalRows.length === 0 ? reportEmptyState('Chưa có mục tiêu nào.') : (
-                  <>
-                    <div className="grid grid-cols-3 gap-2 mb-4 text-center">
-                      <div className="bg-ice-cream dark:bg-night-sky rounded-xl py-2.5"><p className="text-blueberry dark:text-white font-bold">{goalRows.length}</p><p className="text-steel dark:text-light-grey text-[10px] font-semibold">Tổng số</p></div>
-                      <div className="bg-ice-cream dark:bg-night-sky rounded-xl py-2.5"><p className="text-turquoise font-bold">{completedGoals}</p><p className="text-steel dark:text-light-grey text-[10px] font-semibold">Hoàn thành</p></div>
-                      <div className="bg-ice-cream dark:bg-night-sky rounded-xl py-2.5"><p className="text-blueberry dark:text-white font-bold">{Math.round(avgCompletion)}%</p><p className="text-steel dark:text-light-grey text-[10px] font-semibold">TB tiến độ</p></div>
-                    </div>
-                    {closestGoals.length > 0 && (
-                      <>
-                        <p className="text-turquoise text-xs font-bold mb-2 uppercase tracking-wide">Gần hoàn thành nhất</p>
-                        <div className="flex flex-col gap-2 mb-4">
-                          {closestGoals.map((g) => (
-                            <div key={g.id} className="flex items-center justify-between text-sm">
-                              <span className="text-blueberry dark:text-white font-semibold truncate flex-1">{g.name}</span>
-                              <span className="text-blueberry dark:text-white font-bold ml-2">{Math.round(g.pct)}%</span>
-                            </div>
-                          ))}
-                        </div>
-                      </>
-                    )}
-                    {behindGoals.length > 0 && (
-                      <>
-                        <p className="text-cotton-candy text-xs font-bold mb-2 uppercase tracking-wide">Đang chậm tiến độ</p>
-                        <div className="flex flex-col gap-2">
-                          {behindGoals.map((g) => (
-                            <div key={g.id} className="flex items-center justify-between text-sm">
-                              <span className="text-blueberry dark:text-white font-semibold truncate flex-1">{g.name}</span>
-                              <span className="text-blueberry dark:text-white font-bold ml-2">{Math.round(g.pct)}%</span>
-                            </div>
-                          ))}
-                        </div>
-                      </>
-                    )}
-                  </>
-                )}
-              </ReportCard>
-            </div>
-
-            {/* SECTION 10 - PERIOD COMPARISON */}
+            {/* SECTION 06 - SO SÁNH VỚI THÁNG TRƯỚC */}
             {compareOn && (
               <ReportCard>
-                <ReportSectionHeader title="Period Comparison" />
+                <ReportSectionHeader title="So sánh với tháng trước" />
                 {!hasPrevData ? reportEmptyState('Chưa có dữ liệu kỳ trước để so sánh.') : (
                   <div className="overflow-x-auto scrollbar-hide">
                     <table className="w-full text-sm min-w-[480px]">
                       <thead>
                         <tr className="text-left text-steel dark:text-light-grey text-xs font-semibold">
-                          <th className="pb-2.5 font-semibold">Metric</th>
+                          <th className="pb-2.5 font-semibold">Chỉ số</th>
                           <th className="pb-2.5 font-semibold text-right">Kỳ trước</th>
                           <th className="pb-2.5 font-semibold text-right">Kỳ này</th>
                           <th className="pb-2.5 font-semibold text-right">Thay đổi</th>
@@ -4005,11 +3850,11 @@ function Reports({ setScreen, transactions, categories, accounts, goals, onAddCl
                       <tbody>
                         {[
                           { label: 'Thu nhập', cur: curIncome, prev: prevIncome, goodUp: true },
+                          { label: 'Góp quỹ', cur: curAlloc, prev: prevAlloc, goodUp: true },
                           { label: 'Chi tiêu', cur: curExpense, prev: prevExpense, goodUp: false },
-                          { label: 'Dòng tiền ròng', cur: curNet, prev: prevNet, goodUp: true },
-                          { label: 'Tỷ lệ tiết kiệm', cur: curSavingsRate, prev: prevSavingsRate, goodUp: true, isPct: true },
-                          { label: 'Phân bổ vào quỹ', cur: curAlloc, prev: prevAlloc, goodUp: true },
-                          { label: 'Chi tiêu TB/ngày', cur: curExpense / days, prev: prevExpense / prevDays, goodUp: false },
+                          { label: 'Còn lại', cur: curRemain, prev: prevRemain, goodUp: true },
+                          { label: 'Tỷ lệ góp quỹ', cur: allocRatePct || 0, prev: prevAllocRatePct || 0, goodUp: true, isPct: true },
+                          { label: 'Tỷ lệ chi tiêu', cur: expenseRatePct || 0, prev: prevExpenseRatePct || 0, goodUp: false, isPct: true },
                         ].map((row) => (
                           <tr key={row.label} className="border-t border-light-grey/15 dark:border-light-grey/10">
                             <td className="py-2.5 text-blueberry dark:text-white font-semibold">{row.label}</td>
@@ -4025,10 +3870,69 @@ function Reports({ setScreen, transactions, categories, accounts, goals, onAddCl
               </ReportCard>
             )}
 
-            {/* SECTION 11 - FINANCIAL INSIGHTS */}
+            {/* SECTION 07 - XU HƯỚNG PHÂN BỔ THU NHẬP */}
             <ReportCard>
-              <ReportSectionHeader title="Financial Insights" />
-              {insights.length === 0 ? reportEmptyState('Chưa có đủ dữ liệu để tạo insight.') : (
+              <div className="flex items-center justify-between flex-wrap gap-2 mb-1">
+                <ReportSectionHeader title="Xu hướng phân bổ thu nhập" />
+                <div className="flex gap-1.5 bg-ice-cream dark:bg-night-sky rounded-full p-1">
+                  {[3, 6, 12].map((m) => (
+                    <button key={m} onClick={() => setTrendMonths(m)} className={`px-3 py-1.5 rounded-full text-xs font-bold transition ${trendMonths === m ? 'bg-gradient-primary text-white' : 'text-steel dark:text-light-grey'}`}>{m} tháng</button>
+                  ))}
+                </div>
+              </div>
+              {!hasTrendData ? reportEmptyState('Chưa có đủ dữ liệu để xem xu hướng.') : (
+                <>
+                  <svg viewBox="0 0 600 120" className="w-full h-32 md:h-40 mt-3" preserveAspectRatio="none">
+                    <line x1="0" y1="60" x2="600" y2="60" stroke="currentColor" className="text-light-grey/30 dark:text-light-grey/10" strokeWidth="1" />
+                    <polyline fill="none" stroke="#0DBACC" strokeWidth="2.5" points={trendPoints(trendData.map((t) => t.income))} />
+                    <polyline fill="none" stroke="#9F7FE0" strokeWidth="2.5" points={trendPoints(trendData.map((t) => t.alloc))} />
+                    <polyline fill="none" stroke="#F18AB5" strokeWidth="2.5" points={trendPoints(trendData.map((t) => t.expense))} />
+                    <polyline fill="none" stroke="#74ACEF" strokeWidth="2" strokeDasharray="4 3" points={trendPoints(trendData.map((t) => t.remain))} />
+                  </svg>
+                  <div className="flex justify-between text-[10px] text-steel dark:text-light-grey mt-1 px-1">
+                    <span>{trendData[0]?.label}</span>
+                    {trendData.length > 2 && <span>{trendData[Math.floor(trendData.length / 2)]?.label}</span>}
+                    <span>{trendData[trendData.length - 1]?.label}</span>
+                  </div>
+                  <div className="flex flex-wrap gap-3 mt-4 text-xs font-semibold">
+                    <span className="flex items-center gap-1.5 text-blueberry dark:text-white"><span className="w-2.5 h-2.5 rounded-full" style={{ background: '#0DBACC' }} />Thu nhập</span>
+                    <span className="flex items-center gap-1.5 text-blueberry dark:text-white"><span className="w-2.5 h-2.5 rounded-full" style={{ background: '#9F7FE0' }} />Góp quỹ</span>
+                    <span className="flex items-center gap-1.5 text-blueberry dark:text-white"><span className="w-2.5 h-2.5 rounded-full" style={{ background: '#F18AB5' }} />Chi tiêu</span>
+                    <span className="flex items-center gap-1.5 text-blueberry dark:text-white"><span className="w-2.5 h-2.5 rounded-full" style={{ background: '#74ACEF' }} />Còn lại</span>
+                  </div>
+                </>
+              )}
+            </ReportCard>
+
+            {/* SECTION 08 - TIẾN ĐỘ CÁC MỤC TIÊU */}
+            <ReportCard>
+              <ReportSectionHeader title="Tiến độ các mục tiêu" />
+              {goalRows.length === 0 ? reportEmptyState('Chưa có mục tiêu nào.') : (
+                <>
+                  <div className="grid grid-cols-2 gap-3 mb-4 text-center">
+                    <div className="bg-ice-cream dark:bg-night-sky rounded-xl py-2.5"><p className="text-blueberry dark:text-white font-bold">{goalRows.length}</p><p className="text-steel dark:text-light-grey text-[10px] font-semibold">Tổng số mục tiêu</p></div>
+                    <div className="bg-ice-cream dark:bg-night-sky rounded-xl py-2.5"><p className="text-turquoise font-bold">{completedGoalsCount}</p><p className="text-steel dark:text-light-grey text-[10px] font-semibold">Đã hoàn thành</p></div>
+                  </div>
+                  <div className="flex flex-col gap-3.5 max-h-72 overflow-y-auto scrollbar-hide pr-1">
+                    {goalRows.map((g) => (
+                      <div key={g.id}>
+                        <div className="flex items-center justify-between gap-2 mb-1">
+                          <span className="text-blueberry dark:text-white text-sm font-semibold truncate">{g.name}</span>
+                          <span className="text-blueberry dark:text-white text-xs font-bold flex-shrink-0">{formatMoney(g.current_amount || 0)}{g.target_amount ? ` / ${formatMoney(g.target_amount)}` : ''}</span>
+                        </div>
+                        <ProgressBar pct={g.pct} colorClass={g.isDone ? 'bg-turquoise' : 'bg-lavender'} />
+                        <p className="text-steel dark:text-light-grey text-[10px] mt-1">{Math.round(g.pct)}%{g.isDone ? ' · Đã hoàn thành' : ''}</p>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+            </ReportCard>
+
+            {/* SECTION 09 - NHẬN XÉT THÁNG NÀY */}
+            <ReportCard>
+              <ReportSectionHeader title="Nhận xét tháng này" />
+              {insights.length === 0 ? reportEmptyState('Chưa có đủ dữ liệu để tạo nhận xét.') : (
                 <div className="flex flex-col gap-2.5">
                   {insights.map((ins, i) => (
                     <div key={i} className={`flex items-start gap-2.5 rounded-xl border px-3.5 py-2.5 ${insightStyle[ins.type].class}`}>
@@ -4040,49 +3944,34 @@ function Reports({ setScreen, transactions, categories, accounts, goals, onAddCl
               )}
             </ReportCard>
 
-            {/* SECTION 12 - DETAILED BREAKDOWN */}
+            {/* SECTION 10 - CHI TIẾT PHÂN BỔ THU NHẬP */}
             <ReportCard>
-              <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
-                <ReportSectionHeader title="Detailed Breakdown" />
-                <div className="flex items-center gap-2 bg-ice-cream dark:bg-night-sky rounded-full px-3.5 py-2">
-                  <Search size={14} className="text-steel dark:text-light-grey" />
-                  <input value={breakdownSearch} onChange={(e) => setBreakdownSearch(e.target.value)} placeholder="Tìm danh mục..." className="bg-transparent outline-none text-xs flex-1 text-blueberry dark:text-white" />
-                </div>
-              </div>
-              {displayedBreakdown.length === 0 ? reportEmptyState('Không có dữ liệu phù hợp.') : (
+              <ReportSectionHeader title="Chi tiết phân bổ thu nhập" />
+              {!hasCurData ? reportEmptyState('Chưa có dữ liệu trong kỳ này.') : (
                 <div className="overflow-x-auto scrollbar-hide">
-                  <table className="w-full text-sm min-w-[600px]">
+                  <table className="w-full text-sm min-w-[560px]">
                     <thead>
                       <tr className="text-left text-steel dark:text-light-grey text-xs font-semibold">
-                        <th className="pb-2.5 font-semibold">Danh mục</th>
-                        <th className="pb-2.5 font-semibold text-right">Giao dịch</th>
-                        <th className="pb-2.5 font-semibold text-right">Thu nhập</th>
-                        <th className="pb-2.5 font-semibold text-right">Chi tiêu</th>
-                        <th className="pb-2.5 font-semibold text-right">Phân bổ</th>
-                        <th className="pb-2.5 font-semibold text-right">Tỷ trọng</th>
+                        <th className="pb-2.5 font-semibold">Quỹ / Khoản mục</th>
+                        <th className="pb-2.5 font-semibold text-right">Số tiền</th>
+                        <th className="pb-2.5 font-semibold text-right">% Thu nhập</th>
+                        <th className="pb-2.5 font-semibold text-right">% Tổng phân bổ</th>
                         <th className="pb-2.5 font-semibold text-right">Thay đổi</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {displayedBreakdown.map((c) => (
-                        <tr key={c.id} className="border-t border-light-grey/15 dark:border-light-grey/10">
-                          <td className="py-2.5 text-blueberry dark:text-white font-semibold flex items-center gap-2"><EmojiCircle emoji={c.icon} size={22} />{c.name}</td>
-                          <td className="py-2.5 text-right text-steel dark:text-light-grey">{c.count}</td>
-                          <td className="py-2.5 text-right text-blueberry dark:text-white">{c.income > 0 ? formatMoney(c.income) : '—'}</td>
-                          <td className="py-2.5 text-right text-blueberry dark:text-white">{c.expense > 0 ? formatMoney(c.expense) : '—'}</td>
-                          <td className="py-2.5 text-right text-blueberry dark:text-white">{c.allocation > 0 ? formatMoney(c.allocation) : '—'}</td>
-                          <td className="py-2.5 text-right text-steel dark:text-light-grey">{Math.round((c.total / totalBreakdown) * 100)}%</td>
-                          <td className="py-2.5 text-right"><ReportDelta cur={c.total} prev={c.prevTotal} goodUp={c.type !== 'expense'} isPoint={false} /></td>
+                      {detailRows.map((r) => (
+                        <tr key={r.key} className="border-t border-light-grey/15 dark:border-light-grey/10">
+                          <td className="py-2.5 text-blueberry dark:text-white font-semibold"><span className="flex items-center gap-2"><EmojiCircle emoji={r.icon} size={22} />{r.name}</span></td>
+                          <td className="py-2.5 text-right text-blueberry dark:text-white font-bold">{formatMoney(r.amount)}</td>
+                          <td className="py-2.5 text-right text-steel dark:text-light-grey">{r.pctIncome === null ? '--' : `${Math.round(r.pctIncome)}%`}</td>
+                          <td className="py-2.5 text-right text-steel dark:text-light-grey">{r.pctAlloc === null ? '—' : `${Math.round(r.pctAlloc)}%`}</td>
+                          <td className="py-2.5 text-right">{compareOn ? <ReportDelta cur={r.amount} prev={r.prevAmount} goodUp={r.goodUp} /> : <span className="text-steel dark:text-light-grey">—</span>}</td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 </div>
-              )}
-              {filteredBreakdown.length > 8 && (
-                <button onClick={() => setBreakdownExpanded((v) => !v)} className="mt-4 text-turquoise text-sm font-bold">
-                  {breakdownExpanded ? 'Thu gọn' : `Xem tất cả (${filteredBreakdown.length})`}
-                </button>
               )}
             </ReportCard>
           </div>
