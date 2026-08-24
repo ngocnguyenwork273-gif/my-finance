@@ -8,6 +8,7 @@ import {
   ArrowLeft, Download, X, Check, Loader2, Target, Wallet, Trash2, Pencil, LogOut, Mail, Lock, Search, Bell, Sun, Moon,
   Filter, MoreHorizontal, Eye, EyeOff, LayoutGrid, List, ArrowUpDown, Calendar, Clock, Star,
   ChevronDown, ChevronRight, ChevronLeft, Camera, KeyRound, UserCog, SlidersHorizontal,
+  AlertTriangle, Info, PieChart, LineChart, BarChart, CircleDollarSign, FileText
 } from 'lucide-react';
 
 /* ==============================================================================
@@ -32,6 +33,58 @@ const fincheckStyles = `
     --baby-blue-light: #C1DDFF;
     --cotton-candy-light: #FFCDDB;
     --lavender-light: #E3D6FF;
+
+    /* Typography hierarchy (avoid pure #FFFFFF everywhere) */
+    --text-primary: rgba(255,255,255,0.92);
+    --text-secondary: rgba(255,255,255,0.70);
+    --text-tertiary: rgba(255,255,255,0.55);
+    --text-placeholder: rgba(255,255,255,0.48);
+    --text-disabled: rgba(255,255,255,0.35);
+
+    /* Liquid glass tokens */
+    --glass-bg: rgba(20,20,45,0.55);
+    --glass-border: rgba(255,255,255,0.12);
+    --glass-blur: blur(18px) saturate(150%);
+    --glass-shadow: 0 8px 32px rgba(0,0,0,0.18);
+  }
+
+  /* App shell base: avoid the default browser bg (white/black) showing
+     through during elastic/overscroll, which reads as an unintended
+     "black patch" on mobile, especially in dark theme. */
+  html, body, #root {
+    width: 100%;
+    min-height: 100%;
+    margin: 0;
+    background-color: var(--ice-cream);
+  }
+  html.dark, html.dark body, html.dark #root {
+    background-color: #1a1a2e;
+  }
+
+  /* Liquid glass — reusable surface for auth card / modal / dropdown / popover */
+  .glass-surface {
+    background: rgba(255,255,255,0.20);
+    backdrop-filter: blur(22px) saturate(140%);
+    -webkit-backdrop-filter: blur(22px) saturate(140%);
+    border: 1px solid rgba(255,255,255,0.28);
+    box-shadow: 0 20px 60px rgba(0,0,0,0.25);
+  }
+  .dark .glass-surface-dark {
+    background: var(--glass-bg);
+    backdrop-filter: var(--glass-blur);
+    -webkit-backdrop-filter: var(--glass-blur);
+    border: 1px solid var(--glass-border);
+    box-shadow: var(--glass-shadow);
+  }
+  .glass-input {
+    background: rgba(255,255,255,0.16);
+    border: 1px solid rgba(255,255,255,0.25);
+    transition: background-color .15s, border-color .15s, box-shadow .15s;
+  }
+  .glass-input:focus {
+    border-color: rgba(34,211,238,0.65);
+    box-shadow: 0 0 0 3px rgba(34,211,238,0.12);
+    background: rgba(255,255,255,0.22);
   }
   .bg-ice-cream { background-color: var(--ice-cream); }
   .bg-turquoise { background-color: var(--turquoise); }
@@ -65,7 +118,7 @@ const fincheckStyles = `
   .shadow-card { box-shadow: 0 2px 4px rgba(48,49,80,0.05), 0 14px 40px rgba(48,49,80,0.11); }
   .dark .bg-ice-cream { background-color: var(--night-sky); }
   .dark .bg-white { background-color: #1e1e32; }
-  .dark .text-blueberry { color: var(--white); }
+  .dark .text-blueberry { color: var(--text-primary); }
   .dark .text-steel { color: var(--light-grey); }
   .dark .border-steel { border-color: #3a3a5a; }
   .dark .border-light-grey { border-color: #3a3a5a; }
@@ -109,6 +162,7 @@ const NAV_ITEMS = [
   { key: 'funds', icon: PiggyBank, label: 'Quản lý quỹ' },
   { key: 'accounts', icon: Wallet, label: 'Quản lý ví' },
   { key: 'goals', icon: Sparkles, label: 'Mục tiêu' },
+  { key: 'report', icon: BarChart3, label: 'Báo cáo' },
   { key: 'settings', icon: SettingsIcon, label: 'Cài đặt' },
 ];
 
@@ -265,6 +319,51 @@ function fundBalanceWithProfit(category, transactions) {
   }
   balance += changesByDay[today.getTime()] || 0;
   return balance;
+}
+
+function fundBalanceAtDate(category, transactions, cutoffDate) {
+  const rate = Number(category.interest_rate || 0);
+  const dailyRate = rate / 100 / 365;
+  const history = transactions
+    .filter((t) => t.category_id === category.id && (t.type === 'allocation' || t.type === 'expense'))
+    .sort((a, b) => new Date(a.date || a.created_at) - new Date(b.date || b.created_at));
+
+  if (history.length === 0) return 0;
+
+  const toDay = (d) => { const x = new Date(d); x.setHours(0, 0, 0, 0); return x; };
+  const startDate = toDay(history[0].date || history[0].created_at);
+  const endDate = toDay(cutoffDate); // inclusive? we process until endDate (including that day)
+
+  const changesByDay = {};
+  history.forEach((t) => {
+    const key = toDay(t.date || t.created_at).getTime();
+    const delta = t.type === 'allocation' ? Number(t.amount) : -Number(t.amount);
+    changesByDay[key] = (changesByDay[key] || 0) + delta;
+  });
+
+  let balance = 0;
+  const cursor = new Date(startDate);
+  while (cursor <= endDate) {
+    balance += changesByDay[cursor.getTime()] || 0;
+    if (balance > 0 && dailyRate > 0) balance += Math.floor(balance * dailyRate);
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return balance;
+}
+
+function accountBalanceAtDate(account, transactions, cutoffDate) {
+  const delta = transactions
+    .filter((t) => {
+      if (t.account_id !== account.id) return false;
+      const d = new Date(t.date || t.created_at);
+      return d <= cutoffDate;
+    })
+    .reduce((s, t) => {
+      if (t.type === 'income') return s + Number(t.amount);
+      if (t.type === 'expense') return s - Number(t.amount);
+      return s + Number(t.amount); // adjustment
+    }, 0);
+  return Number(account.initial_balance || 0) + delta;
 }
 
 function fundTransactionsWithBalance(category, transactions) {
@@ -435,6 +534,113 @@ function periodKeyToRange(periodKey) {
   return { start, end };
 }
 
+// ========== TIME RANGE HELPERS ==========
+function getPeriodStartEnd(type, value, year) {
+  // value: for month: month number (1-12), for quarter: 1-4, for half: 1 or 2, for year: year, for day: date string, for week: week number? We'll handle week separately.
+  // For simplicity, we'll use a date range object.
+  let start, end;
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  if (type === 'day') {
+    const d = new Date(value);
+    start = new Date(d); start.setHours(0,0,0,0);
+    end = new Date(d); end.setHours(23,59,59,999);
+  } else if (type === 'week') {
+    // value is a date representing the week start? We'll use a week picker; for now assume value is a date string of the Monday of that week.
+    const d = new Date(value);
+    start = new Date(d); start.setHours(0,0,0,0);
+    end = new Date(d); end.setDate(end.getDate()+6); end.setHours(23,59,59,999);
+  } else if (type === 'month') {
+    const m = value; // 1-12
+    const y = year || currentYear;
+    start = new Date(y, m-1, 1, 0,0,0);
+    end = new Date(y, m, 0, 23,59,59);
+  } else if (type === 'quarter') {
+    const q = value; // 1-4
+    const y = year || currentYear;
+    const startMonth = (q-1)*3;
+    start = new Date(y, startMonth, 1, 0,0,0);
+    end = new Date(y, startMonth+3, 0, 23,59,59);
+  } else if (type === '6month') {
+    const h = value; // 1 or 2
+    const y = year || currentYear;
+    const startMonth = (h-1)*6;
+    start = new Date(y, startMonth, 1, 0,0,0);
+    end = new Date(y, startMonth+6, 0, 23,59,59);
+  } else if (type === 'year') {
+    const y = value || currentYear;
+    start = new Date(y, 0, 1, 0,0,0);
+    end = new Date(y, 11, 31, 23,59,59);
+  } else if (type === 'custom') {
+    start = new Date(value.start); start.setHours(0,0,0,0);
+    end = new Date(value.end); end.setHours(23,59,59,999);
+  } else {
+    // default to current month
+    const now = new Date();
+    start = new Date(now.getFullYear(), now.getMonth(), 1);
+    end = new Date(now.getFullYear(), now.getMonth()+1, 0, 23,59,59);
+  }
+  return { start, end };
+}
+
+function getPreviousPeriod(type, value, year) {
+  // returns { start, end } for previous period of same length
+  if (type === 'day') {
+    const d = new Date(value);
+    d.setDate(d.getDate() - 1);
+    return getPeriodStartEnd('day', d.toISOString().slice(0,10));
+  } else if (type === 'week') {
+    const d = new Date(value);
+    d.setDate(d.getDate() - 7);
+    return getPeriodStartEnd('week', d.toISOString().slice(0,10));
+  } else if (type === 'month') {
+    let m = value - 1;
+    let y = year;
+    if (m === 0) { m = 12; y--; }
+    return getPeriodStartEnd('month', m, y);
+  } else if (type === 'quarter') {
+    let q = value - 1;
+    let y = year;
+    if (q === 0) { q = 4; y--; }
+    return getPeriodStartEnd('quarter', q, y);
+  } else if (type === '6month') {
+    let h = value - 1;
+    let y = year;
+    if (h === 0) { h = 2; y--; }
+    return getPeriodStartEnd('6month', h, y);
+  } else if (type === 'year') {
+    const y = (value || new Date().getFullYear()) - 1;
+    return getPeriodStartEnd('year', y);
+  } else if (type === 'custom') {
+    // previous same duration: shift both start and end by same duration
+    const dur = new Date(value.end) - new Date(value.start);
+    const prevStart = new Date(value.start); prevStart.setTime(prevStart.getTime() - dur - 1000); // roughly same length
+    const prevEnd = new Date(value.end); prevEnd.setTime(prevEnd.getTime() - dur - 1000);
+    return { start: prevStart, end: prevEnd };
+  }
+  return null;
+}
+
+// Filter transactions within date range (using date field)
+function filterTransactionsByDate(transactions, start, end) {
+  return transactions.filter(t => {
+    const d = new Date(t.date || t.created_at);
+    return d >= start && d <= end;
+  });
+}
+
+// Aggregate period data
+function aggregatePeriodData(txs) {
+  const income = txs.filter(t => t.type === 'income').reduce((s, t) => s + Number(t.amount), 0);
+  const allocation = txs.filter(t => t.type === 'allocation').reduce((s, t) => s + Number(t.amount), 0);
+  const expenses = txs.filter(t => t.type === 'expense');
+  const expenseFromIncome = expenses.filter(t => t.account_id === null).reduce((s, t) => s + Number(t.amount), 0);
+  const expenseFromFund = expenses.filter(t => t.account_id !== null).reduce((s, t) => s + Number(t.amount), 0);
+  const totalActualExpense = expenseFromIncome + expenseFromFund;
+  const remaining = income - allocation - expenseFromIncome;
+  return { income, allocation, expenseFromIncome, expenseFromFund, totalActualExpense, remaining };
+}
+
 /* ==============================================================================
    05. SHARED COMPONENTS
    ============================================================================== */
@@ -527,20 +733,135 @@ function MiniRing({ pct, color, label }) {
 }
 
 /* ==============================================================================
-   06. NAVIGATION
+   06. LAYOUT COMPONENTS (Sidebar, Header, BottomNav)
    ============================================================================== */
-function BottomNav({ screen, setScreen, onAddClick, displayName, avatarUrl, theme, toggleTheme, openSettings, sidebarCollapsed, toggleSidebar }) {
-  const [showDesktopMenu, setShowDesktopMenu] = useState(false);
+
+function SidebarDesktop({ screen, setScreen, sidebarCollapsed, toggleSidebar, theme, toggleTheme }) {
+  return (
+    <aside
+      className={`hidden md:flex flex-col flex-shrink-0 sticky top-0 self-start h-[100dvh] ${sidebarCollapsed ? 'w-20' : 'w-64'} bg-white dark:bg-[#1e1e32] border-r border-[rgba(189,189,203,0.2)] dark:border-[rgba(189,189,203,0.1)] py-6 z-20 overflow-y-auto scrollbar-hide transition-[width] duration-200`}
+    >
+      <div className={`flex items-center mb-8 ${sidebarCollapsed ? 'justify-center px-0' : 'gap-2 px-1'}`}>
+        <button onClick={toggleSidebar} title={sidebarCollapsed ? 'Mở rộng menu' : 'Thu gọn menu'} className="w-9 h-9 rounded-xl bg-gradient-primary flex items-center justify-center flex-shrink-0 hover:opacity-90 transition">
+          <Wallet size={17} className="text-white" />
+        </button>
+        {!sidebarCollapsed && <span className="font-extrabold text-blueberry dark:text-white text-lg">Fincheck</span>}
+      </div>
+
+      <div className="flex flex-col gap-1">
+        {NAV_ITEMS.map(({ key, icon: Icon, label }) => (
+          <button key={key} onClick={() => setScreen(key)} title={sidebarCollapsed ? label : undefined}
+            className={`flex items-center rounded-xl text-sm font-semibold transition ${sidebarCollapsed ? 'justify-center px-0 py-2.5' : 'gap-3 px-3 py-2.5'} ${screen === key ? 'bg-turquoise/10 text-turquoise' : 'text-steel dark:text-light-grey hover:bg-ice-cream dark:hover:bg-night-sky/30'}`}>
+            <Icon size={17} />{!sidebarCollapsed && label}
+          </button>
+        ))}
+      </div>
+
+      <div className={`mt-auto flex flex-col gap-3 ${sidebarCollapsed ? 'items-center' : ''}`}>
+        {sidebarCollapsed ? (
+          <button onClick={toggleTheme} className="w-8 h-8 rounded-full flex items-center justify-center bg-ice-cream dark:bg-night-sky text-steel dark:text-light-grey">
+            {theme === 'dark' ? <Sun size={15} /> : <Moon size={15} />}
+          </button>
+        ) : (
+          <div className="flex items-center gap-1 bg-ice-cream dark:bg-night-sky rounded-full p-1 self-start">
+            <button onClick={() => theme !== 'light' && toggleTheme()} className={`w-8 h-8 rounded-full flex items-center justify-center transition ${theme === 'light' ? 'bg-white dark:bg-night-sky shadow text-blueberry dark:text-white' : 'text-steel dark:text-light-grey'}`}>
+              <Sun size={15} />
+            </button>
+            <button onClick={() => theme !== 'dark' && toggleTheme()} className={`w-8 h-8 rounded-full flex items-center justify-center transition ${theme === 'dark' ? 'bg-blueberry shadow text-white' : 'text-steel dark:text-light-grey'}`}>
+              <Moon size={15} />
+            </button>
+          </div>
+        )}
+        {!sidebarCollapsed && (
+          <div className="bg-gradient-secondary rounded-2xl p-4 text-white">
+            <p className="text-white text-sm font-bold mb-1">💡 Mẹo hôm nay</p>
+            <p className="text-white/80 text-xs">Nạp quỹ ngay khi có thu nhập để kiểm soát chi tiêu tốt hơn.</p>
+          </div>
+        )}
+      </div>
+    </aside>
+  );
+}
+
+function HeaderDesktop({ onAddClick, displayName, avatarUrl, theme, toggleTheme, openSettings }) {
+  const [showMenu, setShowMenu] = useState(false);
+  const [search, setSearch] = useState('');
 
   async function handleLogout() {
-    setShowDesktopMenu(false);
+    setShowMenu(false);
     await supabase.auth.signOut();
   }
 
   return (
+    <header className="hidden md:flex sticky top-0 z-10 bg-white/80 dark:bg-[#1e1e32]/80 backdrop-blur border-b border-[rgba(189,189,203,0.2)] dark:border-[rgba(189,189,203,0.1)] px-6 md:px-8 py-4 items-center justify-between">
+      <div className="flex items-center gap-2 bg-ice-cream dark:bg-night-sky/50 rounded-full px-4 py-2.5 w-72">
+        <Search size={16} className="text-steel dark:text-light-grey" />
+        <input
+          placeholder="Tìm kiếm nhanh"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="bg-transparent outline-none text-sm flex-1 text-blueberry dark:text-white placeholder:text-steel dark:placeholder:text-light-grey"
+        />
+      </div>
+      <div className="flex items-center gap-3">
+        <button onClick={onAddClick} className="bg-gradient-primary text-white rounded-full px-4 py-2.5 text-sm font-bold flex items-center gap-2 shadow-md shadow-turquoise/30">
+          <Plus size={16} /> Thêm giao dịch
+        </button>
+        <button className="w-9 h-9 rounded-full bg-ice-cream dark:bg-night-sky flex items-center justify-center text-steel dark:text-light-grey">
+          <Bell size={16} />
+        </button>
+        <div className="relative">
+          <button onClick={() => setShowMenu((v) => !v)} className="flex items-center gap-2 pl-2 pr-2.5 py-1.5 rounded-full hover:bg-ice-cream dark:hover:bg-night-sky/30 transition">
+            {avatarUrl ? (
+              <img src={avatarUrl} alt="" className="w-9 h-9 rounded-full object-cover flex-shrink-0" />
+            ) : (
+              <div className="w-9 h-9 rounded-full bg-gradient-secondary flex items-center justify-center text-white font-bold text-sm flex-shrink-0">
+                {(displayName || 'B')[0].toUpperCase()}
+              </div>
+            )}
+            <span className="text-sm font-bold text-blueberry dark:text-white">{displayName || 'Bạn'}</span>
+            <ChevronDown size={14} className="text-steel dark:text-light-grey" />
+          </button>
+          {showMenu && (
+            <>
+              <div className="fixed inset-0 z-30" onClick={() => setShowMenu(false)} />
+              <div className="absolute top-12 right-0 bg-white/85 dark:bg-[#1e1e32]/70 backdrop-blur-xl backdrop-saturate-150 rounded-2xl shadow-card border border-white/60 dark:border-[rgba(255,255,255,0.10)] py-1.5 w-56 z-40">
+                <button
+                  onClick={() => {
+                    setShowMenu(false);
+                    openSettings && openSettings('profile');
+                  }}
+                  className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-blueberry dark:text-white hover:bg-ice-cream dark:hover:bg-night-sky/30"
+                >
+                  <SettingsIcon size={15} /> Cài đặt
+                </button>
+                <div className="h-px bg-light-grey/20 dark:bg-light-grey/10 my-1.5" />
+                <button
+                  onClick={handleLogout}
+                  className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-cotton-candy hover:bg-cotton-candy-light dark:hover:bg-night-sky/30"
+                >
+                  <LogOut size={15} /> Đăng xuất
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </header>
+  );
+}
+
+function BottomNavMobile({ screen, setScreen, onAddClick, theme, toggleTheme }) {
+  return (
     <>
+      {/* Theme toggle button on mobile */}
+      <button onClick={toggleTheme} className="fixed top-6 right-5 w-10 h-10 rounded-full bg-white/40 dark:bg-night-sky/45 backdrop-blur-[24px] backdrop-saturate-[200%] border border-white/70 dark:border-white/10 shadow-lg flex items-center justify-center z-20 md:hidden">
+        {theme === 'dark' ? <Sun size={17} className="text-turquoise" /> : <Moon size={17} className="text-blueberry" />}
+      </button>
+
+      {/* Bottom navigation */}
       <div
-        className="fixed bottom-4 left-1/2 -translate-x-1/2 w-[calc(100%-1.5rem)] max-w-sm rounded-full px-6 py-3 flex items-center justify-between z-10 md:hidden bg-white/30 dark:bg-[#1e1e32]/45 backdrop-blur-[30px] backdrop-saturate-[200%] border border-white/70 dark:border-white/10"
+        className="fixed bottom-4 left-1/2 -translate-x-1/2 w-[calc(100%-1.5rem)] max-w-[380px] rounded-full px-5 py-3 flex items-center justify-between z-10 md:hidden bg-white/30 dark:bg-[#1e1e32]/45 backdrop-blur-[30px] backdrop-saturate-[200%] border border-white/70 dark:border-white/10"
         style={{ boxShadow: 'inset 0 1.5px 1px rgba(255,255,255,0.85), inset 0 -1px 12px rgba(255,255,255,0.2), 0 15px 40px -8px rgba(48,49,80,0.35)' }}
       >
         <div className="pointer-events-none absolute inset-0 z-0 rounded-full overflow-hidden">
@@ -549,102 +870,17 @@ function BottomNav({ screen, setScreen, onAddClick, displayName, avatarUrl, them
           <div className="absolute -bottom-8 right-10 w-16 h-16 rounded-full bg-turquoise/25 blur-2xl" />
         </div>
 
-        <div className="relative z-10 flex items-center gap-7">
+        <div className="relative z-10 flex items-center gap-4">
           <button onClick={() => setScreen('dashboard')}><Home size={19} className={screen === 'dashboard' ? 'text-turquoise' : 'text-light-grey'} /></button>
           <button onClick={() => setScreen('funds')}><PiggyBank size={19} className={screen === 'funds' ? 'text-turquoise' : 'text-light-grey'} /></button>
+          <button onClick={() => setScreen('report')}><BarChart3 size={19} className={screen === 'report' ? 'text-turquoise' : 'text-light-grey'} /></button>
         </div>
-        <button onClick={onAddClick} className="relative z-10 w-11 h-11 rounded-full bg-gradient-primary flex items-center justify-center -mt-6 shadow-lg shadow-turquoise/30 flex-shrink-0"><Plus size={20} className="text-white" /></button>
-        <div className="relative z-10 flex items-center gap-7">
+        <button onClick={onAddClick} className="relative z-10 w-11 h-11 rounded-full bg-gradient-primary flex items-center justify-center -mt-6 shadow-lg shadow-turquoise/30 flex-shrink-0">
+          <Plus size={20} className="text-white" />
+        </button>
+        <div className="relative z-10 flex items-center gap-4">
           <button onClick={() => setScreen('accounts')}><Wallet size={19} className={screen === 'accounts' ? 'text-turquoise' : 'text-light-grey'} /></button>
           <button onClick={() => setScreen('goals')}><Sparkles size={19} className={screen === 'goals' ? 'text-turquoise' : 'text-light-grey'} /></button>
-        </div>
-      </div>
-
-      <button onClick={toggleTheme} className="fixed top-6 right-5 w-10 h-10 rounded-full bg-white/40 dark:bg-night-sky/45 backdrop-blur-[24px] backdrop-saturate-[200%] border border-white/70 dark:border-white/10 shadow-lg flex items-center justify-center z-20 md:hidden">
-        {theme === 'dark' ? <Sun size={17} className="text-turquoise" /> : <Moon size={17} className="text-blueberry" />}
-      </button>
-
-      <div className={`hidden md:flex flex-col fixed left-0 top-0 h-screen ${sidebarCollapsed ? 'w-20 px-2' : 'w-64 px-5'} bg-white dark:bg-[#1e1e32] border-r border-[rgba(189,189,203,0.2)] dark:border-[rgba(189,189,203,0.1)] py-6 z-20 transition-all duration-200`}>
-        <div className={`flex items-center mb-8 ${sidebarCollapsed ? 'justify-center px-0' : 'gap-2 px-1'}`}>
-          <button onClick={toggleSidebar} title={sidebarCollapsed ? 'Mở rộng menu' : 'Thu gọn menu'} className="w-9 h-9 rounded-xl bg-gradient-primary flex items-center justify-center flex-shrink-0 hover:opacity-90 transition">
-            <Wallet size={17} className="text-white" />
-          </button>
-          {!sidebarCollapsed && <span className="font-extrabold text-blueberry dark:text-white text-lg">Fincheck</span>}
-        </div>
-
-        <div className="flex flex-col gap-1">
-          {NAV_ITEMS.map(({ key, icon: Icon, label }) => (
-            <button key={key} onClick={() => setScreen(key)} title={sidebarCollapsed ? label : undefined}
-              className={`flex items-center rounded-xl text-sm font-semibold transition ${sidebarCollapsed ? 'justify-center px-0 py-2.5' : 'gap-3 px-3 py-2.5'} ${screen === key ? 'bg-turquoise/10 text-turquoise' : 'text-steel dark:text-light-grey hover:bg-ice-cream dark:hover:bg-night-sky/30'}`}>
-              <Icon size={17} />{!sidebarCollapsed && label}
-            </button>
-          ))}
-        </div>
-
-        <div className={`mt-auto flex flex-col gap-3 ${sidebarCollapsed ? 'items-center' : ''}`}>
-          {sidebarCollapsed ? (
-            <button onClick={toggleTheme} className="w-8 h-8 rounded-full flex items-center justify-center bg-ice-cream dark:bg-night-sky text-steel dark:text-light-grey">
-              {theme === 'dark' ? <Sun size={15} /> : <Moon size={15} />}
-            </button>
-          ) : (
-            <div className="flex items-center gap-1 bg-ice-cream dark:bg-night-sky rounded-full p-1 self-start">
-              <button onClick={() => theme !== 'light' && toggleTheme()} className={`w-8 h-8 rounded-full flex items-center justify-center transition ${theme === 'light' ? 'bg-white dark:bg-night-sky shadow text-blueberry dark:text-white' : 'text-steel dark:text-light-grey'}`}>
-                <Sun size={15} />
-              </button>
-              <button onClick={() => theme !== 'dark' && toggleTheme()} className={`w-8 h-8 rounded-full flex items-center justify-center transition ${theme === 'dark' ? 'bg-blueberry shadow text-white' : 'text-steel dark:text-light-grey'}`}>
-                <Moon size={15} />
-              </button>
-            </div>
-          )}
-          {!sidebarCollapsed && (
-            <div className="bg-gradient-secondary rounded-2xl p-4 text-white">
-              <p className="text-white text-sm font-bold mb-1">💡 Mẹo hôm nay</p>
-              <p className="text-white/80 text-xs">Nạp quỹ ngay khi có thu nhập để kiểm soát chi tiêu tốt hơn.</p>
-            </div>
-          )}
-        </div>
-      </div>
-
-      <div className={`hidden md:flex fixed top-0 ${sidebarCollapsed ? 'left-20' : 'left-64'} right-0 h-20 bg-white/80 dark:bg-[#1e1e32]/80 backdrop-blur border-b border-[rgba(189,189,203,0.2)] dark:border-[rgba(189,189,203,0.1)] items-center px-8 z-10 transition-all duration-200`}>
-        <div className="flex items-center gap-2 bg-ice-cream dark:bg-night-sky/50 rounded-full px-4 py-2.5 w-72">
-          <Search size={16} className="text-steel dark:text-light-grey" />
-          <input placeholder="Tìm kiếm nhanh" className="bg-transparent outline-none text-sm flex-1 text-blueberry dark:text-white placeholder:text-steel dark:placeholder:text-light-grey" />
-        </div>
-        <div className="ml-auto flex items-center gap-3">
-          <button onClick={onAddClick} className="bg-gradient-primary text-white rounded-full px-4 py-2.5 text-sm font-bold flex items-center gap-2 shadow-md shadow-turquoise/30">
-            <Plus size={16} /> Thêm giao dịch
-          </button>
-          <button className="w-9 h-9 rounded-full bg-ice-cream dark:bg-night-sky flex items-center justify-center text-steel dark:text-light-grey"><Bell size={16} /></button>
-          <div className="relative">
-            <button onClick={() => setShowDesktopMenu((v) => !v)} className="flex items-center gap-2 pl-2 pr-2.5 py-1.5 rounded-full hover:bg-ice-cream dark:hover:bg-night-sky/30 transition">
-              {avatarUrl ? (
-                <img src={avatarUrl} alt="" className="w-9 h-9 rounded-full object-cover flex-shrink-0" />
-              ) : (
-                <div className="w-9 h-9 rounded-full bg-gradient-secondary flex items-center justify-center text-white font-bold text-sm flex-shrink-0">
-                  {(displayName || 'B')[0].toUpperCase()}
-                </div>
-              )}
-              <span className="text-sm font-bold text-blueberry dark:text-white">{displayName || 'Bạn'}</span>
-              <ChevronDown size={14} className="text-steel dark:text-light-grey" />
-            </button>
-            {showDesktopMenu && (
-              <>
-                <div className="fixed inset-0 z-30" onClick={() => setShowDesktopMenu(false)} />
-                <div className="absolute top-12 right-0 bg-white dark:bg-[#1e1e32] rounded-2xl shadow-card border-0 dark:border dark:border-[rgba(189,189,203,0.1)] py-1.5 w-56 z-40">
-                  <button onClick={() => { setShowDesktopMenu(false); openSettings ? openSettings('profile') : setScreen('settings'); }} className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-blueberry dark:text-white hover:bg-ice-cream dark:hover:bg-night-sky/30">
-                    <UserCog size={15} /> Cài đặt tài khoản
-                  </button>
-                  <button onClick={() => { setShowDesktopMenu(false); openSettings ? openSettings('categories') : setScreen('settings'); }} className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-blueberry dark:text-white hover:bg-ice-cream dark:hover:bg-night-sky/30">
-                    <SlidersHorizontal size={15} /> Cài đặt hệ thống
-                  </button>
-                  <div className="h-px bg-light-grey/20 dark:bg-light-grey/10 my-1.5" />
-                  <button onClick={handleLogout} className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-cotton-candy hover:bg-cotton-candy-light dark:hover:bg-night-sky/30">
-                    <LogOut size={15} /> Đăng xuất
-                  </button>
-                </div>
-              </>
-            )}
-          </div>
         </div>
       </div>
     </>
@@ -689,8 +925,8 @@ function AddTransaction({ onClose, accounts, categories, transactions, onSaved }
   }
 
   function handleTypeChange(t) {
-    setType(t); 
-    setSelectedCategory(null); 
+    setType(t);
+    setSelectedCategory(null);
     setExpenseSource(null);
     setSelectedYear(Number(currentPeriodKey().split('-')[0]));
     setSelectedPeriod(currentPeriodKey());
@@ -707,9 +943,9 @@ function AddTransaction({ onClose, accounts, categories, transactions, onSaved }
   }
 
   function resetForm() {
-    setAmount(''); 
-    setSelectedCategory(null); 
-    setExpenseSource(null); 
+    setAmount('');
+    setSelectedCategory(null);
+    setExpenseSource(null);
     setNote('');
     setDateTime(nowForInput());
     setSelectedYear(Number(currentPeriodKey().split('-')[0]));
@@ -1560,160 +1796,164 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
   const groupedRecentTx = groupTransactionsByDate(recentTxList);
   const sortedGroupKeys = Object.keys(groupedRecentTx).sort((a, b) => new Date(b) - new Date(a));
 
+  // Remove outer layout wrapper, just return the content
   return (
-    <div className={`min-h-screen relative bg-ice-cream dark:bg-[#1a1a2e] flex ${sidebarCollapsed ? 'md:pl-20' : 'md:pl-64'} md:pt-20 transition-colors`}>
-      <div className={`absolute inset-0 md:hidden ${theme === 'dark' ? 'bg-[#1a1a2e]' : 'bg-gradient-hero opacity-70'}`} />
-      <div className="w-full max-w-sm md:hidden min-h-screen pb-28 relative">
-        <div className="px-5 pt-8 flex items-center justify-between">
-          <div><p className="text-white/80 text-sm font-semibold">Chào bạn!</p><h1 className="text-white text-2xl font-extrabold">{displayName || 'Bạn'}</h1></div>
-          <div className="relative">
-            <button onClick={() => setShowAccountMenu((v) => !v)} className="w-11 h-11 rounded-full bg-white/30 backdrop-blur flex items-center justify-center text-white border border-white/40 overflow-hidden">
-              {avatarUrl ? <img src={avatarUrl} alt="" className="w-full h-full object-cover" /> : <span className="font-bold">{(displayName || 'B')[0].toUpperCase()}</span>}
-            </button>
-            {showAccountMenu && (
-              <>
-                <div className="fixed inset-0 z-30" onClick={() => setShowAccountMenu(false)} />
-                <div className="absolute top-14 right-0 bg-white dark:bg-[#1e1e32] rounded-2xl shadow-card border-0 dark:border dark:border-[rgba(189,189,203,0.1)] py-1.5 w-52 z-40">
-                  <button onClick={() => { setShowAccountMenu(false); openSettings ? openSettings('profile') : setScreen('settings'); }} className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-blueberry dark:text-white hover:bg-ice-cream dark:hover:bg-night-sky/30">
-                    <UserCog size={15} /> Cài đặt
-                  </button>
-                  <div className="h-px bg-light-grey/20 dark:bg-light-grey/10 my-1.5" />
-                  <button onClick={async () => { setShowAccountMenu(false); await supabase.auth.signOut(); }} className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-cotton-candy hover:bg-cotton-candy-light dark:hover:bg-night-sky/30">
-                    <LogOut size={15} /> Đăng xuất
-                  </button>
-                </div>
-              </>
-            )}
-          </div>
-        </div>
-        <div className="px-5 mt-4">
-          <p className="text-white/70 text-xs font-semibold">Tổng tài sản</p>
-          <p className="text-white text-3xl font-bold">{formatMoney(totalAssets)}</p>
-        </div>
-        <div className="mt-6 px-5 flex gap-3 overflow-x-auto pb-2 scrollbar-hide hide-scrollbar" style={{ WebkitOverflowScrolling: 'touch', scrollSnapType: 'x mandatory', scrollPaddingLeft: 20 }}>
-          {fundCategories.length === 0 ? <p className="text-white/70 text-sm">Đánh dấu danh mục là "Quỹ" trong Cài đặt để hiện ở đây.</p>
-            : fundCategories.map((f) => (
-              <button key={f.id} onClick={() => onOpenFund(f.id)} style={{ scrollSnapAlign: 'start' }} className="min-w-[150px] text-left bg-white/90 dark:bg-[#2a2a44]/90 backdrop-blur rounded-3xl p-4 shadow-lg shadow-black/5 flex-shrink-0">
-                <EmojiCircle emoji={f.icon} size={36} active activeColor="#0DBACC" />
-                <p className="text-steel dark:text-light-grey text-xs mt-3 font-semibold">{f.name}</p>
-                <p className="text-blueberry dark:text-white font-bold text-base">{formatMoney(fundBalanceWithProfit(f, transactions))}</p>
+    <>
+      {/* Mobile version */}
+      <div className="md:hidden relative">
+        <div className={`absolute inset-0 ${theme === 'dark' ? 'bg-[#1a1a2e]' : 'bg-gradient-hero opacity-70'}`} />
+        <div className="w-full min-h-[100dvh] pb-28 relative">
+          <div className="px-5 pt-8 flex items-center justify-between">
+            <div><p className="text-white/80 text-sm font-semibold">Chào bạn!</p><h1 className="text-white text-2xl font-extrabold">{displayName || 'Bạn'}</h1></div>
+            <div className="relative">
+              <button onClick={() => setShowAccountMenu((v) => !v)} className="w-11 h-11 rounded-full bg-white/30 backdrop-blur flex items-center justify-center text-white border border-white/40 overflow-hidden">
+                {avatarUrl ? <img src={avatarUrl} alt="" className="w-full h-full object-cover" /> : <span className="font-bold">{(displayName || 'B')[0].toUpperCase()}</span>}
               </button>
-            ))}
-        </div>
-        <div className="mt-6 bg-white dark:bg-[#1e1e32] rounded-[2.5rem] min-h-[60vh] px-5 pt-6 pb-6 shadow-soft">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-blueberry dark:text-white font-extrabold text-lg">Ngân sách tháng này</h2>
-          </div>
-          {spentByCat.length === 0 ? <p className="text-steel dark:text-light-grey text-sm text-center py-6">Chưa có chi tiêu nào tháng này.</p> : (
-            <div className="flex items-center gap-6">
-              <svg width="150" height="150" viewBox="0 0 150 150" className="-rotate-90 flex-shrink-0">
-                {spentByCat.map((cat, i) => {
-                  const pct = cat.amount / total; const dash = pct * circumference; const offset = cumulative; cumulative += dash;
-                  return <circle key={cat.id} cx="75" cy="75" r={radius} fill="none" stroke={palette[i % palette.length]} strokeWidth="14" strokeDasharray={`${dash} ${circumference - dash}`} strokeDashoffset={-offset} strokeLinecap="round" />;
-                })}
-              </svg>
-              <div className="flex flex-col gap-2 text-sm min-w-0">
-                {spentByCat.map((cat, i) => (
-                  <div key={cat.id} className="flex items-center gap-2">
-                    <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: palette[i % palette.length] }} />
-                    <span className="text-blueberry dark:text-white font-semibold">{cat.name}</span><span className="text-blueberry dark:text-white font-bold ml-auto">{formatMoney(cat.amount)}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          <div className="grid grid-cols-2 gap-3 mt-8">
-            <div className="bg-ice-cream dark:bg-night-sky rounded-2xl p-4 flex flex-col items-center">
-              <p className="text-steel dark:text-light-grey text-xs font-semibold mb-2 self-start">Sức khỏe tài chính</p>
-              <svg width="72" height="72" viewBox="0 0 120 120" className="-rotate-90">
-                <circle cx="60" cy="60" r="50" fill="none" stroke="#E3D6FF" strokeWidth="14" />
-                <circle cx="60" cy="60" r="50" fill="none" stroke="#0DBACC" strokeWidth="14" strokeLinecap="round"
-                  strokeDasharray={`${(savingsRate / 100) * 2 * Math.PI * 50} ${2 * Math.PI * 50}`} />
-              </svg>
-              <p className="text-lg font-bold text-blueberry dark:text-white -mt-11">{Math.round(savingsRate)}%</p>
-              <p className="text-steel dark:text-light-grey text-[10px] mt-11">Tỷ lệ tiết kiệm</p>
-            </div>
-            <div className="bg-ice-cream dark:bg-night-sky rounded-2xl p-4 flex flex-col justify-center">
-              <p className="text-steel dark:text-light-grey text-xs font-semibold mb-2">Hạn mức tháng</p>
-              {totalMonthlyLimit === 0 ? (
-                <p className="text-steel dark:text-light-grey text-xs">Chưa đặt hạn mức nào.</p>
-              ) : (
+              {showAccountMenu && (
                 <>
-                  <ProgressBar pct={limitPct} colorClass={limitPct > 100 ? 'bg-cotton-candy' : 'bg-turquoise'} />
-                  <p className="text-steel dark:text-light-grey text-[11px] mt-2">{formatMoney(expenseThisMonth)} / {formatMoney(totalMonthlyLimit)}</p>
+                  <div className="fixed inset-0 z-30" onClick={() => setShowAccountMenu(false)} />
+                  <div className="absolute top-14 right-0 bg-white dark:bg-[#1e1e32] rounded-2xl shadow-card border-0 dark:border dark:border-[rgba(189,189,203,0.1)] py-1.5 w-52 z-40">
+                    <button onClick={() => { setShowAccountMenu(false); openSettings ? openSettings('profile') : setScreen('settings'); }} className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-blueberry dark:text-white hover:bg-ice-cream dark:hover:bg-night-sky/30">
+                      <UserCog size={15} /> Cài đặt
+                    </button>
+                    <div className="h-px bg-light-grey/20 dark:bg-light-grey/10 my-1.5" />
+                    <button onClick={async () => { setShowAccountMenu(false); await supabase.auth.signOut(); }} className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-cotton-candy hover:bg-cotton-candy-light dark:hover:bg-night-sky/30">
+                      <LogOut size={15} /> Đăng xuất
+                    </button>
+                  </div>
                 </>
               )}
             </div>
           </div>
-
-          {goals && goals.length > 0 && (
-            <div className="mt-6">
-              <div className="flex items-center justify-between mb-3">
-                <h2 className="text-blueberry dark:text-white font-extrabold text-lg">Mục tiêu</h2>
-                <button onClick={() => setScreen('goals')} className="text-turquoise text-sm font-bold">Xem tất cả</button>
-              </div>
-              <div className="flex flex-col gap-3">
-                {goals.slice(0, 2).map((g) => {
-                  const pct = g.target_amount ? Math.min(100, (g.current_amount / g.target_amount) * 100) : 0;
-                  return (
-                    <div key={g.id}>
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="text-blueberry dark:text-white text-sm font-semibold">{g.name}</span>
-                        <span className="text-steel dark:text-light-grey text-xs">{Math.round(pct)}%</span>
-                      </div>
-                      <ProgressBar pct={pct} />
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
-          <div className="mt-6">
-            <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-              <h2 className="text-blueberry dark:text-white font-extrabold text-lg">Thu/chi theo danh mục</h2>
-              <PeriodControls />
-            </div>
-            <p className="text-steel dark:text-light-grey text-xs font-bold mb-2">Thu nhập</p>
-            {incomeSeries.length === 0 ? <p className="text-steel dark:text-light-grey text-xs mb-4">Chưa có thu nhập trong khoảng này.</p> : (
-              <div className="mb-5"><CategoryBarChart series={incomeSeries} maxVal={maxIncomeBucketVal} /></div>
-            )}
-            <p className="text-steel dark:text-light-grey text-xs font-bold mb-2">Chi tiêu</p>
-            {expenseSeries.length === 0 ? <p className="text-steel dark:text-light-grey text-xs">Chưa có chi tiêu trong khoảng này.</p> : (
-              <CategoryBarChart series={expenseSeries} maxVal={maxExpenseBucketVal} />
-            )}
+          <div className="px-5 mt-4">
+            <p className="text-white/70 text-xs font-semibold">Tổng tài sản</p>
+            <p className="text-white text-3xl font-bold">{formatMoney(totalAssets)}</p>
           </div>
-
-          <div className="flex items-center justify-between mt-8 mb-3"><h2 className="text-blueberry dark:text-white font-extrabold text-lg">Giao dịch</h2></div>
-          {loading ? <div className="flex justify-center py-8"><Loader2 size={24} className="animate-spin text-turquoise" /></div>
-            : transactions.length === 0 ? <p className="text-steel dark:text-light-grey text-sm text-center py-8">Chưa có giao dịch nào. Bấm nút + để thêm.</p>
-            : (
-              <div className="flex flex-col gap-4 scrollbar-hide">
-                {sortedGroupKeys.map((key) => (
-                  <div key={key}>
-                    <p className="text-xs font-bold text-steel dark:text-light-grey mb-2">{formatDateLabel(key)}</p>
-                    <div className="flex flex-col divide-y divide-[rgba(189,189,203,0.2)] dark:divide-[rgba(189,189,203,0.1)]">
-                      {groupedRecentTx[key].map((tx) => {
-                        const cat = categories.find((c) => c.id === tx.category_id);
-                        return (
-                          <div key={tx.id} className="flex items-center gap-3 py-3 first:pt-0 last:pb-0">
-                            <EmojiCircle emoji={cat?.icon} size={40} bg={tx.type === 'income' ? '#B4F1F1' : '#E3D6FF'} />
-                            <div className="flex-1 min-w-0"><p className="text-blueberry dark:text-white font-bold text-sm">{cat?.name || 'Khác'}</p><p className="text-steel dark:text-light-grey text-xs">{stripPeriodTag(tx.note) || new Date(tx.date || tx.created_at).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}</p></div>
-                            <p className={`font-bold text-sm flex-shrink-0 ${tx.type === 'income' ? 'text-turquoise' : 'text-blueberry dark:text-white'}`}>{tx.type === 'income' ? '+' : '-'}{formatMoney(tx.amount)}</p>
-                          </div>
-                        );
-                      })}
+          <div className="mt-6 px-5 flex gap-3 overflow-x-auto pb-2 scrollbar-hide hide-scrollbar" style={{ WebkitOverflowScrolling: 'touch', scrollSnapType: 'x mandatory', scrollPaddingLeft: 20 }}>
+            {fundCategories.length === 0 ? <p className="text-white/70 text-sm">Đánh dấu danh mục là "Quỹ" trong Cài đặt để hiện ở đây.</p>
+              : fundCategories.map((f) => (
+                <button key={f.id} onClick={() => onOpenFund(f.id)} style={{ scrollSnapAlign: 'start' }} className="min-w-[150px] text-left bg-white/90 dark:bg-[#2a2a44]/90 backdrop-blur rounded-3xl p-4 shadow-lg shadow-black/5 flex-shrink-0">
+                  <EmojiCircle emoji={f.icon} size={36} active activeColor="#0DBACC" />
+                  <p className="text-steel dark:text-light-grey text-xs mt-3 font-semibold">{f.name}</p>
+                  <p className="text-blueberry dark:text-white font-bold text-base">{formatMoney(fundBalanceWithProfit(f, transactions))}</p>
+                </button>
+              ))}
+          </div>
+          <div className="mt-6 bg-white dark:bg-[#1e1e32] rounded-[2.5rem] min-h-[60vh] px-5 pt-6 pb-6 shadow-soft">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-blueberry dark:text-white font-extrabold text-lg">Ngân sách tháng này</h2>
+            </div>
+            {spentByCat.length === 0 ? <p className="text-steel dark:text-light-grey text-sm text-center py-6">Chưa có chi tiêu nào tháng này.</p> : (
+              <div className="flex items-center gap-6">
+                <svg width="150" height="150" viewBox="0 0 150 150" className="-rotate-90 flex-shrink-0">
+                  {spentByCat.map((cat, i) => {
+                    const pct = cat.amount / total; const dash = pct * circumference; const offset = cumulative; cumulative += dash;
+                    return <circle key={cat.id} cx="75" cy="75" r={radius} fill="none" stroke={palette[i % palette.length]} strokeWidth="14" strokeDasharray={`${dash} ${circumference - dash}`} strokeDashoffset={-offset} strokeLinecap="round" />;
+                  })}
+                </svg>
+                <div className="flex flex-col gap-2 text-sm min-w-0">
+                  {spentByCat.map((cat, i) => (
+                    <div key={cat.id} className="flex items-center gap-2">
+                      <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: palette[i % palette.length] }} />
+                      <span className="text-blueberry dark:text-white font-semibold">{cat.name}</span><span className="text-blueberry dark:text-white font-bold ml-auto">{formatMoney(cat.amount)}</span>
                     </div>
-                  </div>
-                ))}
+                  ))}
+                </div>
               </div>
             )}
+
+            <div className="grid grid-cols-2 gap-3 mt-8">
+              <div className="bg-ice-cream dark:bg-night-sky rounded-2xl p-4 flex flex-col items-center">
+                <p className="text-steel dark:text-light-grey text-xs font-semibold mb-2 self-start">Sức khỏe tài chính</p>
+                <svg width="72" height="72" viewBox="0 0 120 120" className="-rotate-90">
+                  <circle cx="60" cy="60" r="50" fill="none" stroke="#E3D6FF" strokeWidth="14" />
+                  <circle cx="60" cy="60" r="50" fill="none" stroke="#0DBACC" strokeWidth="14" strokeLinecap="round"
+                    strokeDasharray={`${(savingsRate / 100) * 2 * Math.PI * 50} ${2 * Math.PI * 50}`} />
+                </svg>
+                <p className="text-lg font-bold text-blueberry dark:text-white -mt-11">{Math.round(savingsRate)}%</p>
+                <p className="text-steel dark:text-light-grey text-[10px] mt-11">Tỷ lệ tiết kiệm</p>
+              </div>
+              <div className="bg-ice-cream dark:bg-night-sky rounded-2xl p-4 flex flex-col justify-center">
+                <p className="text-steel dark:text-light-grey text-xs font-semibold mb-2">Hạn mức tháng</p>
+                {totalMonthlyLimit === 0 ? (
+                  <p className="text-steel dark:text-light-grey text-xs">Chưa đặt hạn mức nào.</p>
+                ) : (
+                  <>
+                    <ProgressBar pct={limitPct} colorClass={limitPct > 100 ? 'bg-cotton-candy' : 'bg-turquoise'} />
+                    <p className="text-steel dark:text-light-grey text-[11px] mt-2">{formatMoney(expenseThisMonth)} / {formatMoney(totalMonthlyLimit)}</p>
+                  </>
+                )}
+              </div>
+            </div>
+
+            {goals && goals.length > 0 && (
+              <div className="mt-6">
+                <div className="flex items-center justify-between mb-3">
+                  <h2 className="text-blueberry dark:text-white font-extrabold text-lg">Mục tiêu</h2>
+                  <button onClick={() => setScreen('goals')} className="text-turquoise text-sm font-bold">Xem tất cả</button>
+                </div>
+                <div className="flex flex-col gap-3">
+                  {goals.slice(0, 2).map((g) => {
+                    const pct = g.target_amount ? Math.min(100, (g.current_amount / g.target_amount) * 100) : 0;
+                    return (
+                      <div key={g.id}>
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-blueberry dark:text-white text-sm font-semibold">{g.name}</span>
+                          <span className="text-steel dark:text-light-grey text-xs">{Math.round(pct)}%</span>
+                        </div>
+                        <ProgressBar pct={pct} />
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            <div className="mt-6">
+              <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+                <h2 className="text-blueberry dark:text-white font-extrabold text-lg">Thu/chi theo danh mục</h2>
+                <PeriodControls />
+              </div>
+              <p className="text-steel dark:text-light-grey text-xs font-bold mb-2">Thu nhập</p>
+              {incomeSeries.length === 0 ? <p className="text-steel dark:text-light-grey text-xs mb-4">Chưa có thu nhập trong khoảng này.</p> : (
+                <div className="mb-5"><CategoryBarChart series={incomeSeries} maxVal={maxIncomeBucketVal} /></div>
+              )}
+              <p className="text-steel dark:text-light-grey text-xs font-bold mb-2">Chi tiêu</p>
+              {expenseSeries.length === 0 ? <p className="text-steel dark:text-light-grey text-xs">Chưa có chi tiêu trong khoảng này.</p> : (
+                <CategoryBarChart series={expenseSeries} maxVal={maxExpenseBucketVal} />
+              )}
+            </div>
+
+            <div className="flex items-center justify-between mt-8 mb-3"><h2 className="text-blueberry dark:text-white font-extrabold text-lg">Giao dịch</h2></div>
+            {loading ? <div className="flex justify-center py-8"><Loader2 size={24} className="animate-spin text-turquoise" /></div>
+              : transactions.length === 0 ? <p className="text-steel dark:text-light-grey text-sm text-center py-8">Chưa có giao dịch nào. Bấm nút + để thêm.</p>
+              : (
+                <div className="flex flex-col gap-4 scrollbar-hide">
+                  {sortedGroupKeys.map((key) => (
+                    <div key={key}>
+                      <p className="text-xs font-bold text-steel dark:text-light-grey mb-2">{formatDateLabel(key)}</p>
+                      <div className="flex flex-col divide-y divide-[rgba(189,189,203,0.2)] dark:divide-[rgba(189,189,203,0.1)]">
+                        {groupedRecentTx[key].map((tx) => {
+                          const cat = categories.find((c) => c.id === tx.category_id);
+                          return (
+                            <div key={tx.id} className="flex items-center gap-3 py-3 first:pt-0 last:pb-0">
+                              <EmojiCircle emoji={cat?.icon} size={40} bg={tx.type === 'income' ? '#B4F1F1' : '#E3D6FF'} />
+                              <div className="flex-1 min-w-0"><p className="text-blueberry dark:text-white font-bold text-sm">{cat?.name || 'Khác'}</p><p className="text-steel dark:text-light-grey text-xs">{stripPeriodTag(tx.note) || new Date(tx.date || tx.created_at).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}</p></div>
+                              <p className={`font-bold text-sm flex-shrink-0 ${tx.type === 'income' ? 'text-turquoise' : 'text-blueberry dark:text-white'}`}>{tx.type === 'income' ? '+' : '-'}{formatMoney(tx.amount)}</p>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+          </div>
         </div>
       </div>
 
-      {/* Desktop version giữ nguyên */}
-      <div className={`hidden md:block w-full ${sidebarCollapsed ? 'max-w-[1580px]' : 'max-w-[1400px]'} px-8 py-8`}>
+      {/* Desktop version */}
+      <div className="hidden md:block">
         <div className="flex items-center justify-between mb-6">
           <h1 className="text-blueberry dark:text-white text-2xl font-extrabold">Dashboard</h1>
           <button onClick={() => setShowAddWidget(true)} className="bg-gradient-primary text-white rounded-full pl-3 pr-4 py-2 text-sm font-bold flex items-center gap-1.5 shadow-md shadow-turquoise/30">
@@ -1812,13 +2052,17 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
                 <div className="w-full" ref={walletContainerRef}>
                   <div className="mb-2">
                     {(() => {
-                      const cardWidth = walletViewport;
+                      const gap = 12;
+                      // Thẻ có bề rộng cố định (tối đa viewport nếu màn quá hẹp),
+                      // để khi sidebar thu gọn / có thêm chỗ thì hiện thêm thẻ kế bên,
+                      // và nếu không đủ chỗ cho hết thẻ thì tự động cho scroll ngang.
+                      const cardWidth = Math.min(240, walletViewport);
                       const viewport = walletViewport;
-                      const stackTotalWidth = Math.max(viewport, (accounts.length * cardWidth));
+                      const stackTotalWidth = Math.max(viewport, (accounts.length * cardWidth) + (accounts.length - 1) * gap);
                       return (
                         <div className="relative" style={{ width: viewport }}>
                           <div ref={walletScrollRef} className="hide-scrollbar overflow-x-auto scrollbar-hide" style={{ width: viewport, scrollSnapType: 'x mandatory', WebkitOverflowScrolling: 'touch' }}>
-                            <div className="flex items-start" style={{ width: stackTotalWidth }}>
+                            <div className="flex items-start" style={{ width: stackTotalWidth, gap }}>
                             {accounts.map((acc, i) => {
                               return (
                                 <div key={acc.id} style={{ scrollSnapAlign: 'start', marginLeft: 0 }}>
@@ -2050,14 +2294,12 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
           </div>
         </div>
       )}
-
-      <BottomNav screen="dashboard" setScreen={setScreen} onAddClick={onAddClick} displayName={displayName} avatarUrl={avatarUrl} theme={theme} toggleTheme={toggleTheme} openSettings={openSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} />
-    </div>
+    </>
   );
 }
 
 /* ==============================================================================
-   09. FUNDS - Đã sửa responsive thanh tổng số dư
+   09. FUNDS
    ============================================================================== */
 function Funds({ setScreen, categories, transactions, onOpenFund, reload, onAddClick, displayName, avatarUrl, theme, toggleTheme, openSettings, sidebarCollapsed, toggleSidebar }) {
   const [showCreate, setShowCreate] = useState(false);
@@ -2113,72 +2355,75 @@ function Funds({ setScreen, categories, transactions, onOpenFund, reload, onAddC
     : null;
   const editingInitialAmount = editingFirstAllocation ? Number(editingFirstAllocation.amount) : 0;
 
+  // Remove outer wrapper with padding
   return (
-    <div className={`min-h-screen relative bg-ice-cream dark:bg-[#1a1a2e] flex ${sidebarCollapsed ? 'md:pl-20' : 'md:pl-64'} md:pt-20 transition-colors`}>
-      <div className={`absolute inset-0 md:hidden ${theme === 'dark' ? 'bg-[#1a1a2e]' : 'bg-gradient-secondary opacity-70'}`} />
-      <div className="w-full max-w-sm md:hidden min-h-screen pb-28 relative">
-        <div className="px-5 pt-8">
-          <div className="flex items-center gap-2 bg-white dark:bg-[#2a2a44] rounded-2xl shadow-soft px-4 py-3">
-            <Search size={16} className="text-steel dark:text-light-grey" />
-            <input value={searchTerm} onChange={(e) => { setSearchTerm(e.target.value); setPage(1); }} placeholder="Tìm quỹ..." className="bg-transparent outline-none text-sm flex-1 text-blueberry dark:text-white" />
+    <>
+      {/* Mobile version */}
+      <div className="md:hidden relative">
+        <div className={`absolute inset-0 ${theme === 'dark' ? 'bg-[#1a1a2e]' : 'bg-gradient-secondary opacity-70'}`} />
+        <div className="w-full min-h-[100dvh] pb-28 relative">
+          <div className="px-5 pt-8">
+            <div className="flex items-center gap-2 bg-white dark:bg-[#2a2a44] rounded-2xl shadow-soft px-4 py-3">
+              <Search size={16} className="text-steel dark:text-light-grey" />
+              <input value={searchTerm} onChange={(e) => { setSearchTerm(e.target.value); setPage(1); }} placeholder="Tìm quỹ..." className="bg-transparent outline-none text-sm flex-1 text-blueberry dark:text-white" />
+            </div>
           </div>
-        </div>
 
-        <div className="px-5 mt-5 flex items-center justify-between">
-          <h1 className="text-blueberry dark:text-white text-lg font-extrabold">Danh sách quỹ</h1>
-          <div className="flex items-center gap-1 bg-white dark:bg-[#2a2a44] rounded-full shadow-soft px-1 py-1">
-            <button onClick={() => setViewMode((v) => (v === 'card' ? 'list' : 'card'))} className="flex items-center gap-1 px-2.5 py-1.5 rounded-full text-xs font-semibold text-blueberry dark:text-white">
-              <List size={13} /> Quản lý
-            </button>
-            <span className="w-px h-4 bg-light-grey dark:bg-light-grey/20" />
-            <button onClick={() => setShowCreate(true)} className="flex items-center gap-1 px-2.5 py-1.5 rounded-full text-xs font-semibold text-turquoise">
-              <Plus size={13} /> Tạo quỹ
-            </button>
+          <div className="px-5 mt-5 flex items-center justify-between">
+            <h1 className="text-blueberry dark:text-white text-lg font-extrabold">Danh sách quỹ</h1>
+            <div className="flex items-center gap-1 bg-white dark:bg-[#2a2a44] rounded-full shadow-soft px-1 py-1">
+              <button onClick={() => setViewMode((v) => (v === 'card' ? 'list' : 'card'))} className="flex items-center gap-1 px-2.5 py-1.5 rounded-full text-xs font-semibold text-blueberry dark:text-white">
+                <List size={13} /> Quản lý
+              </button>
+              <span className="w-px h-4 bg-light-grey dark:bg-light-grey/20" />
+              <button onClick={() => setShowCreate(true)} className="flex items-center gap-1 px-2.5 py-1.5 rounded-full text-xs font-semibold text-turquoise">
+                <Plus size={13} /> Tạo quỹ
+              </button>
+            </div>
           </div>
-        </div>
 
-        {/* Thanh tổng số dư - responsive, khớp lề với danh sách quỹ (px-5) */}
-        <div className="mx-5 mt-2 mb-3 bg-white/70 dark:bg-[#2a2a44]/70 backdrop-blur rounded-xl px-3 py-2 flex items-center justify-between shadow-soft">
-          <p className="text-steel dark:text-light-grey text-xs font-semibold">Tổng số dư mọi quỹ</p>
-          <p className="text-blueberry dark:text-white font-bold text-sm">{formatMoney(totalFunds)}</p>
-        </div>
+          <div className="mx-5 mt-2 mb-3 bg-white/70 dark:bg-[#2a2a44]/70 backdrop-blur rounded-xl px-3 py-2 flex items-center justify-between shadow-soft">
+            <p className="text-steel dark:text-light-grey text-xs font-semibold">Tổng số dư mọi quỹ</p>
+            <p className="text-blueberry dark:text-white font-bold text-sm">{formatMoney(totalFunds)}</p>
+          </div>
 
-        <div className="px-5 flex flex-col gap-4 scrollbar-hide">
-          {filteredFunds.length === 0 ? (
-            <p className="text-steel dark:text-light-grey text-sm text-center py-10">{funds.length === 0 ? 'Chưa có quỹ nào. Bấm "Tạo quỹ" để tạo quỹ đầu tiên.' : 'Không tìm thấy quỹ nào.'}</p>
-          ) : (
-            filteredFunds.map((f, i) => {
-              const balance = fundBalanceWithProfit(f, transactions);
-              const target = Number(f.target_amount || 0);
-              const rStyle = fundRateStyle(f);
-              return (
-                <button key={f.id} onClick={() => onOpenFund(f.id, 'funds')} className="relative w-full h-44 rounded-3xl overflow-hidden text-left shadow-soft"
-                  style={{ background: fundCardBackground(f, i), backgroundSize: 'cover', backgroundPosition: 'center' }}>
-                  <span className="absolute top-3 right-3 flex items-center gap-1 bg-black/25 backdrop-blur text-white text-[11px] font-bold px-2.5 py-1 rounded-full">
-                    <Star size={11} className="fill-white" /> Chủ quỹ
-                  </span>
-                  <span className="absolute top-3 left-4 flex items-center gap-1.5 text-white font-extrabold text-base drop-shadow">
-                    <span>{f.icon || '💰'}</span> {f.name}
-                  </span>
-                  <span className="absolute bottom-3 left-4 flex items-center gap-1.5">
-                    <span className="w-5 h-5 rounded bg-white/90 flex items-center justify-center text-[11px]">{f.icon || '💰'}</span>
-                    <span className="text-white font-bold text-lg drop-shadow">
-                      {formatMoney(balance)}{target > 0 && <span className="font-semibold text-sm"> / {formatMoney(target)}</span>}
+          <div className="px-5 flex flex-col gap-4 scrollbar-hide">
+            {filteredFunds.length === 0 ? (
+              <p className="text-steel dark:text-light-grey text-sm text-center py-10">{funds.length === 0 ? 'Chưa có quỹ nào. Bấm "Tạo quỹ" để tạo quỹ đầu tiên.' : 'Không tìm thấy quỹ nào.'}</p>
+            ) : (
+              filteredFunds.map((f, i) => {
+                const balance = fundBalanceWithProfit(f, transactions);
+                const target = Number(f.target_amount || 0);
+                const rStyle = fundRateStyle(f);
+                return (
+                  <button key={f.id} onClick={() => onOpenFund(f.id, 'funds')} className="relative w-full h-44 rounded-3xl overflow-hidden text-left shadow-soft"
+                    style={{ background: fundCardBackground(f, i), backgroundSize: 'cover', backgroundPosition: 'center' }}>
+                    <span className="absolute top-3 right-3 flex items-center gap-1 bg-black/25 backdrop-blur text-white text-[11px] font-bold px-2.5 py-1 rounded-full">
+                      <Star size={11} className="fill-white" /> Chủ quỹ
                     </span>
-                  </span>
-                  <span className="absolute bottom-3 right-3 flex items-center gap-1 text-white text-[10px] font-bold bg-black/30 backdrop-blur px-2 py-0.5 rounded-full">
-                    <span className="w-1.5 h-1.5 rounded-full" style={{ background: rStyle.color }} />
-                    {rStyle.value} {f.interest_rate > 0 && `(${f.interest_rate}%)`}
-                  </span>
-                </button>
-              );
-            })
-          )}
+                    <span className="absolute top-3 left-4 flex items-center gap-1.5 text-white font-extrabold text-base drop-shadow">
+                      <span>{f.icon || '💰'}</span> {f.name}
+                    </span>
+                    <span className="absolute bottom-3 left-4 flex items-center gap-1.5">
+                      <span className="w-5 h-5 rounded bg-white/90 flex items-center justify-center text-[11px]">{f.icon || '💰'}</span>
+                      <span className="text-white font-bold text-lg drop-shadow">
+                        {formatMoney(balance)}{target > 0 && <span className="font-semibold text-sm"> / {formatMoney(target)}</span>}
+                      </span>
+                    </span>
+                    <span className="absolute bottom-3 right-3 flex items-center gap-1 text-white text-[10px] font-bold bg-black/30 backdrop-blur px-2 py-0.5 rounded-full">
+                      <span className="w-1.5 h-1.5 rounded-full" style={{ background: rStyle.color }} />
+                      {rStyle.value} {f.interest_rate > 0 && `(${f.interest_rate}%)`}
+                    </span>
+                  </button>
+                );
+              })
+            )}
+          </div>
         </div>
       </div>
 
-      {/* Desktop version giữ nguyên */}
-      <div className={`hidden md:block w-full ${sidebarCollapsed ? 'max-w-[1580px]' : 'max-w-[1400px]'} px-8 py-8`} onClick={() => { setOpenMenuId(null); setShowFilterMenu(false); setShowSortMenu(false); }}>
+      {/* Desktop version */}
+      <div className="hidden md:block">
         <h1 className="text-blueberry dark:text-white text-2xl font-extrabold mb-6">Quản lý quỹ</h1>
 
         <div className="grid grid-cols-4 gap-4 mb-6">
@@ -2188,7 +2433,7 @@ function Funds({ setScreen, categories, transactions, onOpenFund, reload, onAddC
           <SummaryCard icon={Sparkles} iconBg="bg-lavender" label="Tổng số lượng quỹ" value={funds.length} sub={`${doneCount} đã đạt mục tiêu`} />
         </div>
 
-        <div className="bg-white dark:bg-[#1e1e32] rounded-3xl shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)] overflow-hidden">
+        <div className="bg-white dark:bg-[#1e1e32] rounded-3xl shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)] overflow-hidden" onClick={() => { setOpenMenuId(null); setShowFilterMenu(false); setShowSortMenu(false); }}>
           <div className="flex items-center justify-between p-5 pb-3 flex-wrap gap-3">
             <div className="flex items-center gap-2 flex-wrap">
               {filterTarget !== 'all' && (
@@ -2415,13 +2660,12 @@ function Funds({ setScreen, categories, transactions, onOpenFund, reload, onAddC
 
       {showCreate && <EditFundForm onClose={() => setShowCreate(false)} onSaved={reload} isNew={true} />}
       {editingFund && <EditFundForm category={editingFund} onClose={() => setEditingFund(null)} onSaved={reload} isNew={false} initialAmount={editingInitialAmount} firstAllocation={editingFirstAllocation} />}
-      <BottomNav screen="funds" setScreen={setScreen} onAddClick={onAddClick} displayName={displayName} avatarUrl={avatarUrl} theme={theme} toggleTheme={toggleTheme} openSettings={openSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} />
-    </div>
+    </>
   );
 }
 
 /* ==============================================================================
-   10. FUND DETAIL - Đã sửa lịch sử lợi nhuận đúng thời gian và thứ tự
+   10. FUND DETAIL
    ============================================================================== */
 function FundDetail({ category, transactions, onBack, reload, softDelete, setScreen, onAddClick, displayName, avatarUrl, theme, toggleTheme, openSettings, sidebarCollapsed, toggleSidebar }) {
   const [filter, setFilter] = useState('all');
@@ -2520,9 +2764,10 @@ function FundDetail({ category, transactions, onBack, reload, softDelete, setScr
     return new Date(item.date || item.created_at).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
   };
 
+  // Remove outer wrapper with padding
   return (
-    <div className={`min-h-screen relative bg-ice-cream dark:bg-[#1a1a2e] flex ${sidebarCollapsed ? 'md:pl-20' : 'md:pl-64'} md:pt-20 transition-colors`}>
-      <div className="w-full max-w-sm md:hidden min-h-screen pb-28 relative bg-ice-cream dark:bg-[#1a1a2e]">
+    <>
+      <div className="md:hidden min-h-[100dvh] pb-28 relative bg-ice-cream dark:bg-[#1a1a2e]">
         <div className="h-56 relative"
           style={{
             ...(category.background_url ? { backgroundImage: `linear-gradient(rgba(0,0,0,0.35),rgba(0,0,0,0.35)), url(${category.background_url})`, backgroundSize: 'cover', backgroundPosition: 'center' } : { background: 'linear-gradient(180deg,#0DBACC,#74ACEF,#C1DDFF)' }),
@@ -2664,8 +2909,8 @@ function FundDetail({ category, transactions, onBack, reload, softDelete, setScr
         </div>
       </div>
 
-      {/* Desktop version giữ nguyên cấu trúc, áp dụng logic tương tự */}
-      <div className={`hidden md:block w-full ${sidebarCollapsed ? 'max-w-[1076px]' : 'max-w-4xl'} px-8 py-8`}>
+      {/* Desktop version */}
+      <div className="hidden md:block">
         <div className="flex items-center justify-between mb-6">
           <div className="flex items-center gap-3">
             <button onClick={onBack} className="w-9 h-9 rounded-full bg-white dark:bg-[#2a2a44] flex items-center justify-center shadow-soft"><ArrowLeft size={18} className="text-blueberry dark:text-white" /></button>
@@ -2795,8 +3040,7 @@ function FundDetail({ category, transactions, onBack, reload, softDelete, setScr
 
       {showEdit && <EditFundForm category={category} onClose={() => setShowEdit(false)} onSaved={reload} isNew={false} initialAmount={initialAmount} firstAllocation={firstAllocation} />}
       {quickMode && <QuickAllocateWithdrawForm category={category} mode={quickMode} onClose={() => setQuickMode(null)} onSaved={reload} />}
-      <BottomNav screen="funds" setScreen={setScreen} onAddClick={onAddClick} displayName={displayName} avatarUrl={avatarUrl} theme={theme} toggleTheme={toggleTheme} openSettings={openSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} />
-    </div>
+    </>
   );
 }
 
@@ -2807,38 +3051,41 @@ function Accounts({ setScreen, accounts, transactions, onOpenAccount, reload, on
   const [showCreate, setShowCreate] = useState(false);
   const totalBalance = accounts.reduce((s, a) => s + accountBalance(a, transactions), 0);
   const totalExcludingGold = accounts.filter((a) => a.type !== 'gold').reduce((s, a) => s + accountBalance(a, transactions), 0);
+
   return (
-    <div className={`min-h-screen relative bg-ice-cream dark:bg-[#1a1a2e] flex ${sidebarCollapsed ? 'md:pl-20' : 'md:pl-64'} md:pt-20 transition-colors`}>
-      <div className={`absolute inset-0 md:hidden ${theme === 'dark' ? 'bg-[#1a1a2e]' : 'bg-gradient-primary opacity-70'}`} />
-      <div className="w-full max-w-sm md:hidden min-h-screen pb-28 relative">
-        <div className="px-5 pt-8 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <button onClick={() => setScreen('dashboard')} className="w-9 h-9 rounded-full bg-white/30 backdrop-blur flex items-center justify-center"><ArrowLeft size={18} className="text-white" /></button>
-            <h1 className="text-white text-lg font-bold">Quản lý ví</h1>
-          </div>
-          <button onClick={() => setShowCreate(true)} className="w-9 h-9 rounded-full bg-white/30 backdrop-blur flex items-center justify-center"><Plus size={18} className="text-white" /></button>
-        </div>
-        <div className="px-5 mt-4 text-center">
-          <p className="text-white/80 text-sm font-semibold">Tổng tất cả tài khoản</p>
-          <p className="text-white text-3xl font-bold">{formatMoney(totalBalance)}</p>
-          <p className="text-white/70 text-xs font-semibold mt-1">Tổng tất cả trừ vàng: {formatMoney(totalExcludingGold)}</p>
-        </div>
-        <div className="mt-6 bg-white dark:bg-[#1e1e32] rounded-[2.5rem] min-h-[70vh] px-5 pt-6 pb-6 shadow-soft">
-          {accounts.length === 0 ? <p className="text-steel dark:text-light-grey text-sm text-center py-10">Chưa có ví nào. Bấm + để thêm ví đầu tiên.</p> : (
-            <div className="flex flex-col gap-3 scrollbar-hide">
-              {accounts.map((acc) => (
-                <button key={acc.id} onClick={() => onOpenAccount(acc.id, 'accounts')} className="flex items-center gap-3 bg-ice-cream dark:bg-night-sky rounded-2xl p-4 text-left hover:bg-turquoise/5 transition">
-                  <EmojiCircle emoji={acc.icon} size={44} bg="#E3D6FF" />
-                  <div className="flex-1 min-w-0"><p className="text-blueberry dark:text-white font-bold text-sm">{acc.name}</p><p className="text-steel dark:text-light-grey text-xs font-semibold capitalize">{ACCOUNT_TYPES.find((t) => t.value === acc.type)?.label || acc.type}</p></div>
-                  <p className="text-blueberry dark:text-white font-bold">{formatMoney(accountBalance(acc, transactions))}</p>
-                </button>
-              ))}
+    <>
+      <div className="md:hidden relative">
+        <div className={`absolute inset-0 ${theme === 'dark' ? 'bg-[#1a1a2e]' : 'bg-gradient-primary opacity-70'}`} />
+        <div className="w-full min-h-[100dvh] pb-28 relative">
+          <div className="px-5 pt-8 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <button onClick={() => setScreen('dashboard')} className="w-9 h-9 rounded-full bg-white/30 backdrop-blur flex items-center justify-center"><ArrowLeft size={18} className="text-white" /></button>
+              <h1 className="text-white text-lg font-bold">Quản lý ví</h1>
             </div>
-          )}
+            <button onClick={() => setShowCreate(true)} className="w-9 h-9 rounded-full bg-white/30 backdrop-blur flex items-center justify-center"><Plus size={18} className="text-white" /></button>
+          </div>
+          <div className="px-5 mt-4 text-center">
+            <p className="text-white/80 text-sm font-semibold">Tổng tất cả tài khoản</p>
+            <p className="text-white text-3xl font-bold">{formatMoney(totalBalance)}</p>
+            <p className="text-white/70 text-xs font-semibold mt-1">Tổng tất cả trừ vàng: {formatMoney(totalExcludingGold)}</p>
+          </div>
+          <div className="mt-6 bg-white dark:bg-[#1e1e32] rounded-[2.5rem] min-h-[70vh] px-5 pt-6 pb-6 shadow-soft">
+            {accounts.length === 0 ? <p className="text-steel dark:text-light-grey text-sm text-center py-10">Chưa có ví nào. Bấm + để thêm ví đầu tiên.</p> : (
+              <div className="flex flex-col gap-3 scrollbar-hide">
+                {accounts.map((acc) => (
+                  <button key={acc.id} onClick={() => onOpenAccount(acc.id, 'accounts')} className="flex items-center gap-3 bg-ice-cream dark:bg-night-sky rounded-2xl p-4 text-left hover:bg-turquoise/5 transition">
+                    <EmojiCircle emoji={acc.icon} size={44} bg="#E3D6FF" />
+                    <div className="flex-1 min-w-0"><p className="text-blueberry dark:text-white font-bold text-sm">{acc.name}</p><p className="text-steel dark:text-light-grey text-xs font-semibold capitalize">{ACCOUNT_TYPES.find((t) => t.value === acc.type)?.label || acc.type}</p></div>
+                    <p className="text-blueberry dark:text-white font-bold">{formatMoney(accountBalance(acc, transactions))}</p>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
-      <div className={`hidden md:block w-full ${sidebarCollapsed ? 'max-w-[1380px]' : 'max-w-[1200px]'} px-8 py-8`}>
+      <div className="hidden md:block">
         <div className="flex items-center justify-between mb-2">
           <div>
             <h1 className="text-blueberry dark:text-white text-2xl font-extrabold">Quản lý ví</h1>
@@ -2871,8 +3118,7 @@ function Accounts({ setScreen, accounts, transactions, onOpenAccount, reload, on
       </div>
 
       {showCreate && <EditAccountModal onClose={() => setShowCreate(false)} onSaved={reload} isNew={true} />}
-      <BottomNav screen="accounts" setScreen={setScreen} onAddClick={onAddClick} displayName={displayName} avatarUrl={avatarUrl} theme={theme} toggleTheme={toggleTheme} openSettings={openSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} />
-    </div>
+    </>
   );
 }
 
@@ -2897,8 +3143,8 @@ function AccountDetail({ account, transactions, categories, onBack, reload, soft
   }
 
   return (
-    <div className={`min-h-screen relative bg-ice-cream dark:bg-[#1a1a2e] flex ${sidebarCollapsed ? 'md:pl-20' : 'md:pl-64'} md:pt-20 transition-colors`}>
-      <div className="w-full max-w-sm md:hidden min-h-screen pb-28 relative" style={{ background: 'linear-gradient(180deg,#0DBACC,#74ACEF,#C1DDFF)' }}>
+    <>
+      <div className="md:hidden min-h-[100dvh] pb-28 relative" style={{ background: 'linear-gradient(180deg,#0DBACC,#74ACEF,#C1DDFF)' }}>
         <div className="px-5 pt-8 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <button onClick={onBack} className="w-9 h-9 rounded-full bg-white/30 backdrop-blur flex items-center justify-center"><ArrowLeft size={18} className="text-white" /></button>
@@ -2954,7 +3200,7 @@ function AccountDetail({ account, transactions, categories, onBack, reload, soft
         </div>
       </div>
 
-      <div className={`hidden md:block w-full ${sidebarCollapsed ? 'max-w-[1076px]' : 'max-w-4xl'} px-8 py-8`}>
+      <div className="hidden md:block">
         <div className="flex items-center justify-between mb-6">
           <div className="flex items-center gap-3">
             <button onClick={onBack} className="w-9 h-9 rounded-full bg-white dark:bg-[#2a2a44] flex items-center justify-center shadow-soft"><ArrowLeft size={18} className="text-blueberry dark:text-white" /></button>
@@ -3018,8 +3264,7 @@ function AccountDetail({ account, transactions, categories, onBack, reload, soft
 
       {showAdjust && <QuickAdjustBalanceForm account={account} currentBalance={balance} onClose={() => setShowAdjust(false)} onSaved={reload} />}
       {showEdit && <EditAccountModal account={account} onClose={() => setShowEdit(false)} onSaved={reload} />}
-      <BottomNav screen="accounts" setScreen={setScreen} onAddClick={onAddClick} displayName={displayName} avatarUrl={avatarUrl} theme={theme} toggleTheme={toggleTheme} openSettings={openSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} />
-    </div>
+    </>
   );
 }
 
@@ -3069,52 +3314,53 @@ function Goals({ setScreen, goals, loadingGoals, reload, softDelete, onAddClick,
   const pagedGoals = displayGoals.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
   return (
-    <div className={`min-h-screen relative bg-ice-cream dark:bg-[#1a1a2e] flex ${sidebarCollapsed ? 'md:pl-20' : 'md:pl-64'} md:pt-20 transition-colors`}>
-      <div className={`absolute inset-0 md:hidden ${theme === 'dark' ? 'bg-[#1a1a2e]' : 'bg-gradient-secondary opacity-70'}`} />
-      <div className="w-full max-w-sm md:hidden min-h-screen pb-28 relative">
-        <div className="px-5 pt-8 flex items-center gap-3">
-          <button onClick={() => setScreen('dashboard')} className="w-9 h-9 rounded-full bg-white/30 backdrop-blur flex items-center justify-center"><ArrowLeft size={18} className="text-white" /></button>
-          <h1 className="text-white text-lg font-bold">Mục tiêu</h1>
-        </div>
-        <div className="mt-6 bg-white dark:bg-[#1e1e32] rounded-[2.5rem] min-h-[80vh] px-5 pt-6 pb-6 shadow-soft">
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-blueberry dark:text-white font-extrabold text-lg">Mục tiêu của tôi</h2>
-            <button onClick={() => setEditingGoal('new')} className="w-7 h-7 rounded-full bg-ice-cream dark:bg-night-sky flex items-center justify-center"><Plus size={16} className="text-blueberry dark:text-white" /></button>
+    <>
+      <div className="md:hidden relative">
+        <div className={`absolute inset-0 ${theme === 'dark' ? 'bg-[#1a1a2e]' : 'bg-gradient-secondary opacity-70'}`} />
+        <div className="w-full min-h-[100dvh] pb-28 relative">
+          <div className="px-5 pt-8 flex items-center gap-3">
+            <button onClick={() => setScreen('dashboard')} className="w-9 h-9 rounded-full bg-white/30 backdrop-blur flex items-center justify-center"><ArrowLeft size={18} className="text-white" /></button>
+            <h1 className="text-white text-lg font-bold">Mục tiêu</h1>
           </div>
-          {loadingGoals ? <div className="flex justify-center py-6"><Loader2 size={22} className="animate-spin text-turquoise" /></div>
-            : goals.length === 0 ? <p className="text-steel dark:text-light-grey text-sm text-center py-6">Chưa có mục tiêu nào.</p>
-            : <div className="flex flex-col gap-5 scrollbar-hide">
-                {sortedGoals.map((goal) => {
-                  const isDone = goal.status === 'Hoàn thành';
-                  const pct = isDone ? 100 : (goal.target_amount ? Math.min(100, (goal.current_amount / goal.target_amount) * 100) : 0);
-                  const remaining = (goal.target_amount || 0) - (goal.current_amount || 0);
-                  const pStyle = priorityStyle(goal.priority_term);
-                  return (
-                    <button key={goal.id} onClick={() => setEditingGoal(goal)} className="text-left">
-                      <div className="flex items-center gap-3 mb-2">
-                        <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${isDone ? 'bg-turquoise' : 'bg-gradient-primary'}`}>
-                          {isDone ? <Check size={18} className="text-white" /> : <Target size={18} className="text-white" />}
+          <div className="mt-6 bg-white dark:bg-[#1e1e32] rounded-[2.5rem] min-h-[80vh] px-5 pt-6 pb-6 shadow-soft">
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-blueberry dark:text-white font-extrabold text-lg">Mục tiêu của tôi</h2>
+              <button onClick={() => setEditingGoal('new')} className="w-7 h-7 rounded-full bg-ice-cream dark:bg-night-sky flex items-center justify-center"><Plus size={16} className="text-blueberry dark:text-white" /></button>
+            </div>
+            {loadingGoals ? <div className="flex justify-center py-6"><Loader2 size={22} className="animate-spin text-turquoise" /></div>
+              : goals.length === 0 ? <p className="text-steel dark:text-light-grey text-sm text-center py-6">Chưa có mục tiêu nào.</p>
+              : <div className="flex flex-col gap-5 scrollbar-hide">
+                  {sortedGoals.map((goal) => {
+                    const isDone = goal.status === 'Hoàn thành';
+                    const pct = isDone ? 100 : (goal.target_amount ? Math.min(100, (goal.current_amount / goal.target_amount) * 100) : 0);
+                    const remaining = (goal.target_amount || 0) - (goal.current_amount || 0);
+                    const pStyle = priorityStyle(goal.priority_term);
+                    return (
+                      <button key={goal.id} onClick={() => setEditingGoal(goal)} className="text-left">
+                        <div className="flex items-center gap-3 mb-2">
+                          <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${isDone ? 'bg-turquoise' : 'bg-gradient-primary'}`}>
+                            {isDone ? <Check size={18} className="text-white" /> : <Target size={18} className="text-white" />}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-blueberry dark:text-white font-bold text-sm">{goal.name}</p>
+                            {goal.priority_term && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ color: pStyle.color, background: pStyle.bg }}>{goal.priority_term}</span>}
+                          </div>
+                          <p className="text-blueberry dark:text-white font-bold text-sm flex-shrink-0">{formatMoney(goal.current_amount || 0)}</p>
                         </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-blueberry dark:text-white font-bold text-sm">{goal.name}</p>
-                          {goal.priority_term && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ color: pStyle.color, background: pStyle.bg }}>{goal.priority_term}</span>}
+                        <ProgressBar pct={pct} colorClass={isDone ? 'bg-turquoise' : 'bg-baby-blue'} />
+                        <div className="flex justify-between mt-1 text-xs text-steel dark:text-light-grey font-semibold">
+                          <span>{goal.target_amount ? `Còn thiếu ${formatMoney(Math.max(0, remaining))}` : ''}</span>
+                          <span>{goal.target_amount ? formatMoney(goal.target_amount) : ''}</span>
                         </div>
-                        <p className="text-blueberry dark:text-white font-bold text-sm flex-shrink-0">{formatMoney(goal.current_amount || 0)}</p>
-                      </div>
-                      <ProgressBar pct={pct} colorClass={isDone ? 'bg-turquoise' : 'bg-baby-blue'} />
-                      <div className="flex justify-between mt-1 text-xs text-steel dark:text-light-grey font-semibold">
-                        <span>{goal.target_amount ? `Còn thiếu ${formatMoney(Math.max(0, remaining))}` : ''}</span>
-                        <span>{goal.target_amount ? formatMoney(goal.target_amount) : ''}</span>
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>}
+                      </button>
+                    );
+                  })}
+                </div>}
+          </div>
         </div>
-        <BottomNav screen="goals" setScreen={setScreen} onAddClick={onAddClick} displayName={displayName} avatarUrl={avatarUrl} theme={theme} toggleTheme={toggleTheme} openSettings={openSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} />
       </div>
 
-      <div className={`hidden md:block w-full ${sidebarCollapsed ? 'max-w-[1580px]' : 'max-w-[1400px]'} px-8 py-8`} onClick={() => { setOpenMenuId(null); setShowFilterMenu(false); setShowSortMenu(false); }}>
+      <div className="hidden md:block" onClick={() => { setOpenMenuId(null); setShowFilterMenu(false); setShowSortMenu(false); }}>
         <h1 className="text-blueberry dark:text-white text-2xl font-extrabold mb-6">Mục tiêu</h1>
 
         <div className="grid grid-cols-4 gap-4 mb-6">
@@ -3351,8 +3597,7 @@ function Goals({ setScreen, goals, loadingGoals, reload, softDelete, onAddClick,
       </div>
 
       {editingGoal && <EditGoalForm goal={editingGoal === 'new' ? null : editingGoal} isNew={editingGoal === 'new'} onClose={() => setEditingGoal(null)} onSaved={reload} softDelete={softDelete} />}
-      <BottomNav screen="goals" setScreen={setScreen} onAddClick={onAddClick} displayName={displayName} avatarUrl={avatarUrl} theme={theme} toggleTheme={toggleTheme} openSettings={openSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} />
-    </div>
+    </>
   );
 }
 
@@ -3537,30 +3782,32 @@ function Settings({ setScreen, categories, accounts, reload, softDelete, user, o
   );
 
   return (
-    <div className={`min-h-screen relative bg-ice-cream dark:bg-[#1a1a2e] flex ${sidebarCollapsed ? 'md:pl-20' : 'md:pl-64'} md:pt-20 transition-colors`}>
-      <div className={`absolute inset-0 md:hidden ${theme === 'dark' ? 'bg-[#1a1a2e]' : 'bg-gradient-secondary opacity-70'}`} />
-      <div className="w-full max-w-sm md:hidden min-h-screen pb-28 relative">
-        <div className="px-5 pt-8 flex items-center gap-3">
-          <button onClick={() => setScreen('dashboard')} className="w-9 h-9 rounded-full bg-white/30 backdrop-blur flex items-center justify-center"><ArrowLeft size={18} className="text-white" /></button>
-          <h1 className="text-white text-lg font-bold">Cài đặt</h1>
-        </div>
+    <>
+      <div className="md:hidden relative">
+        <div className={`absolute inset-0 ${theme === 'dark' ? 'bg-[#1a1a2e]' : 'bg-gradient-secondary opacity-70'}`} />
+        <div className="w-full min-h-[100dvh] pb-28 relative">
+          <div className="px-5 pt-8 flex items-center gap-3">
+            <button onClick={() => setScreen('dashboard')} className="w-9 h-9 rounded-full bg-white/30 backdrop-blur flex items-center justify-center"><ArrowLeft size={18} className="text-white" /></button>
+            <h1 className="text-white text-lg font-bold">Cài đặt</h1>
+          </div>
 
-        <div className="px-5 mt-4 flex gap-2">
-          <button onClick={() => setSection('profile')} className={`flex-1 py-2 rounded-full text-sm font-bold ${section === 'profile' ? 'bg-white dark:bg-[#2a2a44] text-blueberry dark:text-white shadow' : 'bg-white/30 text-white'}`}>Hồ sơ</button>
-          <button onClick={() => setSection('categories')} className={`flex-1 py-2 rounded-full text-sm font-bold ${section === 'categories' ? 'bg-white dark:bg-[#2a2a44] text-blueberry dark:text-white shadow' : 'bg-white/30 text-white'}`}>Danh mục</button>
-          <button onClick={() => setSection('data')} className={`flex-1 py-2 rounded-full text-sm font-bold ${section === 'data' ? 'bg-white dark:bg-[#2a2a44] text-blueberry dark:text-white shadow' : 'bg-white/30 text-white'}`}>Dữ liệu</button>
-          <button onClick={() => setSection('history')} className={`flex-1 py-2 rounded-full text-sm font-bold ${section === 'history' ? 'bg-white dark:bg-[#2a2a44] text-blueberry dark:text-white shadow' : 'bg-white/30 text-white'}`}>Lịch sử</button>
-        </div>
+          <div className="px-5 mt-4 flex gap-2">
+            <button onClick={() => setSection('profile')} className={`flex-1 py-2 rounded-full text-sm font-bold ${section === 'profile' ? 'bg-white dark:bg-[#2a2a44] text-blueberry dark:text-white shadow' : 'bg-white/30 text-white'}`}>Hồ sơ</button>
+            <button onClick={() => setSection('categories')} className={`flex-1 py-2 rounded-full text-sm font-bold ${section === 'categories' ? 'bg-white dark:bg-[#2a2a44] text-blueberry dark:text-white shadow' : 'bg-white/30 text-white'}`}>Danh mục</button>
+            <button onClick={() => setSection('data')} className={`flex-1 py-2 rounded-full text-sm font-bold ${section === 'data' ? 'bg-white dark:bg-[#2a2a44] text-blueberry dark:text-white shadow' : 'bg-white/30 text-white'}`}>Dữ liệu</button>
+            <button onClick={() => setSection('history')} className={`flex-1 py-2 rounded-full text-sm font-bold ${section === 'history' ? 'bg-white dark:bg-[#2a2a44] text-blueberry dark:text-white shadow' : 'bg-white/30 text-white'}`}>Lịch sử</button>
+          </div>
 
-        <div className="mt-4 bg-white dark:bg-[#1e1e32] rounded-[2.5rem] min-h-[76vh] px-5 pt-6 pb-6 shadow-soft scrollbar-hide">
-          {section === 'profile' && <ProfileSection user={user} onUpdated={onProfileUpdated} logActivity={logActivity} />}
-          {section === 'categories' && <CategorySection categories={categories} reload={reload} softDelete={softDelete} />}
-          {section === 'data' && ResetDataPanel}
-          {section === 'history' && SystemHistoryPanel}
+          <div className="mt-4 bg-white dark:bg-[#1e1e32] rounded-[2.5rem] min-h-[76vh] px-5 pt-6 pb-6 shadow-soft scrollbar-hide">
+            {section === 'profile' && <ProfileSection user={user} onUpdated={onProfileUpdated} logActivity={logActivity} />}
+            {section === 'categories' && <CategorySection categories={categories} reload={reload} softDelete={softDelete} />}
+            {section === 'data' && ResetDataPanel}
+            {section === 'history' && SystemHistoryPanel}
+          </div>
         </div>
       </div>
 
-      <div className={`hidden md:block w-full ${sidebarCollapsed ? 'max-w-[948px]' : 'max-w-3xl'} px-8 py-8`}>
+      <div className="hidden md:block">
         <div className="flex items-center justify-between mb-6">
           <h1 className="text-blueberry dark:text-white text-2xl font-extrabold">Cài đặt</h1>
           <button onClick={handleLogout} className="flex items-center gap-2 bg-white dark:bg-[#2a2a44] text-cotton-candy rounded-full px-4 py-2 text-sm font-bold shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)]"><LogOut size={15} /> Đăng xuất</button>
@@ -3580,9 +3827,7 @@ function Settings({ setScreen, categories, accounts, reload, softDelete, user, o
           {section === 'history' && SystemHistoryPanel}
         </div>
       </div>
-
-      <BottomNav screen="settings" setScreen={setScreen} onAddClick={onAddClick} displayName={displayName} avatarUrl={avatarUrl} theme={theme} toggleTheme={toggleTheme} openSettings={openSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} />
-    </div>
+    </>
   );
 }
 
@@ -3765,7 +4010,680 @@ function CategorySection({ categories, reload, softDelete }) {
 }
 
 /* ==============================================================================
-   16. MAIN APP
+   16. REPORT COMPONENT
+   ============================================================================== */
+function Report({ setScreen, transactions, categories, accounts, goals, onAddClick, displayName, avatarUrl, theme, toggleTheme, openSettings, sidebarCollapsed, toggleSidebar }) {
+  // Time range state
+  const [timeType, setTimeType] = useState('month');
+  const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1);
+  const [selectedQuarter, setSelectedQuarter] = useState(Math.floor((new Date().getMonth())/3) + 1);
+  const [selectedHalf, setSelectedHalf] = useState(new Date().getMonth() < 6 ? 1 : 2);
+  const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
+  const [selectedDay, setSelectedDay] = useState(new Date().toISOString().slice(0,10));
+  const [selectedWeek, setSelectedWeek] = useState(() => {
+    const d = new Date();
+    const day = d.getDay();
+    const diff = d.getDate() - day + (day === 0 ? -6 : 1); // Monday
+    d.setDate(diff);
+    return d.toISOString().slice(0,10);
+  });
+  const [customStart, setCustomStart] = useState(new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0,10));
+  const [customEnd, setCustomEnd] = useState(new Date().toISOString().slice(0,10));
+
+  // Compute start/end based on type
+  const getPeriod = () => {
+    let start, end;
+    const now = new Date();
+    const y = selectedYear;
+    if (timeType === 'day') {
+      const d = new Date(selectedDay);
+      start = new Date(d); start.setHours(0,0,0,0);
+      end = new Date(d); end.setHours(23,59,59,999);
+    } else if (timeType === 'week') {
+      const d = new Date(selectedWeek);
+      start = new Date(d); start.setHours(0,0,0,0);
+      end = new Date(d); end.setDate(end.getDate()+6); end.setHours(23,59,59,999);
+    } else if (timeType === 'month') {
+      const m = selectedMonth;
+      start = new Date(y, m-1, 1, 0,0,0);
+      end = new Date(y, m, 0, 23,59,59);
+    } else if (timeType === 'quarter') {
+      const q = selectedQuarter;
+      const sm = (q-1)*3;
+      start = new Date(y, sm, 1, 0,0,0);
+      end = new Date(y, sm+3, 0, 23,59,59);
+    } else if (timeType === '6month') {
+      const h = selectedHalf;
+      const sm = (h-1)*6;
+      start = new Date(y, sm, 1, 0,0,0);
+      end = new Date(y, sm+6, 0, 23,59,59);
+    } else if (timeType === 'year') {
+      start = new Date(y, 0, 1, 0,0,0);
+      end = new Date(y, 11, 31, 23,59,59);
+    } else if (timeType === 'custom') {
+      start = new Date(customStart); start.setHours(0,0,0,0);
+      end = new Date(customEnd); end.setHours(23,59,59,999);
+    } else {
+      // fallback month
+      start = new Date(y, now.getMonth(), 1);
+      end = new Date(y, now.getMonth()+1, 0, 23,59,59);
+    }
+    return { start, end };
+  };
+
+  const { start, end } = getPeriod();
+  const periodTxs = transactions.filter(t => {
+    const d = new Date(t.date || t.created_at);
+    return d >= start && d <= end;
+  });
+
+  // Aggregate
+  const agg = aggregatePeriodData(periodTxs);
+  const { income, allocation, expenseFromIncome, expenseFromFund, totalActualExpense, remaining } = agg;
+
+  // Previous period
+  const getPrevPeriod = () => {
+    let prevStart, prevEnd;
+    if (timeType === 'day') {
+      const d = new Date(selectedDay); d.setDate(d.getDate()-1);
+      const s = new Date(d); s.setHours(0,0,0,0);
+      const e = new Date(d); e.setHours(23,59,59,999);
+      return { start: s, end: e };
+    } else if (timeType === 'week') {
+      const d = new Date(selectedWeek); d.setDate(d.getDate()-7);
+      const s = new Date(d); s.setHours(0,0,0,0);
+      const e = new Date(d); e.setDate(e.getDate()+6); e.setHours(23,59,59,999);
+      return { start: s, end: e };
+    } else if (timeType === 'month') {
+      let m = selectedMonth - 1; let y = selectedYear;
+      if (m === 0) { m = 12; y--; }
+      const s = new Date(y, m-1, 1, 0,0,0);
+      const e = new Date(y, m, 0, 23,59,59);
+      return { start: s, end: e };
+    } else if (timeType === 'quarter') {
+      let q = selectedQuarter - 1; let y = selectedYear;
+      if (q === 0) { q = 4; y--; }
+      const sm = (q-1)*3;
+      const s = new Date(y, sm, 1, 0,0,0);
+      const e = new Date(y, sm+3, 0, 23,59,59);
+      return { start: s, end: e };
+    } else if (timeType === '6month') {
+      let h = selectedHalf - 1; let y = selectedYear;
+      if (h === 0) { h = 2; y--; }
+      const sm = (h-1)*6;
+      const s = new Date(y, sm, 1, 0,0,0);
+      const e = new Date(y, sm+6, 0, 23,59,59);
+      return { start: s, end: e };
+    } else if (timeType === 'year') {
+      const y = selectedYear - 1;
+      const s = new Date(y, 0, 1, 0,0,0);
+      const e = new Date(y, 11, 31, 23,59,59);
+      return { start: s, end: e };
+    } else if (timeType === 'custom') {
+      const dur = end - start;
+      const ps = new Date(start); ps.setTime(ps.getTime() - dur - 1000);
+      const pe = new Date(end); pe.setTime(pe.getTime() - dur - 1000);
+      return { start: ps, end: pe };
+    }
+    return null;
+  };
+
+  const prev = getPrevPeriod();
+  let prevAgg = { income: 0, allocation: 0, expenseFromIncome: 0, expenseFromFund: 0, totalActualExpense: 0, remaining: 0 };
+  if (prev) {
+    const prevTxs = transactions.filter(t => {
+      const d = new Date(t.date || t.created_at);
+      return d >= prev.start && d <= prev.end;
+    });
+    prevAgg = aggregatePeriodData(prevTxs);
+  }
+
+  // Asset snapshot at end of period
+  const totalAccountsEnd = accounts.reduce((s, a) => s + accountBalanceAtDate(a, transactions, end), 0);
+  const fundCats = categories.filter(c => c.is_fund);
+  const totalFundsEnd = fundCats.reduce((s, c) => s + fundBalanceAtDate(c, transactions, end), 0);
+  const totalAssetsEnd = totalAccountsEnd + totalFundsEnd;
+  // Asset at start of period for comparison
+  const totalAccountsStart = accounts.reduce((s, a) => s + accountBalanceAtDate(a, transactions, start), 0);
+  const totalFundsStart = fundCats.reduce((s, c) => s + fundBalanceAtDate(c, transactions, start), 0);
+  const totalAssetsStart = totalAccountsStart + totalFundsStart;
+  const assetChange = totalAssetsStart > 0 ? ((totalAssetsEnd - totalAssetsStart) / totalAssetsStart) * 100 : null;
+
+  // Income breakdown
+  const incomeCats = categories.filter(c => c.type === 'income');
+  const incomeBreakdown = incomeCats.map(c => ({
+    ...c,
+    amount: periodTxs.filter(t => t.category_id === c.id && t.type === 'income').reduce((s, t) => s + Number(t.amount), 0)
+  })).filter(c => c.amount > 0).sort((a,b) => b.amount - a.amount);
+
+  // Expense breakdown
+  const expenseCats = categories.filter(c => c.type === 'expense');
+  const expenseBreakdown = expenseCats.map(c => ({
+    ...c,
+    amount: periodTxs.filter(t => t.category_id === c.id && t.type === 'expense').reduce((s, t) => s + Number(t.amount), 0),
+    fromIncome: periodTxs.filter(t => t.category_id === c.id && t.type === 'expense' && t.account_id === null).reduce((s, t) => s + Number(t.amount), 0),
+    fromFund: periodTxs.filter(t => t.category_id === c.id && t.type === 'expense' && t.account_id !== null).reduce((s, t) => s + Number(t.amount), 0)
+  })).filter(c => c.amount > 0).sort((a,b) => b.amount - a.amount);
+
+  // Fund data
+  const fundData = fundCats.map(c => {
+    const balanceNow = fundBalanceAtDate(c, transactions, end); // at end of period
+    const contributed = periodTxs.filter(t => t.category_id === c.id && t.type === 'allocation').reduce((s, t) => s + Number(t.amount), 0);
+    const withdrawn = periodTxs.filter(t => t.category_id === c.id && t.type === 'expense').reduce((s, t) => s + Number(t.amount), 0);
+    const target = Number(c.target_amount || 0);
+    const progress = target > 0 ? Math.min(100, (balanceNow / target) * 100) : 0;
+    return { ...c, balanceNow, contributed, withdrawn, target, progress };
+  }).filter(f => f.contributed > 0 || f.withdrawn > 0 || f.balanceNow > 0).sort((a,b) => b.contributed - a.contributed);
+
+  // Trends: if year, show 12 months; if quarter, show 3 months; if month, show days? We'll keep simple: for year show monthly, else show sub-periods.
+  const trendData = (() => {
+    if (timeType === 'year') {
+      const months = [];
+      for (let m=1; m<=12; m++) {
+        const s = new Date(selectedYear, m-1, 1, 0,0,0);
+        const e = new Date(selectedYear, m, 0, 23,59,59);
+        const txs = transactions.filter(t => {
+          const d = new Date(t.date || t.created_at);
+          return d >= s && d <= e;
+        });
+        const a = aggregatePeriodData(txs);
+        months.push({ label: `Th${m}`, income: a.income, allocation: a.allocation, expenseFromIncome: a.expenseFromIncome, remaining: a.remaining });
+      }
+      return months;
+    } else if (timeType === 'quarter') {
+      const months = [];
+      const sm = (selectedQuarter-1)*3;
+      for (let i=0; i<3; i++) {
+        const m = sm + i + 1;
+        const s = new Date(selectedYear, m-1, 1, 0,0,0);
+        const e = new Date(selectedYear, m, 0, 23,59,59);
+        const txs = transactions.filter(t => {
+          const d = new Date(t.date || t.created_at);
+          return d >= s && d <= e;
+        });
+        const a = aggregatePeriodData(txs);
+        months.push({ label: `Th${m}`, income: a.income, allocation: a.allocation, expenseFromIncome: a.expenseFromIncome, remaining: a.remaining });
+      }
+      return months;
+    } else if (timeType === '6month') {
+      const months = [];
+      const sm = (selectedHalf-1)*6;
+      for (let i=0; i<6; i++) {
+        const m = sm + i + 1;
+        const s = new Date(selectedYear, m-1, 1, 0,0,0);
+        const e = new Date(selectedYear, m, 0, 23,59,59);
+        const txs = transactions.filter(t => {
+          const d = new Date(t.date || t.created_at);
+          return d >= s && d <= e;
+        });
+        const a = aggregatePeriodData(txs);
+        months.push({ label: `Th${m}`, income: a.income, allocation: a.allocation, expenseFromIncome: a.expenseFromIncome, remaining: a.remaining });
+      }
+      return months;
+    } else {
+      // For month/week/day, show last 6 periods of same type? Not implemented here for brevity.
+      return [];
+    }
+  })();
+
+  // Insights
+  const insights = [];
+  const incomeChange = prevAgg.income > 0 ? ((income - prevAgg.income) / prevAgg.income) * 100 : null;
+  if (incomeChange !== null && Math.abs(incomeChange) > 5) {
+    insights.push({
+      icon: incomeChange > 0 ? TrendingUp : TrendingDown,
+      title: incomeChange > 0 ? 'Thu nhập tăng' : 'Thu nhập giảm',
+      desc: `Thu nhập ${incomeChange > 0 ? 'tăng' : 'giảm'} ${Math.abs(Math.round(incomeChange))}% so với kỳ trước.`,
+      color: incomeChange > 0 ? 'text-turquoise' : 'text-cotton-candy'
+    });
+  }
+  const savingRate = income > 0 ? Math.round((allocation / income) * 100) : 0;
+  insights.push({
+    icon: PiggyBank,
+    title: 'Tỷ lệ góp quỹ',
+    desc: `Bạn đã dành ${savingRate}% thu nhập để góp quỹ.`,
+    color: 'text-turquoise'
+  });
+  if (expenseBreakdown.length > 0) {
+    const top = expenseBreakdown[0];
+    insights.push({
+      icon: Wallet,
+      title: 'Chi tiêu lớn nhất',
+      desc: `Danh mục "${top.name}" chiếm ${totalActualExpense > 0 ? Math.round((top.amount / totalActualExpense) * 100) : 0}% tổng chi.`,
+      color: 'text-cotton-candy'
+    });
+  }
+  if (allocation + expenseFromIncome > income) {
+    insights.push({
+      icon: AlertTriangle,
+      title: 'Cảnh báo dòng tiền',
+      desc: `Góp quỹ và chi từ thu nhập vượt quá thu nhập. Bạn đang sử dụng tiền tích lũy.`,
+      color: 'text-cotton-candy'
+    });
+  }
+  if (assetChange !== null && Math.abs(assetChange) > 3) {
+    insights.push({
+      icon: CircleDollarSign,
+      title: assetChange > 0 ? 'Tài sản tăng' : 'Tài sản giảm',
+      desc: `Tổng tài sản ${assetChange > 0 ? 'tăng' : 'giảm'} ${Math.abs(Math.round(assetChange))}% so với đầu kỳ.`,
+      color: assetChange > 0 ? 'text-turquoise' : 'text-cotton-candy'
+    });
+  }
+  // Goal progress
+  const activeGoals = goals.filter(g => g.status !== 'Hoàn thành');
+  if (activeGoals.length > 0) {
+    const goal = activeGoals[0];
+    const pct = goal.target_amount ? Math.min(100, (goal.current_amount / goal.target_amount) * 100) : 0;
+    insights.push({
+      icon: Target,
+      title: `Mục tiêu "${goal.name}"`,
+      desc: `Đạt ${Math.round(pct)}% mục tiêu.`,
+      color: 'text-lavender'
+    });
+  }
+
+  // Drilldown state
+  const [drilldownCategory, setDrilldownCategory] = useState(null);
+  const [drilldownTransactions, setDrilldownTransactions] = useState([]);
+  const [showDrilldown, setShowDrilldown] = useState(false);
+
+  function openDrilldown(categoryId) {
+    const cat = categories.find(c => c.id === categoryId);
+    const txs = periodTxs.filter(t => t.category_id === categoryId && t.type === 'expense')
+      .sort((a,b) => new Date(b.date || b.created_at) - new Date(a.date || a.created_at));
+    setDrilldownCategory(cat);
+    setDrilldownTransactions(txs);
+    setShowDrilldown(true);
+  }
+
+  // Format period label for header
+  const getPeriodLabel = () => {
+    if (timeType === 'day') return `Ngày ${new Date(selectedDay).toLocaleDateString('vi-VN')}`;
+    if (timeType === 'week') return `Tuần ${new Date(selectedWeek).toLocaleDateString('vi-VN')} - ${new Date(new Date(selectedWeek).getTime()+6*86400000).toLocaleDateString('vi-VN')}`;
+    if (timeType === 'month') return `Tháng ${selectedMonth}/${selectedYear}`;
+    if (timeType === 'quarter') return `Quý ${selectedQuarter}/${selectedYear}`;
+    if (timeType === '6month') return `${selectedHalf === 1 ? 'H1' : 'H2'}/${selectedYear}`;
+    if (timeType === 'year') return `Năm ${selectedYear}`;
+    if (timeType === 'custom') return `${new Date(customStart).toLocaleDateString('vi-VN')} - ${new Date(customEnd).toLocaleDateString('vi-VN')}`;
+    return '';
+  };
+
+  const periodLabel = getPeriodLabel();
+
+  // Stacked bar component
+  function StackedBar({ data }) {
+    const total = data.reduce((s, d) => s + d.value, 0);
+    if (total === 0) return <div className="text-center text-steel dark:text-light-grey py-2">Không có dữ liệu</div>;
+    const segments = data.map(d => ({ ...d, pct: (d.value / total) * 100 }));
+    return (
+      <div className="w-full h-8 rounded-full overflow-hidden flex">
+        {segments.map((seg, i) => (
+          <div key={i} style={{ width: `${seg.pct}%`, background: seg.color }} title={`${seg.label}: ${formatMoney(seg.value)}`} />
+        ))}
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <div className="md:hidden relative">
+        <div className={`absolute inset-0 ${theme === 'dark' ? 'bg-[#1a1a2e]' : 'bg-gradient-hero opacity-70'}`} />
+        <div className="w-full min-h-[100dvh] pb-28 relative">
+          <div className="px-5 pt-8 flex items-center justify-between">
+            <h1 className="text-white text-lg font-bold">Báo cáo</h1>
+            <button onClick={() => setScreen('dashboard')} className="w-9 h-9 rounded-full bg-white/30 backdrop-blur flex items-center justify-center"><X size={18} className="text-white" /></button>
+          </div>
+          <div className="px-5 mt-2">
+            <select value={timeType} onChange={(e) => setTimeType(e.target.value)} className="w-full bg-white/20 backdrop-blur rounded-xl px-4 py-2 text-sm text-white outline-none">
+              <option value="day">Ngày</option>
+              <option value="week">Tuần</option>
+              <option value="month">Tháng</option>
+              <option value="quarter">Quý</option>
+              <option value="6month">6 tháng</option>
+              <option value="year">Năm</option>
+              <option value="custom">Tùy chỉnh</option>
+            </select>
+            {timeType === 'day' && <input type="date" value={selectedDay} onChange={(e) => setSelectedDay(e.target.value)} className="w-full mt-2 bg-white/20 backdrop-blur rounded-xl px-4 py-2 text-sm text-white outline-none" />}
+            {timeType === 'week' && <input type="date" value={selectedWeek} onChange={(e) => setSelectedWeek(e.target.value)} className="w-full mt-2 bg-white/20 backdrop-blur rounded-xl px-4 py-2 text-sm text-white outline-none" />}
+            {timeType === 'month' && (
+              <div className="flex gap-2 mt-2">
+                <select value={selectedMonth} onChange={(e) => setSelectedMonth(Number(e.target.value))} className="flex-1 bg-white/20 backdrop-blur rounded-xl px-4 py-2 text-sm text-white outline-none">
+                  {Array.from({length:12}, (_,i) => i+1).map(m => <option key={m} value={m}>{m}</option>)}
+                </select>
+                <input type="number" value={selectedYear} onChange={(e) => setSelectedYear(Number(e.target.value))} className="w-20 bg-white/20 backdrop-blur rounded-xl px-4 py-2 text-sm text-white outline-none" />
+              </div>
+            )}
+            {timeType === 'quarter' && (
+              <div className="flex gap-2 mt-2">
+                <select value={selectedQuarter} onChange={(e) => setSelectedQuarter(Number(e.target.value))} className="flex-1 bg-white/20 backdrop-blur rounded-xl px-4 py-2 text-sm text-white outline-none">
+                  <option value={1}>Q1</option><option value={2}>Q2</option><option value={3}>Q3</option><option value={4}>Q4</option>
+                </select>
+                <input type="number" value={selectedYear} onChange={(e) => setSelectedYear(Number(e.target.value))} className="w-20 bg-white/20 backdrop-blur rounded-xl px-4 py-2 text-sm text-white outline-none" />
+              </div>
+            )}
+            {timeType === '6month' && (
+              <div className="flex gap-2 mt-2">
+                <select value={selectedHalf} onChange={(e) => setSelectedHalf(Number(e.target.value))} className="flex-1 bg-white/20 backdrop-blur rounded-xl px-4 py-2 text-sm text-white outline-none">
+                  <option value={1}>H1</option><option value={2}>H2</option>
+                </select>
+                <input type="number" value={selectedYear} onChange={(e) => setSelectedYear(Number(e.target.value))} className="w-20 bg-white/20 backdrop-blur rounded-xl px-4 py-2 text-sm text-white outline-none" />
+              </div>
+            )}
+            {timeType === 'year' && (
+              <input type="number" value={selectedYear} onChange={(e) => setSelectedYear(Number(e.target.value))} className="w-full mt-2 bg-white/20 backdrop-blur rounded-xl px-4 py-2 text-sm text-white outline-none" />
+            )}
+            {timeType === 'custom' && (
+              <div className="flex gap-2 mt-2">
+                <input type="date" value={customStart} onChange={(e) => setCustomStart(e.target.value)} className="flex-1 bg-white/20 backdrop-blur rounded-xl px-4 py-2 text-sm text-white outline-none" />
+                <input type="date" value={customEnd} onChange={(e) => setCustomEnd(e.target.value)} className="flex-1 bg-white/20 backdrop-blur rounded-xl px-4 py-2 text-sm text-white outline-none" />
+              </div>
+            )}
+          </div>
+          <div className="px-5 mt-4 bg-white dark:bg-[#1e1e32] rounded-3xl shadow-soft p-4">
+            <h2 className="text-blueberry dark:text-white font-extrabold text-base mb-3">Tổng quan</h2>
+            <div className="grid grid-cols-1 gap-2">
+              <div className="flex justify-between"><span className="text-steel dark:text-light-grey">Tài sản (cuối kỳ)</span><span className="font-bold text-blueberry dark:text-white">{formatMoney(totalAssetsEnd)}</span></div>
+              <div className="flex justify-between"><span className="text-steel dark:text-light-grey">Thu nhập</span><span className="font-bold text-turquoise">{formatMoney(income)}</span></div>
+              <div className="flex justify-between"><span className="text-steel dark:text-light-grey">Chi tiêu</span><span className="font-bold text-cotton-candy">{formatMoney(totalActualExpense)}</span></div>
+            </div>
+          </div>
+          <div className="px-5 mt-4 bg-white dark:bg-[#1e1e32] rounded-3xl shadow-soft p-4">
+            <h2 className="text-blueberry dark:text-white font-extrabold text-base mb-3">Dòng tiền</h2>
+            <div className="space-y-1">
+              <div className="flex justify-between"><span>Thu nhập</span><span className="font-bold text-turquoise">{formatMoney(income)}</span></div>
+              <div className="flex justify-between"><span>Góp quỹ</span><span className="font-bold text-baby-blue">{formatMoney(allocation)}</span></div>
+              <div className="flex justify-between"><span>Chi từ thu nhập</span><span className="font-bold text-cotton-candy">{formatMoney(expenseFromIncome)}</span></div>
+              <div className="flex justify-between border-t pt-2"><span className="font-bold">Còn lại</span><span className={`font-bold ${remaining >= 0 ? 'text-turquoise' : 'text-cotton-candy'}`}>{formatMoney(remaining)}</span></div>
+            </div>
+          </div>
+          <div className="px-5 mt-4 bg-white dark:bg-[#1e1e32] rounded-3xl shadow-soft p-4">
+            <h2 className="text-blueberry dark:text-white font-extrabold text-base mb-3">Top chi tiêu</h2>
+            {expenseBreakdown.slice(0,3).map(c => (
+              <div key={c.id} className="flex justify-between py-1"><span>{c.name}</span><span className="font-bold text-cotton-candy">{formatMoney(c.amount)}</span></div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div className="hidden md:block">
+        <div className="flex items-center justify-between mb-6 flex-wrap gap-4">
+          <h1 className="text-blueberry dark:text-white text-2xl font-extrabold">Báo cáo &amp; Phân tích</h1>
+          <div className="flex items-center gap-2 flex-wrap">
+            <select value={timeType} onChange={(e) => setTimeType(e.target.value)} className="bg-ice-cream dark:bg-night-sky rounded-full text-sm font-bold px-4 py-2 outline-none text-blueberry dark:text-white">
+              <option value="day">Ngày</option>
+              <option value="week">Tuần</option>
+              <option value="month">Tháng</option>
+              <option value="quarter">Quý</option>
+              <option value="6month">6 tháng</option>
+              <option value="year">Năm</option>
+              <option value="custom">Tùy chỉnh</option>
+            </select>
+            {timeType === 'day' && <input type="date" value={selectedDay} onChange={(e) => setSelectedDay(e.target.value)} className="bg-ice-cream dark:bg-night-sky rounded-full text-sm font-bold px-4 py-2 outline-none text-blueberry dark:text-white" />}
+            {timeType === 'week' && <input type="date" value={selectedWeek} onChange={(e) => setSelectedWeek(e.target.value)} className="bg-ice-cream dark:bg-night-sky rounded-full text-sm font-bold px-4 py-2 outline-none text-blueberry dark:text-white" />}
+            {timeType === 'month' && (
+              <>
+                <select value={selectedMonth} onChange={(e) => setSelectedMonth(Number(e.target.value))} className="bg-ice-cream dark:bg-night-sky rounded-full text-sm font-bold px-4 py-2 outline-none text-blueberry dark:text-white">
+                  {Array.from({length:12}, (_,i) => i+1).map(m => <option key={m} value={m}>{m}</option>)}
+                </select>
+                <input type="number" value={selectedYear} onChange={(e) => setSelectedYear(Number(e.target.value))} className="bg-ice-cream dark:bg-night-sky rounded-full text-sm font-bold px-4 py-2 outline-none text-blueberry dark:text-white w-24" />
+              </>
+            )}
+            {timeType === 'quarter' && (
+              <>
+                <select value={selectedQuarter} onChange={(e) => setSelectedQuarter(Number(e.target.value))} className="bg-ice-cream dark:bg-night-sky rounded-full text-sm font-bold px-4 py-2 outline-none text-blueberry dark:text-white">
+                  <option value={1}>Q1</option><option value={2}>Q2</option><option value={3}>Q3</option><option value={4}>Q4</option>
+                </select>
+                <input type="number" value={selectedYear} onChange={(e) => setSelectedYear(Number(e.target.value))} className="bg-ice-cream dark:bg-night-sky rounded-full text-sm font-bold px-4 py-2 outline-none text-blueberry dark:text-white w-24" />
+              </>
+            )}
+            {timeType === '6month' && (
+              <>
+                <select value={selectedHalf} onChange={(e) => setSelectedHalf(Number(e.target.value))} className="bg-ice-cream dark:bg-night-sky rounded-full text-sm font-bold px-4 py-2 outline-none text-blueberry dark:text-white">
+                  <option value={1}>H1</option><option value={2}>H2</option>
+                </select>
+                <input type="number" value={selectedYear} onChange={(e) => setSelectedYear(Number(e.target.value))} className="bg-ice-cream dark:bg-night-sky rounded-full text-sm font-bold px-4 py-2 outline-none text-blueberry dark:text-white w-24" />
+              </>
+            )}
+            {timeType === 'year' && (
+              <input type="number" value={selectedYear} onChange={(e) => setSelectedYear(Number(e.target.value))} className="bg-ice-cream dark:bg-night-sky rounded-full text-sm font-bold px-4 py-2 outline-none text-blueberry dark:text-white w-24" />
+            )}
+            {timeType === 'custom' && (
+              <>
+                <input type="date" value={customStart} onChange={(e) => setCustomStart(e.target.value)} className="bg-ice-cream dark:bg-night-sky rounded-full text-sm font-bold px-4 py-2 outline-none text-blueberry dark:text-white" />
+                <input type="date" value={customEnd} onChange={(e) => setCustomEnd(e.target.value)} className="bg-ice-cream dark:bg-night-sky rounded-full text-sm font-bold px-4 py-2 outline-none text-blueberry dark:text-white" />
+              </>
+            )}
+          </div>
+        </div>
+
+        <div className="bg-white dark:bg-[#1e1e32] rounded-3xl p-6 shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)] mb-6">
+          <h2 className="text-blueberry dark:text-white font-extrabold text-lg mb-2">Tổng kết {periodLabel}</h2>
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+            <div><p className="text-steel dark:text-light-grey text-sm">Thu nhập</p><p className="text-xl font-bold text-turquoise">{formatMoney(income)}</p></div>
+            <div><p className="text-steel dark:text-light-grey text-sm">Góp quỹ</p><p className="text-xl font-bold text-baby-blue">{formatMoney(allocation)}</p></div>
+            <div><p className="text-steel dark:text-light-grey text-sm">Chi tiêu</p><p className="text-xl font-bold text-cotton-candy">{formatMoney(totalActualExpense)}</p></div>
+            <div><p className="text-steel dark:text-light-grey text-sm">Còn lại</p><p className={`text-xl font-bold ${remaining >= 0 ? 'text-turquoise' : 'text-cotton-candy'}`}>{formatMoney(remaining)}</p></div>
+            <div><p className="text-steel dark:text-light-grey text-sm">Tài sản cuối kỳ</p><p className="text-xl font-bold text-blueberry dark:text-white">{formatMoney(totalAssetsEnd)}</p></div>
+          </div>
+          {assetChange !== null && (
+            <p className={`text-sm mt-2 ${assetChange >= 0 ? 'text-turquoise' : 'text-cotton-candy'}`}>
+              {assetChange >= 0 ? '▲' : '▼'} {Math.abs(Math.round(assetChange))}% so với đầu kỳ
+            </p>
+          )}
+        </div>
+
+        <div className="grid grid-cols-3 gap-6 mb-6">
+          <div className="bg-white dark:bg-[#1e1e32] rounded-3xl p-6 shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)] cursor-pointer hover:shadow-card transition" onClick={() => alert(incomeBreakdown.map(c => `${c.name}: ${formatMoney(c.amount)}`).join('\n'))}>
+            <p className="text-steel dark:text-light-grey text-sm font-semibold">Tổng tài sản</p>
+            <p className="text-blueberry dark:text-white text-2xl font-bold">{formatMoney(totalAssetsEnd)}</p>
+          </div>
+          <div className="bg-white dark:bg-[#1e1e32] rounded-3xl p-6 shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)] cursor-pointer hover:shadow-card transition" onClick={() => alert(incomeBreakdown.map(c => `${c.name}: ${formatMoney(c.amount)}`).join('\n'))}>
+            <p className="text-steel dark:text-light-grey text-sm font-semibold">Thu nhập</p>
+            <p className="text-turquoise text-2xl font-bold">{formatMoney(income)}</p>
+          </div>
+          <div className="bg-white dark:bg-[#1e1e32] rounded-3xl p-6 shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)] cursor-pointer hover:shadow-card transition" onClick={() => alert(expenseBreakdown.map(c => `${c.name}: ${formatMoney(c.amount)}`).join('\n'))}>
+            <p className="text-steel dark:text-light-grey text-sm font-semibold">Chi tiêu</p>
+            <p className="text-cotton-candy text-2xl font-bold">{formatMoney(totalActualExpense)}</p>
+          </div>
+        </div>
+
+        <div className="bg-white dark:bg-[#1e1e32] rounded-3xl p-6 shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)] mb-6">
+          <h2 className="text-blueberry dark:text-white font-extrabold text-lg mb-4">Dòng tiền trong kỳ</h2>
+          <div className="flex flex-col md:flex-row gap-6">
+            <div className="flex-1">
+              <div className="space-y-2">
+                <div className="flex justify-between"><span className="text-steel dark:text-light-grey">Thu nhập</span><span className="font-bold text-turquoise">{formatMoney(income)}</span></div>
+                <div className="flex justify-between"><span className="text-steel dark:text-light-grey">Góp quỹ</span><span className="font-bold text-baby-blue">{formatMoney(allocation)}</span></div>
+                <div className="flex justify-between"><span className="text-steel dark:text-light-grey">Chi từ thu nhập</span><span className="font-bold text-cotton-candy">{formatMoney(expenseFromIncome)}</span></div>
+                <div className="flex justify-between border-t pt-2"><span className="font-bold">Còn lại</span><span className={`font-bold ${remaining >= 0 ? 'text-turquoise' : 'text-cotton-candy'}`}>{formatMoney(remaining)}</span></div>
+              </div>
+            </div>
+            <div className="flex-1">
+              <StackedBar data={[
+                { label: 'Góp quỹ', value: allocation, color: '#74ACEF' },
+                { label: 'Chi từ thu nhập', value: expenseFromIncome, color: '#F18AB5' },
+                { label: 'Còn lại', value: Math.max(0, remaining), color: '#0DBACC' }
+              ]} />
+              {remaining < 0 && <p className="text-cotton-candy text-xs mt-2">⚠️ Các khoản phân bổ vượt quá thu nhập.</p>}
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-white dark:bg-[#1e1e32] rounded-3xl p-6 shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)] mb-6">
+          <h2 className="text-blueberry dark:text-white font-extrabold text-lg mb-4">Thu nhập theo danh mục</h2>
+          {incomeBreakdown.length === 0 ? <p className="text-steel dark:text-light-grey">Không có thu nhập.</p> : (
+            <div className="grid grid-cols-2 gap-2">
+              {incomeBreakdown.map(c => (
+                <div key={c.id} className="flex justify-between bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-2">
+                  <span>{c.icon} {c.name}</span>
+                  <span className="font-bold text-turquoise">{formatMoney(c.amount)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="bg-white dark:bg-[#1e1e32] rounded-3xl p-6 shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)] mb-6">
+          <h2 className="text-blueberry dark:text-white font-extrabold text-lg mb-4">Hoạt động quỹ</h2>
+          {fundData.length === 0 ? <p className="text-steel dark:text-light-grey">Không có hoạt động quỹ.</p> : (
+            <div className="space-y-3">
+              {fundData.slice(0,5).map(f => (
+                <div key={f.id} className="flex items-center justify-between border-b last:border-0 py-2">
+                  <div><p className="font-bold text-blueberry dark:text-white">{f.icon} {f.name}</p><p className="text-xs text-steel dark:text-light-grey">Số dư: {formatMoney(f.balanceNow)}</p></div>
+                  <div className="text-right">
+                    <p className="text-sm text-turquoise">+{formatMoney(f.contributed)}</p>
+                    {f.withdrawn > 0 && <p className="text-sm text-cotton-candy">-{formatMoney(f.withdrawn)}</p>}
+                    {f.target > 0 && <p className="text-xs text-steel dark:text-light-grey">{Math.round(f.progress)}%</p>}
+                  </div>
+                </div>
+              ))}
+              {fundData.length > 5 && <p className="text-steel dark:text-light-grey text-sm">... và {fundData.length-5} quỹ khác</p>}
+            </div>
+          )}
+        </div>
+
+        <div className="bg-white dark:bg-[#1e1e32] rounded-3xl p-6 shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)] mb-6">
+          <h2 className="text-blueberry dark:text-white font-extrabold text-lg mb-4">Chi tiêu theo danh mục</h2>
+          {expenseBreakdown.length === 0 ? <p className="text-steel dark:text-light-grey">Không có chi tiêu.</p> : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {expenseBreakdown.map(c => {
+                const total = c.fromIncome + c.fromFund;
+                const pct = totalActualExpense > 0 ? Math.round((total / totalActualExpense) * 100) : 0;
+                return (
+                  <button key={c.id} onClick={() => openDrilldown(c.id)} className="bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-left hover:bg-turquoise/10 transition">
+                    <div className="flex justify-between items-center">
+                      <span className="font-bold text-blueberry dark:text-white">{c.icon} {c.name}</span>
+                      <span className="font-bold text-cotton-candy">{formatMoney(total)}</span>
+                    </div>
+                    <div className="w-full h-1.5 bg-light-grey/30 rounded-full mt-1">
+                      <div className="h-full bg-cotton-candy rounded-full" style={{ width: `${Math.min(pct, 100)}%` }} />
+                    </div>
+                    <div className="flex justify-between text-xs text-steel dark:text-light-grey mt-1">
+                      <span>{pct}%</span>
+                      <span>{c.fromIncome > 0 ? `Từ thu nhập: ${formatMoney(c.fromIncome)}` : ''}</span>
+                      <span>{c.fromFund > 0 ? `Từ quỹ: ${formatMoney(c.fromFund)}` : ''}</span>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        <div className="bg-white dark:bg-[#1e1e32] rounded-3xl p-6 shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)] mb-6">
+          <h2 className="text-blueberry dark:text-white font-extrabold text-lg mb-4">So với kỳ trước</h2>
+          <div className="grid grid-cols-4 gap-4">
+            <div><p className="text-steel dark:text-light-grey text-sm">Thu nhập</p><p className="text-xl font-bold">{formatMoney(income)}</p>
+              {prevAgg.income > 0 && <span className={`text-xs ${income >= prevAgg.income ? 'text-turquoise' : 'text-cotton-candy'}`}>{income >= prevAgg.income ? '▲' : '▼'} {Math.abs(Math.round(((income - prevAgg.income)/prevAgg.income)*100))}%</span>}
+            </div>
+            <div><p className="text-steel dark:text-light-grey text-sm">Góp quỹ</p><p className="text-xl font-bold">{formatMoney(allocation)}</p>
+              {prevAgg.allocation > 0 && <span className={`text-xs ${allocation >= prevAgg.allocation ? 'text-turquoise' : 'text-cotton-candy'}`}>{allocation >= prevAgg.allocation ? '▲' : '▼'} {Math.abs(Math.round(((allocation - prevAgg.allocation)/prevAgg.allocation)*100))}%</span>}
+            </div>
+            <div><p className="text-steel dark:text-light-grey text-sm">Chi tiêu</p><p className="text-xl font-bold">{formatMoney(totalActualExpense)}</p>
+              {prevAgg.totalActualExpense > 0 && <span className={`text-xs ${totalActualExpense <= prevAgg.totalActualExpense ? 'text-turquoise' : 'text-cotton-candy'}`}>{totalActualExpense <= prevAgg.totalActualExpense ? '▼' : '▲'} {Math.abs(Math.round(((totalActualExpense - prevAgg.totalActualExpense)/prevAgg.totalActualExpense)*100))}%</span>}
+            </div>
+            <div><p className="text-steel dark:text-light-grey text-sm">Còn lại</p><p className={`text-xl font-bold ${remaining >= 0 ? 'text-turquoise' : 'text-cotton-candy'}`}>{formatMoney(remaining)}</p>
+              {prevAgg.remaining > 0 && <span className={`text-xs ${remaining >= prevAgg.remaining ? 'text-turquoise' : 'text-cotton-candy'}`}>{remaining >= prevAgg.remaining ? '▲' : '▼'} {Math.abs(Math.round(((remaining - prevAgg.remaining)/prevAgg.remaining)*100))}%</span>}
+            </div>
+          </div>
+        </div>
+
+        {(timeType === 'year' || timeType === 'quarter' || timeType === '6month') && trendData.length > 0 && (
+          <div className="bg-white dark:bg-[#1e1e32] rounded-3xl p-6 shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)] mb-6">
+            <h2 className="text-blueberry dark:text-white font-extrabold text-lg mb-4">Xu hướng theo tháng</h2>
+            <div className="h-48 flex items-end gap-2">
+              {trendData.map((d, i) => {
+                const max = Math.max(...trendData.map(t => t.income), 1);
+                const heightInc = (d.income / max) * 100;
+                const heightAlloc = (d.allocation / max) * 100;
+                const heightExp = (d.expenseFromIncome / max) * 100;
+                return (
+                  <div key={i} className="flex-1 flex flex-col items-center">
+                    <div className="w-full flex flex-col items-center justify-end h-full relative">
+                      <div className="absolute bottom-0 w-full flex flex-col items-end" style={{ height: `${heightInc}%` }}>
+                        <div className="w-full bg-turquoise/30 rounded-t-sm" style={{ height: `${heightExp}%` }} />
+                        <div className="w-full bg-turquoise/60 rounded-t-sm" style={{ height: `${heightAlloc}%` }} />
+                        <div className="w-full bg-turquoise rounded-t-sm" style={{ height: `${Math.max(0, heightInc - heightAlloc - heightExp)}%` }} />
+                      </div>
+                    </div>
+                    <span className="text-[10px] text-steel dark:text-light-grey mt-1">{d.label}</span>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="flex gap-4 mt-2 text-xs">
+              <span className="flex items-center gap-1"><span className="w-3 h-3 bg-turquoise rounded" /> Thu nhập</span>
+              <span className="flex items-center gap-1"><span className="w-3 h-3 bg-turquoise/60 rounded" /> Góp quỹ</span>
+              <span className="flex items-center gap-1"><span className="w-3 h-3 bg-turquoise/30 rounded" /> Chi tiêu</span>
+            </div>
+          </div>
+        )}
+
+        <div className="bg-white dark:bg-[#1e1e32] rounded-3xl p-6 shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)] mb-6">
+          <h2 className="text-blueberry dark:text-white font-extrabold text-lg mb-4">Mục tiêu tài chính</h2>
+          {goals.length === 0 ? <p className="text-steel dark:text-light-grey">Chưa có mục tiêu.</p> : (
+            <div className="space-y-3">
+              {goals.slice(0,5).map(g => {
+                const pct = g.target_amount ? Math.min(100, (g.current_amount / g.target_amount) * 100) : 0;
+                return (
+                  <div key={g.id}>
+                    <div className="flex justify-between"><span className="font-bold text-blueberry dark:text-white">{g.name}</span><span className="text-steel dark:text-light-grey">{Math.round(pct)}%</span></div>
+                    <ProgressBar pct={pct} colorClass={g.status === 'Hoàn thành' ? 'bg-turquoise' : 'bg-baby-blue'} />
+                    <div className="flex justify-between text-xs text-steel dark:text-light-grey mt-1">
+                      <span>{formatMoney(g.current_amount || 0)} / {formatMoney(g.target_amount || 0)}</span>
+                      <span>Còn thiếu {formatMoney(Math.max(0, (g.target_amount||0) - (g.current_amount||0)))}</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        <div className="bg-white dark:bg-[#1e1e32] rounded-3xl p-6 shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)] mb-6">
+          <h2 className="text-blueberry dark:text-white font-extrabold text-lg mb-4">Nhận xét {periodLabel}</h2>
+          {insights.length === 0 ? <p className="text-steel dark:text-light-grey">Chưa có nhận xét.</p> : (
+            <div className="grid grid-cols-2 gap-4">
+              {insights.map((ins, i) => (
+                <div key={i} className="flex items-start gap-3 bg-ice-cream dark:bg-night-sky rounded-xl p-4">
+                  <ins.icon size={20} className={`${ins.color} flex-shrink-0`} />
+                  <div><p className="font-bold text-blueberry dark:text-white">{ins.title}</p><p className="text-steel dark:text-light-grey text-sm">{ins.desc}</p></div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {showDrilldown && drilldownCategory && (
+          <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={() => setShowDrilldown(false)}>
+            <div className="bg-white dark:bg-[#1e1e32] w-full max-w-md rounded-3xl p-6 max-h-[80vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+              <div className="flex justify-between items-center mb-4">
+                <h3 className="font-bold text-blueberry dark:text-white">Chi tiết "{drilldownCategory.name}"</h3>
+                <button onClick={() => setShowDrilldown(false)}><X size={18} className="text-steel dark:text-light-grey" /></button>
+              </div>
+              {drilldownTransactions.length === 0 ? <p className="text-steel dark:text-light-grey">Không có giao dịch.</p> : (
+                <div className="space-y-2">
+                  {drilldownTransactions.map(tx => (
+                    <div key={tx.id} className="flex justify-between border-b py-2">
+                      <div>
+                        <p className="text-sm text-blueberry dark:text-white">{new Date(tx.date || tx.created_at).toLocaleDateString('vi-VN')}</p>
+                        <p className="text-xs text-steel dark:text-light-grey">{stripPeriodTag(tx.note) || 'Không có ghi chú'}</p>
+                      </div>
+                      <span className="font-bold text-cotton-candy">{formatMoney(tx.amount)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
+/* ==============================================================================
+   17. MAIN APP
    ============================================================================== */
 function MainApp({ user, theme, toggleTheme }) {
   const [screen, setScreen] = useState('dashboard');
@@ -3863,27 +4781,87 @@ function MainApp({ user, theme, toggleTheme }) {
   const [accountReturnScreen, setAccountReturnScreen] = useState('accounts');
   function openAccount(id, from = 'accounts') { setSelectedAccountId(id); setAccountReturnScreen(from); setScreen('account-detail'); }
 
-  if (screen === 'fund-detail') {
-    const cat = categories.find((c) => c.id === selectedFundId);
-    if (!cat) { setScreen('dashboard'); return null; }
-    return <><FundDetail category={cat} transactions={transactions} onBack={() => setScreen(fundReturnScreen)} reload={loadAll} softDelete={softDelete} setScreen={setScreen} onAddClick={() => setShowAdd(true)} displayName={displayName} avatarUrl={avatarUrl} theme={theme} toggleTheme={toggleTheme} openSettings={goToSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} />{showAdd && <AddTransaction onClose={() => setShowAdd(false)} accounts={accounts} categories={categories} transactions={transactions} onSaved={loadAll} />}</>;
+  // Helper to render screen content inside layout
+  function renderScreenContent() {
+    if (screen === 'fund-detail') {
+      const cat = categories.find((c) => c.id === selectedFundId);
+      if (!cat) { setScreen('dashboard'); return null; }
+      return <FundDetail category={cat} transactions={transactions} onBack={() => setScreen(fundReturnScreen)} reload={loadAll} softDelete={softDelete} setScreen={setScreen} onAddClick={() => setShowAdd(true)} displayName={displayName} avatarUrl={avatarUrl} theme={theme} toggleTheme={toggleTheme} openSettings={goToSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} />;
+    }
+    if (screen === 'account-detail') {
+      const acc = accounts.find((a) => a.id === selectedAccountId);
+      if (!acc) { setScreen('accounts'); return null; }
+      return <AccountDetail account={acc} transactions={transactions} categories={categories} onBack={() => setScreen(accountReturnScreen)} reload={loadAll} softDelete={softDelete} setScreen={setScreen} onAddClick={() => setShowAdd(true)} displayName={displayName} avatarUrl={avatarUrl} theme={theme} toggleTheme={toggleTheme} openSettings={goToSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} />;
+    }
+    if (screen === 'funds') return <Funds setScreen={setScreen} categories={categories} transactions={transactions} onOpenFund={openFund} reload={loadAll} onAddClick={() => setShowAdd(true)} displayName={displayName} avatarUrl={avatarUrl} theme={theme} toggleTheme={toggleTheme} openSettings={goToSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} />;
+    if (screen === 'goals') return <Goals setScreen={setScreen} goals={goals} loadingGoals={loadingGoals} reload={loadAll} softDelete={softDelete} onAddClick={() => setShowAdd(true)} displayName={displayName} avatarUrl={avatarUrl} theme={theme} toggleTheme={toggleTheme} openSettings={goToSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} />;
+    if (screen === 'accounts') return <Accounts setScreen={setScreen} accounts={accounts} transactions={transactions} onOpenAccount={openAccount} reload={loadAll} onAddClick={() => setShowAdd(true)} displayName={displayName} avatarUrl={avatarUrl} theme={theme} toggleTheme={toggleTheme} openSettings={goToSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} />;
+    if (screen === 'settings') return <Settings setScreen={setScreen} categories={categories} accounts={accounts} reload={loadAll} softDelete={softDelete} user={currentUser} onProfileUpdated={refreshUser} onAddClick={() => setShowAdd(true)} theme={theme} toggleTheme={toggleTheme} initialSection={settingsSection} openSettings={goToSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} onResetData={resetAllData} resettingData={resettingData} logs={logs} logActivity={logActivity} restoreLog={restoreLog} />;
+    if (screen === 'report') return <Report setScreen={setScreen} transactions={transactions} categories={categories} accounts={accounts} goals={goals} onAddClick={() => setShowAdd(true)} displayName={displayName} avatarUrl={avatarUrl} theme={theme} toggleTheme={toggleTheme} openSettings={goToSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} />;
+    // Dashboard default
+    return <Dashboard setScreen={setScreen} transactions={transactions} categories={categories} accounts={accounts} goals={goals} loading={loading} displayName={displayName} avatarUrl={avatarUrl} onAddClick={() => setShowAdd(true)} theme={theme} toggleTheme={toggleTheme} onOpenFund={openFund} onOpenAccount={openAccount} reload={loadAll} openSettings={goToSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} />;
   }
-  if (screen === 'account-detail') {
-    const acc = accounts.find((a) => a.id === selectedAccountId);
-    if (!acc) { setScreen('accounts'); return null; }
-    return <><AccountDetail account={acc} transactions={transactions} categories={categories} onBack={() => setScreen(accountReturnScreen)} reload={loadAll} softDelete={softDelete} setScreen={setScreen} onAddClick={() => setShowAdd(true)} displayName={displayName} avatarUrl={avatarUrl} theme={theme} toggleTheme={toggleTheme} openSettings={goToSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} />{showAdd && <AddTransaction onClose={() => setShowAdd(false)} accounts={accounts} categories={categories} transactions={transactions} onSaved={loadAll} />}</>;
-  }
-  if (screen === 'funds') return <><Funds setScreen={setScreen} categories={categories} transactions={transactions} onOpenFund={openFund} reload={loadAll} onAddClick={() => setShowAdd(true)} displayName={displayName} avatarUrl={avatarUrl} theme={theme} toggleTheme={toggleTheme} openSettings={goToSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} />{showAdd && <AddTransaction onClose={() => setShowAdd(false)} accounts={accounts} categories={categories} transactions={transactions} onSaved={loadAll} />}</>;
-  if (screen === 'goals') return <><Goals setScreen={setScreen} goals={goals} loadingGoals={loadingGoals} reload={loadAll} softDelete={softDelete} onAddClick={() => setShowAdd(true)} displayName={displayName} avatarUrl={avatarUrl} theme={theme} toggleTheme={toggleTheme} openSettings={goToSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} />{showAdd && <AddTransaction onClose={() => setShowAdd(false)} accounts={accounts} categories={categories} transactions={transactions} onSaved={loadAll} />}</>;
-  if (screen === 'accounts') return <><Accounts setScreen={setScreen} accounts={accounts} transactions={transactions} onOpenAccount={openAccount} reload={loadAll} onAddClick={() => setShowAdd(true)} displayName={displayName} avatarUrl={avatarUrl} theme={theme} toggleTheme={toggleTheme} openSettings={goToSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} />{showAdd && <AddTransaction onClose={() => setShowAdd(false)} accounts={accounts} categories={categories} transactions={transactions} onSaved={loadAll} />}</>;
-  if (screen === 'settings') return <><Settings setScreen={setScreen} categories={categories} accounts={accounts} reload={loadAll} softDelete={softDelete} user={currentUser} onProfileUpdated={refreshUser} onAddClick={() => setShowAdd(true)} theme={theme} toggleTheme={toggleTheme} initialSection={settingsSection} openSettings={goToSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} onResetData={resetAllData} resettingData={resettingData} logs={logs} logActivity={logActivity} restoreLog={restoreLog} />{showAdd && <AddTransaction onClose={() => setShowAdd(false)} accounts={accounts} categories={categories} transactions={transactions} onSaved={loadAll} />}</>;
-  return <><Dashboard setScreen={setScreen} transactions={transactions} categories={categories} accounts={accounts} goals={goals} loading={loading} displayName={displayName} avatarUrl={avatarUrl} onAddClick={() => setShowAdd(true)} theme={theme} toggleTheme={toggleTheme} onOpenFund={(id) => openFund(id, 'dashboard')} onOpenAccount={openAccount} reload={loadAll} openSettings={goToSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} />{showAdd && <AddTransaction onClose={() => setShowAdd(false)} accounts={accounts} categories={categories} transactions={transactions} onSaved={loadAll} />}</>;
+
+  // Layout wrapper — true flex-row App Shell (Sidebar is a real flex item,
+  // no fixed positioning / margin-left offset hack).
+  return (
+    <div className="flex w-full min-h-[100dvh] bg-ice-cream dark:bg-[#1a1a2e]">
+      {/* Sidebar Desktop — flex item, flex-shrink: 0 */}
+      <SidebarDesktop
+        screen={screen}
+        setScreen={setScreen}
+        sidebarCollapsed={sidebarCollapsed}
+        toggleSidebar={toggleSidebar}
+        theme={theme}
+        toggleTheme={toggleTheme}
+      />
+
+      {/* AppBody — flex: 1, min-width: 0 so it never gets pushed wider than the viewport */}
+      <div className="flex-1 flex flex-col min-w-0 w-full">
+        {/* Desktop Header — width: 100%, no manual offset math */}
+        <HeaderDesktop
+          onAddClick={() => setShowAdd(true)}
+          displayName={displayName}
+          avatarUrl={avatarUrl}
+          theme={theme}
+          toggleTheme={toggleTheme}
+          openSettings={goToSettings}
+        />
+
+        {/* MainContent — width: 100%, min-width: 0 */}
+        <main className="flex-1 min-w-0 w-full overflow-y-auto overflow-x-hidden p-4 md:p-6">
+          {renderScreenContent()}
+        </main>
+      </div>
+
+      {/* Mobile BottomNav */}
+      <BottomNavMobile
+        screen={screen}
+        setScreen={setScreen}
+        onAddClick={() => setShowAdd(true)}
+        theme={theme}
+        toggleTheme={toggleTheme}
+      />
+
+      {/* AddTransaction Modal - rendered globally */}
+      {showAdd && (
+        <AddTransaction
+          onClose={() => setShowAdd(false)}
+          accounts={accounts}
+          categories={categories}
+          transactions={transactions}
+          onSaved={loadAll}
+        />
+      )}
+    </div>
+  );
 }
 
 /* ==============================================================================
-   17. ROOT APP
+   18. ROOT APP
    ============================================================================== */
-const AUTH_BG_IMAGE = '';
+const AUTH_BG_DESKTOP = 'images/hk.jpg'; // Set your desktop background image URL here
+const AUTH_BG_MOBILE = 'images/hk2.jpg';   // Set your mobile background image URL here
 
 function AuthScreen() {
   const [mode, setMode] = useState('signup');
@@ -3929,44 +4907,32 @@ function AuthScreen() {
     setLoading(false);
   }
 
-  const fieldClass = "w-full bg-white/55 border border-white/70 rounded-full py-3.5 text-sm text-black placeholder:text-black/45 outline-none focus:border-white focus:bg-white/75 transition font-semibold";
+  const fieldClass = "glass-input w-full rounded-full py-3.5 text-sm text-black placeholder:text-black/45 outline-none transition font-semibold";
 
   return (
-    <div className="min-h-screen relative overflow-hidden flex items-center justify-center px-4 sm:px-6 py-10">
+    <div className="min-h-[100dvh] relative overflow-hidden flex items-center justify-center px-4 sm:px-6 py-10">
       <div className="absolute inset-0">
-        {AUTH_BG_IMAGE ? (
-          <>
-            <img src={AUTH_BG_IMAGE} alt="" className="w-full h-full object-cover" />
-            <div className="absolute inset-0 bg-black/35" />
-          </>
-        ) : (
-          <>
-            <div className="w-full h-full bg-gradient-to-br from-turquoise via-baby-blue to-lavender" />
-            <div className="absolute inset-0 bg-gradient-to-br from-turquoise/50 via-baby-blue/30 to-lavender/50" />
-          </>
-        )}
+        <picture>
+          <source media="(max-width: 767px)" srcSet={AUTH_BG_MOBILE} />
+          <img src={AUTH_BG_DESKTOP} alt="" className="w-full h-full object-cover" />
+        </picture>
+        <div className="absolute inset-0 bg-black/35" />
       </div>
       <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-[600px] h-[350px] rounded-full bg-cotton-candy/20 blur-[120px]" />
       <div className="absolute top-10 right-10 w-64 h-64 rounded-full bg-white/15 blur-3xl" />
       <div className="absolute -top-20 -left-20 w-72 h-72 rounded-full bg-turquoise-light/25 blur-3xl" />
       <div className="absolute bottom-10 -right-16 w-60 h-60 rounded-full bg-lavender-light/25 blur-3xl" />
 
-      <div className="relative w-full max-w-sm">
+      <div className="relative w-full max-w-[390px]">
         <div
-          className="relative rounded-[1.75rem] overflow-hidden bg-white/40 backdrop-blur-[42px] backdrop-saturate-[180%] border border-white/80 p-6"
-          style={{ boxShadow: 'inset 0 2px 1px rgba(255,255,255,0.9), inset 0 -2px 24px rgba(255,255,255,0.3), inset 0 0 50px rgba(255,255,255,0.12), 0 30px 70px -10px rgba(48,49,80,0.5)' }}
+          className="glass-surface relative rounded-[1.75rem] overflow-hidden p-6"
         >
-          <div className="pointer-events-none absolute inset-0 z-0 bg-gradient-to-b from-white/65 via-white/10 to-transparent" />
-          <div className="pointer-events-none absolute -top-24 -left-20 z-0 w-64 h-64 rounded-full bg-white/55 blur-3xl" />
-          <div className="pointer-events-none absolute -bottom-28 -right-16 z-0 w-60 h-60 rounded-full bg-turquoise/30 blur-3xl" />
-          <div className="pointer-events-none absolute top-1/3 -right-14 z-0 w-40 h-40 rounded-full bg-cotton-candy/25 blur-3xl" />
-          <div className="pointer-events-none absolute bottom-1/4 -left-14 z-0 w-36 h-36 rounded-full bg-lavender/20 blur-3xl" />
-          <div className="pointer-events-none absolute -top-1/2 -left-1/4 z-0 w-[140%] h-[80%] rotate-[-18deg] bg-gradient-to-b from-white/55 via-white/0 to-transparent" />
-          <div className="pointer-events-none absolute -bottom-1/3 -right-1/4 z-0 w-[100%] h-[60%] rotate-[-18deg] bg-gradient-to-t from-white/25 via-white/0 to-transparent" />
-          <div className="pointer-events-none absolute inset-x-0 top-0 z-0 h-px bg-gradient-to-r from-transparent via-white to-transparent" />
+          {/* Subtle top highlight only — a real pane of glass, not a white box */}
+          <div className="pointer-events-none absolute inset-0 z-0 bg-gradient-to-b from-white/25 via-white/0 to-transparent" />
+          <div className="pointer-events-none absolute inset-x-0 top-0 z-0 h-px bg-gradient-to-r from-transparent via-white/70 to-transparent" />
 
           <div className="relative z-10">
-          <div className="flex bg-white/40 border border-white/60 rounded-full p-1 mb-5">
+          <div className="flex bg-white/18 border border-white/25 rounded-full p-1 mb-5">
             <button
               onClick={() => switchMode('signup')}
               className={`flex-1 py-2 rounded-full text-sm font-bold transition ${mode === 'signup' ? 'bg-gradient-primary text-white shadow' : 'text-blueberry/70'}`}>
@@ -3988,11 +4954,11 @@ function AuthScreen() {
               <div className="flex gap-3">
                 <input
                   value={firstName} onChange={(e) => setFirstName(e.target.value)}
-                  placeholder="Tên" className="w-1/2 bg-white/55 border border-white/70 rounded-full px-5 py-3.5 text-sm text-black placeholder:text-black/45 outline-none focus:border-white focus:bg-white/75 transition font-semibold"
+                  placeholder="Tên" className="glass-input w-1/2 rounded-full px-5 py-3.5 text-sm text-black placeholder:text-black/45 outline-none transition font-semibold"
                 />
                 <input
                   value={lastName} onChange={(e) => setLastName(e.target.value)}
-                  placeholder="Họ" className="w-1/2 bg-white/55 border border-white/70 rounded-full px-5 py-3.5 text-sm text-black placeholder:text-black/45 outline-none focus:border-white focus:bg-white/75 transition font-semibold"
+                  placeholder="Họ" className="glass-input w-1/2 rounded-full px-5 py-3.5 text-sm text-black placeholder:text-black/45 outline-none transition font-semibold"
                 />
               </div>
             )}
@@ -4072,8 +5038,6 @@ export default function App() {
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', theme === 'dark');
-    // Ép các phần tử gốc trình duyệt (scrollbar, input, select, date picker...)
-    // theo đúng theme app đã chọn, không để chúng tự lấy theo theme hệ thống
     document.documentElement.style.colorScheme = theme === 'dark' ? 'dark' : 'light';
     localStorage.setItem('theme', theme);
   }, [theme]);
@@ -4088,7 +5052,7 @@ export default function App() {
   }, []);
 
   if (session === undefined) {
-    return <div className="min-h-screen flex items-center justify-center bg-ice-cream dark:bg-[#1a1a2e]"><Loader2 size={28} className="animate-spin text-turquoise" /></div>;
+    return <div className="min-h-[100dvh] flex items-center justify-center bg-ice-cream dark:bg-[#1a1a2e]"><Loader2 size={28} className="animate-spin text-turquoise" /></div>;
   }
   if (!session) return <AuthScreen />;
   return <MainApp user={session.user} theme={theme} toggleTheme={toggleTheme} />;
