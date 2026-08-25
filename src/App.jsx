@@ -5,11 +5,13 @@ import { useState, useEffect, useRef, Fragment } from 'react';
 import { supabase } from './supabaseClient';
 import {
   Home, Sparkles, Plus, BarChart3, Settings as SettingsIcon, TrendingUp, TrendingDown, PiggyBank, HeartPulse,
-  ArrowLeft, Download, X, Check, Loader2, Target, Wallet, Trash2, Pencil, LogOut, Mail, Lock, Search, Bell, Sun, Moon,
+  ArrowLeft, Download, X, Check, Loader2, Target, Wallet, Trash2, Pencil, LogOut, Mail, Lock, Search, Bell, Sun, Moon, User,
   Filter, MoreHorizontal, Eye, EyeOff, LayoutGrid, List, ArrowUpDown, Calendar, Clock, Star,
   ChevronDown, ChevronRight, ChevronLeft, Camera, KeyRound, UserCog, SlidersHorizontal,
-  AlertTriangle, Info, PieChart, LineChart, BarChart, CircleDollarSign, FileText
+  AlertTriangle, Info, PieChart, LineChart, BarChart, CircleDollarSign, FileText, SendHorizontal
 } from 'lucide-react';
+import ReactCrop from 'react-image-crop';
+import 'react-image-crop/dist/ReactCrop.css';
 
 /* ==============================================================================
    02. CUSTOM STYLES (Fincheck palette + ẩn scrollbar)
@@ -165,6 +167,159 @@ const NAV_ITEMS = [
   { key: 'report', icon: BarChart3, label: 'Báo cáo' },
   { key: 'settings', icon: SettingsIcon, label: 'Cài đặt' },
 ];
+
+/* ==============================================================================
+   03B. SHARED HOOKS — dùng chung toàn app
+   ============================================================================== */
+// Đóng dropdown/menu khi nhấn ESC. Việc đóng khi click ra ngoài đã được xử lý
+// riêng ở từng nơi gọi (thường bằng 1 lớp overlay fixed inset-0), hook này
+// chỉ bổ sung phần ESC cho đồng bộ hành vi trên toàn app.
+function useCloseOnEscape(isOpen, onClose) {
+  useEffect(() => {
+    if (!isOpen) return;
+    function handleKey(e) {
+      if (e.key === 'Escape') onClose();
+    }
+    document.addEventListener('keydown', handleKey);
+    return () => document.removeEventListener('keydown', handleKey);
+  }, [isOpen, onClose]);
+}
+
+/* ==============================================================================
+   03C. IMAGE UPLOADER / IMAGE EDITOR — dùng chung toàn app
+   ------------------------------------------------------------------------------
+   Component dùng chung cho MỌI nơi trong app cho phép upload ảnh (avatar,
+   banner, ảnh card, ...). Flow chuẩn: chọn ảnh → mở editor (crop/zoom/pan) →
+   preview → xác nhận → callback trả về file ảnh đã crop để nơi gọi tự upload.
+
+   Props:
+   - aspectRatio: "1:1" | "16:9" | "4:3" | ... (mặc định "1:1")
+   - circularCrop: bool — hiển thị khung crop tròn (dùng cho avatar)
+   - value: url ảnh hiện tại để hiển thị preview nhỏ (không bắt buộc)
+   - onConfirm(file): được gọi với File ảnh đã crop khi người dùng bấm "Lưu"
+   - uploading: bool — disable nút chọn ảnh khi đang upload
+   - renderTrigger({ open, uploading }): tuỳ biến nút/khu vực trigger chọn ảnh;
+     nếu không truyền, dùng nút mặc định dạng pill có icon Camera.
+   - triggerClassName / triggerLabel: tuỳ biến nhanh nút mặc định
+   ============================================================================== */
+function parseAspectRatio(aspectRatio) {
+  if (typeof aspectRatio === 'number') return aspectRatio;
+  const [w, h] = String(aspectRatio || '1:1').split(':').map(Number);
+  if (!w || !h) return 1;
+  return w / h;
+}
+
+function ImageUploader({
+  aspectRatio = '1:1',
+  circularCrop = false,
+  uploading = false,
+  onConfirm,
+  renderTrigger,
+  triggerClassName = 'bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-2.5 text-sm text-blueberry dark:text-white font-semibold cursor-pointer hover:bg-turquoise/10 transition flex items-center gap-2',
+  triggerLabel = 'Đổi ảnh',
+}) {
+  const ratio = parseAspectRatio(aspectRatio);
+  const [showEditor, setShowEditor] = useState(false);
+  const [imgSrc, setImgSrc] = useState(null);
+  const [crop, setCrop] = useState({ unit: '%', width: 80, aspect: ratio });
+  const [zoom, setZoom] = useState(1);
+  const imageRef = useRef(null);
+  const inputRef = useRef(null);
+
+  function onSelectFile(e) {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // cho phép chọn lại cùng 1 file lần sau
+    if (!file) return;
+    const reader = new FileReader();
+    reader.addEventListener('load', () => {
+      setImgSrc(reader.result);
+      setZoom(1);
+      setCrop({ unit: '%', width: 80, x: 10, y: 10, aspect: ratio });
+      setShowEditor(true);
+    });
+    reader.readAsDataURL(file);
+  }
+
+  function handleCancel() {
+    setShowEditor(false);
+    setImgSrc(null);
+    setZoom(1);
+  }
+
+  function handleConfirm() {
+    if (!imageRef.current || !crop.width || !crop.height) return;
+    const canvas = document.createElement('canvas');
+    const image = imageRef.current;
+    const scaleX = image.naturalWidth / image.width;
+    const scaleY = image.naturalHeight / image.height;
+    const cropX = crop.x * scaleX;
+    const cropY = crop.y * scaleY;
+    const cropWidth = crop.width * scaleX;
+    const cropHeight = crop.height * scaleY;
+    canvas.width = cropWidth;
+    canvas.height = cropHeight;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(image, cropX, cropY, cropWidth, cropHeight, 0, 0, cropWidth, cropHeight);
+    canvas.toBlob((blob) => {
+      if (!blob) return;
+      const file = new File([blob], 'image.jpg', { type: 'image/jpeg' });
+      onConfirm && onConfirm(file);
+      setShowEditor(false);
+      setImgSrc(null);
+      setZoom(1);
+    }, 'image/jpeg', 0.92);
+  }
+
+  return (
+    <>
+      {renderTrigger ? (
+        renderTrigger({ open: () => inputRef.current?.click(), uploading })
+      ) : (
+        <label className={triggerClassName}>
+          {uploading ? <Loader2 size={14} className="animate-spin" /> : <Camera size={14} />} {uploading ? 'Đang tải...' : triggerLabel}
+          <input ref={inputRef} type="file" accept="image/*" onChange={onSelectFile} className="hidden" disabled={uploading} />
+        </label>
+      )}
+      {/* Trigger ẩn để renderTrigger tuỳ biến vẫn dùng chung 1 input file */}
+      {renderTrigger && (
+        <input ref={inputRef} type="file" accept="image/*" onChange={onSelectFile} className="hidden" disabled={uploading} />
+      )}
+
+      {showEditor && imgSrc && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onClick={handleCancel}>
+          <div className="bg-white dark:bg-[#1e1e32] rounded-3xl p-6 max-w-md w-full" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-blueberry dark:text-white font-bold text-lg mb-3">Cắt ảnh</h3>
+            {/* overflow-auto cho phép kéo/pan ảnh khi ảnh lớn hơn khung xem sau khi zoom */}
+            <div className="flex items-center justify-center bg-ice-cream dark:bg-night-sky rounded-2xl overflow-auto max-h-[50vh]">
+              <ReactCrop crop={crop} onChange={setCrop} aspect={ratio} circularCrop={circularCrop} keepSelection>
+                <img
+                  ref={imageRef}
+                  src={imgSrc}
+                  alt="Crop"
+                  className="select-none"
+                  style={{ width: `${zoom * 100}%`, maxWidth: 'none', height: 'auto' }}
+                  draggable={false}
+                />
+              </ReactCrop>
+            </div>
+            <div className="flex items-center gap-3 mt-4">
+              <span className="text-xs text-steel dark:text-light-grey font-semibold flex-shrink-0">Zoom</span>
+              <input
+                type="range" min="1" max="3" step="0.05" value={zoom}
+                onChange={(e) => setZoom(Number(e.target.value))}
+                className="flex-1 accent-turquoise"
+              />
+            </div>
+            <div className="flex gap-3 mt-4">
+              <button onClick={handleCancel} className="flex-1 py-2.5 rounded-full text-sm font-bold text-steel dark:text-light-grey bg-ice-cream dark:bg-[#2a2a44]">Huỷ</button>
+              <button onClick={handleConfirm} className="flex-1 py-2.5 rounded-full text-sm font-bold text-white bg-gradient-primary shadow-md shadow-turquoise/30">Lưu ảnh</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
 
 const FUND_CARD_GRADIENTS = [
   'linear-gradient(135deg, #B4F1F1, #C1DDFF)',
@@ -807,6 +962,7 @@ function SidebarDesktop({ screen, setScreen, sidebarCollapsed, toggleSidebar, th
 function HeaderDesktop({ onAddClick, displayName, avatarUrl, theme, toggleTheme, openSettings }) {
   const [showMenu, setShowMenu] = useState(false);
   const [search, setSearch] = useState('');
+  useCloseOnEscape(showMenu, () => setShowMenu(false));
 
   async function handleLogout() {
     setShowMenu(false);
@@ -872,7 +1028,88 @@ function HeaderDesktop({ onAddClick, displayName, avatarUrl, theme, toggleTheme,
   );
 }
 
-function BottomNavMobile({ screen, setScreen, onAddClick, theme, toggleTheme }) {
+function BottomNavMobile({ screen, setScreen, onAddClick, theme, toggleTheme, openSettings }) {
+  // "Quản lý" (funds / accounts / goals) floating glass sub-menu
+  const [manageOpen, setManageOpen] = useState(false);
+  const [manageMounted, setManageMounted] = useState(false);
+  const [quickMenuOpen, setQuickMenuOpen] = useState(false);
+  const navWrapRef = useRef(null);
+
+  const isManageActive = screen === 'funds' || screen === 'accounts' || screen === 'goals';
+
+  // Mount for enter animation, keep mounted briefly for exit animation (transform/opacity only — no layout shift)
+  useEffect(() => {
+    let t;
+    if (manageOpen) {
+      setManageMounted(true);
+    } else if (manageMounted) {
+      t = setTimeout(() => setManageMounted(false), 220);
+    }
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [manageOpen]);
+
+  // Click/tap outside the whole nav complex closes the menu
+  useEffect(() => {
+    if (!manageOpen) return;
+    function handleOutside(e) {
+      if (navWrapRef.current && !navWrapRef.current.contains(e.target)) {
+        setManageOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handleOutside);
+    document.addEventListener('touchstart', handleOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleOutside);
+      document.removeEventListener('touchstart', handleOutside);
+    };
+  }, [manageOpen]);
+
+  function go(nextScreen) {
+    setManageOpen(false);
+    setQuickMenuOpen(false);
+    setScreen(nextScreen);
+  }
+
+  function handleAdd() {
+    setManageOpen(false);
+    setQuickMenuOpen(true);
+  }
+
+  function handleProfile() {
+    setManageOpen(false);
+    setQuickMenuOpen(false);
+    if (openSettings) openSettings('profile');
+    else setScreen('settings');
+  }
+
+  const manageItems = [
+    { key: 'funds', label: 'Quản lý quỹ', sub: 'Theo dõi các quỹ', icon: PiggyBank },
+    { key: 'accounts', label: 'Quản lý ví', sub: 'Theo dõi tài khoản / ví', icon: Wallet },
+    { key: 'goals', label: 'Quản lý mục tiêu', sub: 'Theo dõi tiến độ mục tiêu', icon: Target },
+  ];
+
+  const NavIcon = ({ icon: Icon, label, active, onClick }) => (
+    <button
+      onClick={onClick}
+      className="relative flex flex-col items-center justify-center gap-1 w-12 py-1 active:scale-90 transition-transform duration-150"
+    >
+      {active && (
+        <span
+          className="absolute -top-1 w-1 h-1 rounded-full"
+          style={{ background: '#0DBACC', boxShadow: '0 0 8px 1px rgba(13,186,204,0.8)' }}
+        />
+      )}
+      <Icon size={20} strokeWidth={2.1} style={{ color: active ? '#0DBACC' : 'rgba(255,255,255,0.72)' }} />
+      <span
+        className="text-[10px] font-bold leading-none"
+        style={{ color: active ? '#0DBACC' : 'rgba(255,255,255,0.55)' }}
+      >
+        {label}
+      </span>
+    </button>
+  );
+
   return (
     <>
       {/* Theme toggle button on mobile */}
@@ -880,28 +1117,145 @@ function BottomNavMobile({ screen, setScreen, onAddClick, theme, toggleTheme }) 
         {theme === 'dark' ? <Sun size={17} className="text-turquoise" /> : <Moon size={17} className="text-blueberry" />}
       </button>
 
-      {/* Bottom navigation */}
+      {/* Floating Curved Liquid Glass Bottom Navigation */}
       <div
-        className="fixed bottom-4 left-1/2 -translate-x-1/2 w-[calc(100%-1.5rem)] max-w-[380px] rounded-full px-5 py-3 flex items-center justify-between z-10 md:hidden bg-white/30 dark:bg-[#1e1e32]/45 backdrop-blur-[30px] backdrop-saturate-[200%] border border-white/70 dark:border-white/10"
-        style={{ boxShadow: 'inset 0 1.5px 1px rgba(255,255,255,0.85), inset 0 -1px 12px rgba(255,255,255,0.2), 0 15px 40px -8px rgba(48,49,80,0.35)' }}
+        ref={navWrapRef}
+        className="fixed left-1/2 z-20 md:hidden"
+        style={{
+          transform: 'translateX(-50%)',
+          bottom: 'calc(env(safe-area-inset-bottom, 0px) + 12px)',
+          width: 'calc(100% - 28px)',
+          maxWidth: '430px',
+        }}
       >
-        <div className="pointer-events-none absolute inset-0 z-0 rounded-full overflow-hidden">
-          <div className="absolute inset-0 bg-gradient-to-b from-white/50 dark:from-white/10 via-white/5 dark:via-white/0 to-transparent" />
-          <div className="absolute -top-8 left-6 w-20 h-20 rounded-full bg-white/50 dark:bg-white/10 blur-2xl" />
-          <div className="absolute -bottom-8 right-10 w-16 h-16 rounded-full bg-turquoise/25 blur-2xl" />
-        </div>
+        <div className="relative">
 
-        <div className="relative z-10 flex items-center gap-4">
-          <button onClick={() => setScreen('dashboard')}><Home size={19} className={screen === 'dashboard' ? 'text-turquoise' : 'text-light-grey'} /></button>
-          <button onClick={() => setScreen('funds')}><PiggyBank size={19} className={screen === 'funds' ? 'text-turquoise' : 'text-light-grey'} /></button>
-          <button onClick={() => setScreen('report')}><BarChart3 size={19} className={screen === 'report' ? 'text-turquoise' : 'text-light-grey'} /></button>
-        </div>
-        <button onClick={onAddClick} className="relative z-10 w-11 h-11 rounded-full bg-gradient-primary flex items-center justify-center -mt-6 shadow-lg shadow-turquoise/30 flex-shrink-0">
-          <Plus size={20} className="text-white" />
-        </button>
-        <div className="relative z-10 flex items-center gap-4">
-          <button onClick={() => setScreen('accounts')}><Wallet size={19} className={screen === 'accounts' ? 'text-turquoise' : 'text-light-grey'} /></button>
-          <button onClick={() => setScreen('goals')}><Sparkles size={19} className={screen === 'goals' ? 'text-turquoise' : 'text-light-grey'} /></button>
+          {/* Floating "Quản lý" glass popup menu */}
+          {manageMounted && (
+            <div
+              className="absolute left-1 bottom-[86px] w-[240px] max-w-[80%] rounded-[22px] overflow-hidden transition-all ease-out"
+              style={{
+                transitionDuration: '220ms',
+                transformOrigin: 'bottom left',
+                opacity: manageOpen ? 1 : 0,
+                transform: manageOpen ? 'translateY(0) scale(1)' : 'translateY(12px) scale(0.96)',
+                pointerEvents: manageOpen ? 'auto' : 'none',
+                background: 'rgba(25,27,48,0.72)',
+                backdropFilter: 'blur(24px) saturate(160%)',
+                WebkitBackdropFilter: 'blur(24px) saturate(160%)',
+                border: '1px solid rgba(255,255,255,0.12)',
+                boxShadow: '0 20px 50px rgba(0,0,0,0.35), 0 0 30px -8px rgba(13,186,204,0.20), inset 0 1px 0 rgba(255,255,255,0.16)',
+              }}
+            >
+              {/* subtle color reflections, purely decorative */}
+              <div className="pointer-events-none absolute -top-10 -left-6 w-24 h-24 rounded-full bg-turquoise/20 blur-2xl" />
+              <div className="pointer-events-none absolute -bottom-10 -right-6 w-24 h-24 rounded-full bg-lavender/25 blur-2xl" />
+              <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/40 to-transparent" />
+
+              <div className="relative px-3.5 pt-3.5 pb-2.5">
+                <p className="text-[11px] font-extrabold tracking-wide mb-2 px-1" style={{ color: 'rgba(255,255,255,0.95)' }}>
+                  Quản lý tài chính
+                </p>
+                <div className="flex flex-col gap-0.5">
+                  {manageItems.map(({ key, label, sub, icon: Icon }) => (
+                    <button
+                      key={key}
+                      onClick={() => go(key)}
+                      className="flex items-center gap-2.5 px-1.5 py-2 rounded-2xl text-left hover:bg-white/[0.06] active:scale-[0.98] transition"
+                    >
+                      <span
+                        className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0"
+                        style={{ background: 'linear-gradient(135deg, rgba(13,186,204,0.25), rgba(159,127,224,0.25))', border: '1px solid rgba(255,255,255,0.14)' }}
+                      >
+                        <Icon size={16} style={{ color: screen === key ? '#0DBACC' : '#B88CFF' }} />
+                      </span>
+                      <span className="min-w-0">
+                        <span className="block text-[13px] font-bold leading-tight" style={{ color: 'rgba(255,255,255,0.95)' }}>{label}</span>
+                        <span className="block text-[11px] leading-tight truncate" style={{ color: 'rgba(255,255,255,0.60)' }}>{sub}</span>
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Quick action menu (from + button) */}
+          {quickMenuOpen && (
+            <div
+              className="absolute left-1/2 -translate-x-1/2 bottom-[86px] w-[220px] rounded-[22px] overflow-hidden transition-all ease-out"
+              style={{
+                background: 'rgba(25,27,48,0.80)',
+                backdropFilter: 'blur(24px) saturate(160%)',
+                WebkitBackdropFilter: 'blur(24px) saturate(160%)',
+                border: '1px solid rgba(255,255,255,0.12)',
+                boxShadow: '0 20px 50px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.16)',
+                padding: '10px 0',
+              }}
+            >
+              <button onClick={() => { setQuickMenuOpen(false); onAddClick('income'); }} className="w-full flex items-center gap-3 px-5 py-2.5 text-white hover:bg-white/10 transition">
+                <TrendingUp size={18} className="text-turquoise" /> Thu nhập
+              </button>
+              <button onClick={() => { setQuickMenuOpen(false); onAddClick('allocation'); }} className="w-full flex items-center gap-3 px-5 py-2.5 text-white hover:bg-white/10 transition">
+                <PiggyBank size={18} className="text-baby-blue" /> Nạp quỹ
+              </button>
+              <button onClick={() => { setQuickMenuOpen(false); onAddClick('expense'); }} className="w-full flex items-center gap-3 px-5 py-2.5 text-white hover:bg-white/10 transition">
+                <TrendingDown size={18} className="text-cotton-candy" /> Chi tiêu
+              </button>
+              <button onClick={() => { setQuickMenuOpen(false); onAddClick('transfer'); }} className="w-full flex items-center gap-3 px-5 py-2.5 text-white hover:bg-white/10 transition">
+                <SendHorizontal size={18} className="text-lavender" /> Chuyển khoản
+              </button>
+            </div>
+          )}
+
+          {/* Raised center "+" button — absolutely positioned, never causes layout shift */}
+          <button
+            onClick={handleAdd}
+            aria-label="Thêm giao dịch"
+            className="absolute left-1/2 z-10 flex items-center justify-center rounded-full active:scale-95 transition-transform duration-150"
+            style={{
+              top: '-24px',
+              transform: 'translateX(-50%)',
+              width: '58px',
+              height: '58px',
+              background: 'linear-gradient(135deg, #0DBACC 0%, #3BC9E8 55%, #B88CFF 100%)',
+              boxShadow: '0 10px 24px -4px rgba(13,186,204,0.55), 0 0 0 6px rgba(13,186,204,0.10), 0 4px 10px rgba(0,0,0,0.30)',
+            }}
+          >
+            <span
+              className="pointer-events-none absolute inset-0 rounded-full"
+              style={{ background: 'linear-gradient(180deg, rgba(255,255,255,0.55) 0%, rgba(255,255,255,0) 55%)', mixBlendMode: 'overlay' }}
+            />
+            <Plus size={24} strokeWidth={2.5} className="text-white relative z-10" />
+          </button>
+
+          {/* Curved liquid-glass bar */}
+          <div
+            className="relative rounded-[28px] h-[72px] flex items-center justify-between px-3 overflow-hidden"
+            style={{
+              background: 'linear-gradient(180deg, rgba(29,30,56,0.80) 0%, rgba(17,18,37,0.86) 100%)',
+              backdropFilter: 'blur(26px) saturate(170%)',
+              WebkitBackdropFilter: 'blur(26px) saturate(170%)',
+              border: '1px solid rgba(255,255,255,0.12)',
+              boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.16), inset 0 -14px 24px -18px rgba(159,127,224,0.18), 0 18px 40px -12px rgba(0,0,0,0.55), 0 0 36px -14px rgba(13,186,204,0.22)',
+            }}
+          >
+            {/* top highlight line + soft inner glow blobs — decorative only */}
+            <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/45 to-transparent" />
+            <div className="pointer-events-none absolute -top-6 left-8 w-24 h-16 rounded-full bg-white/10 blur-2xl" />
+            <div className="pointer-events-none absolute -bottom-6 right-10 w-20 h-16 rounded-full bg-lavender/15 blur-2xl" />
+
+            <div className="relative z-10 flex items-center justify-between w-full">
+              <NavIcon icon={Home} label="Trang chủ" active={screen === 'dashboard'} onClick={() => go('dashboard')} />
+              <NavIcon icon={LayoutGrid} label="Quản lý" active={isManageActive || manageOpen} onClick={() => setManageOpen((v) => !v)} />
+
+              {/* spacer reserving space under the raised + button */}
+              <span className="w-12 flex-shrink-0" aria-hidden="true" />
+
+              <NavIcon icon={BarChart3} label="Báo cáo" active={screen === 'report'} onClick={() => go('report')} />
+              <NavIcon icon={User} label="Profile" active={screen === 'settings'} onClick={handleProfile} />
+            </div>
+          </div>
         </div>
       </div>
     </>
@@ -911,8 +1265,8 @@ function BottomNavMobile({ screen, setScreen, onAddClick, theme, toggleTheme }) 
 /* ==============================================================================
    07. MODALS
    ============================================================================== */
-function AddTransaction({ onClose, accounts, categories, transactions, onSaved }) {
-  const [type, setType] = useState('expense');
+function AddTransaction({ onClose, accounts, categories, transactions, onSaved, initialType }) {
+  const [type, setType] = useState(initialType || 'expense');
   const [amount, setAmount] = useState('');
   const [selectedCategory, setSelectedCategory] = useState(null);
   const [selectedYear, setSelectedYear] = useState(Number(currentPeriodKey().split('-')[0]));
@@ -982,6 +1336,15 @@ function AddTransaction({ onClose, accounts, categories, transactions, onSaved }
 
     let accountIdToSave = null;
     let noteToSave = note || null;
+
+    // Check overlimit
+    if (overLimit) {
+      const confirm = window.confirm(
+        `Khoản chi này vượt quá hạn mức ${formatMoney(activeCat.monthly_limit)}. Bạn vẫn muốn tiếp tục nhập?`
+      );
+      if (!confirm) return;
+      noteToSave = `[Vượt hạn mức] ${noteToSave || ''}`;
+    }
 
     if (type === 'income') {
       if (!selectedPeriod) { alert('Vui lòng chọn Kỳ'); return; }
@@ -1129,6 +1492,217 @@ function AddTransaction({ onClose, accounts, categories, transactions, onSaved }
   );
 }
 
+function EditTransaction({ transaction, onClose, accounts, categories, transactions: allTx, onSaved }) {
+  const [type, setType] = useState(transaction.type);
+  const [amount, setAmount] = useState(String(transaction.amount));
+  const [selectedCategory, setSelectedCategory] = useState(transaction.category_id);
+  const [selectedYear, setSelectedYear] = useState(() => {
+    const pk = parsePeriodTag(transaction.note) || dateToPeriodKey(transaction.date || transaction.created_at);
+    return Number(pk.split('-')[0]);
+  });
+  const [selectedPeriod, setSelectedPeriod] = useState(() => parsePeriodTag(transaction.note) || dateToPeriodKey(transaction.date || transaction.created_at));
+  const [expenseSource, setExpenseSource] = useState(transaction.account_id || null);
+  const [note, setNote] = useState(stripPeriodTag(transaction.note || ''));
+  const [dateTime, setDateTime] = useState(() => {
+    const d = new Date(transaction.date || transaction.created_at);
+    d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+    return d.toISOString().slice(0, 16);
+  });
+  const [saving, setSaving] = useState(false);
+
+  const yearNow = new Date().getFullYear();
+  const years = Array.from({ length: 5 }, (_, i) => yearNow - 2 + i);
+  const periods = buildPeriods(selectedYear);
+
+  const activeCat = categories.find((c) => c.id === selectedCategory);
+  const isFundCategory = type === 'expense' && !!activeCat?.is_fund;
+  const overLimit = type === 'expense' && activeCat?.monthly_limit && Number(amount) > Number(activeCat.monthly_limit);
+  const usesPeriod = type === 'income' || type === 'allocation' || (type === 'expense' && !isFundCategory && expenseSource === 'income');
+  const pool = usesPeriod ? periodPool(allTx || [], selectedPeriod) : null;
+  const periodOverLimit = (type === 'allocation' || (type === 'expense' && !isFundCategory && expenseSource === 'income')) && pool && Number(amount) > pool.remaining;
+  const fundBalanceNow = isFundCategory ? fundBalanceWithProfit(activeCat, allTx || []) : null;
+  const fundOverBalance = isFundCategory && amount && Number(amount) > fundBalanceNow;
+  const sourceAccount = type === 'expense' && !isFundCategory && expenseSource && expenseSource !== 'income' ? accounts.find((a) => a.id === expenseSource) : null;
+  const sourceOverBalance = sourceAccount && amount && Number(amount) > accountBalance(sourceAccount, allTx || []);
+
+  function handleAmountChange(e) { setAmount(e.target.value.replace(/\D/g, '')); }
+  function handleYearChange(y) {
+    setSelectedYear(y);
+    const month = selectedPeriod.split('-')[1];
+    setSelectedPeriod(`${y}-${month}`);
+  }
+  function handleTypeChange(t) {
+    setType(t);
+    setSelectedCategory(null);
+    setExpenseSource(null);
+    setSelectedYear(Number(currentPeriodKey().split('-')[0]));
+    setSelectedPeriod(currentPeriodKey());
+  }
+  function handleCategoryChange(id) {
+    setSelectedCategory(id);
+    setExpenseSource(null);
+  }
+  function handleExpenseSourceSelect(source) {
+    setExpenseSource(source);
+  }
+
+  async function handleSave() {
+    if (!amount || Number(amount) === 0) { alert('Vui lòng nhập số tiền'); return; }
+    if (!selectedCategory) { alert('Vui lòng chọn danh mục'); return; }
+
+    let accountIdToSave = null;
+    let noteToSave = note || null;
+
+    if (overLimit) {
+      const confirm = window.confirm(
+        `Khoản chi này vượt quá hạn mức ${formatMoney(activeCat.monthly_limit)}. Bạn vẫn muốn tiếp tục nhập?`
+      );
+      if (!confirm) return;
+      noteToSave = `[Vượt hạn mức] ${noteToSave || ''}`;
+    }
+
+    if (type === 'income') {
+      if (!selectedPeriod) { alert('Vui lòng chọn Kỳ'); return; }
+      noteToSave = tagPeriodNote(selectedPeriod, note);
+    } else if (type === 'allocation') {
+      if (!selectedPeriod) { alert('Vui lòng chọn Kỳ (nguồn thu nhập để nạp quỹ)'); return; }
+      if (periodOverLimit) { alert('Số tiền nạp vượt quá số dư còn lại của kỳ thu nhập.'); return; }
+      noteToSave = tagPeriodNote(selectedPeriod, note);
+    } else if (type === 'expense') {
+      if (isFundCategory) {
+        if (fundOverBalance) { alert('Số dư quỹ không đủ.'); return; }
+      } else {
+        if (!expenseSource) { alert('Vui lòng chọn Nguồn tiền cho khoản chi tiêu này.'); return; }
+        if (expenseSource === 'income') {
+          if (!selectedPeriod) { alert('Vui lòng chọn Kỳ'); return; }
+          if (periodOverLimit) { alert('Số dư nguồn tiền không đủ.'); return; }
+          noteToSave = tagPeriodNote(selectedPeriod, note);
+        } else {
+          if (sourceOverBalance) { alert('Số dư nguồn tiền không đủ.'); return; }
+          accountIdToSave = expenseSource;
+        }
+      }
+    }
+
+    setSaving(true);
+    const { error } = await supabase.from('transactions').update({
+      account_id: accountIdToSave, category_id: selectedCategory, type, amount: Number(amount),
+      note: noteToSave, date: dateTime.slice(0, 10), created_at: new Date(dateTime).toISOString(),
+    }).eq('id', transaction.id);
+    setSaving(false);
+    if (error) { alert('Lỗi khi lưu: ' + error.message); return; }
+    onSaved();
+    onClose();
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/0 md:bg-black/40 z-30 md:flex md:items-center md:justify-center md:p-6" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="bg-white dark:bg-[#1e1e32] w-full h-full md:h-auto md:max-h-[88vh] md:max-w-xl md:rounded-3xl md:overflow-y-auto overflow-y-auto relative scrollbar-hide">
+        <div className="px-5 pt-8 md:pt-6 flex items-center justify-between sticky top-0 bg-white dark:bg-[#1e1e32] z-10">
+          <button onClick={onClose} className="w-9 h-9 rounded-full bg-ice-cream dark:bg-night-sky flex items-center justify-center"><X size={18} className="text-blueberry dark:text-white" /></button>
+          <h1 className="text-blueberry dark:text-white text-lg font-bold">Sửa giao dịch</h1>
+          <div className="w-9 h-9" />
+        </div>
+        <div className="px-5 mt-6">
+          <div className="flex bg-ice-cream dark:bg-night-sky rounded-full p-1">
+            <button onClick={() => handleTypeChange('income')} className={`flex-1 py-2 rounded-full text-xs sm:text-sm font-semibold transition ${type === 'income' ? 'bg-white dark:bg-[#2a2a44] text-turquoise shadow' : 'text-steel dark:text-light-grey'}`}>Thu nhập</button>
+            <button onClick={() => handleTypeChange('allocation')} className={`flex-1 py-2 rounded-full text-xs sm:text-sm font-semibold transition ${type === 'allocation' ? 'bg-white dark:bg-[#2a2a44] text-turquoise shadow' : 'text-steel dark:text-light-grey'}`}>Nạp quỹ</button>
+            <button onClick={() => handleTypeChange('expense')} className={`flex-1 py-2 rounded-full text-xs sm:text-sm font-semibold transition ${type === 'expense' ? 'bg-white dark:bg-[#2a2a44] text-turquoise shadow' : 'text-steel dark:text-light-grey'}`}>Chi tiêu</button>
+          </div>
+        </div>
+        <div className="px-5 mt-8 text-center">
+          <p className="text-steel dark:text-light-grey text-sm font-semibold mb-1">Số tiền</p>
+          <div className="flex items-center justify-center gap-1">
+            <input type="text" inputMode="numeric" value={amount ? Number(amount).toLocaleString('en-US') : ''} onChange={handleAmountChange} placeholder="0" className={`text-4xl font-bold text-center bg-transparent outline-none w-full ${overLimit || periodOverLimit ? 'text-cotton-candy' : type === 'income' || type === 'allocation' ? 'text-turquoise' : 'text-blueberry dark:text-white'}`} />
+            <span className="text-4xl font-bold text-light-grey">đ</span>
+          </div>
+          {overLimit && <p className="text-cotton-candy text-xs mt-2 font-semibold">⚠️ Vượt hạn mức {formatMoney(activeCat.monthly_limit)} của danh mục này!</p>}
+          {periodOverLimit && <p className="text-cotton-candy text-xs mt-2 font-semibold">⚠️ Vượt số tiền còn lại của Kỳ này ({formatMoney(pool.remaining)})!</p>}
+          {fundOverBalance && <p className="text-cotton-candy text-xs mt-2 font-semibold">⚠️ Vượt số dư hiện có của quỹ ({formatMoney(fundBalanceNow)})!</p>}
+          {sourceOverBalance && <p className="text-cotton-candy text-xs mt-2 font-semibold">⚠️ Vượt số dư hiện có của nguồn tiền này ({formatMoney(accountBalance(sourceAccount, allTx || []))})!</p>}
+        </div>
+        <div className="px-5 mt-8">
+          <p className="text-blueberry dark:text-white font-bold text-sm mb-3">{type === 'income' ? 'Danh mục thu nhập' : 'Quỹ / Danh mục'} <span className="text-cotton-candy">*</span></p>
+          {categoryList().length === 0 ? <p className="text-steel dark:text-light-grey text-sm">Chưa có danh mục. Vào Cài đặt để thêm.</p> : (
+            <div className="grid grid-cols-4 sm:grid-cols-5 gap-3">
+              {categoryList().map((cat) => {
+                const active = selectedCategory === cat.id;
+                const willExceed = type === 'expense' && cat.monthly_limit && Number(amount) > Number(cat.monthly_limit);
+                return (
+                  <button key={cat.id} onClick={() => handleCategoryChange(cat.id)} className="flex flex-col items-center gap-1.5">
+                    <EmojiCircle emoji={cat.icon} size={48} active={active} activeColor={willExceed ? '#F18AB5' : '#0DBACC'} />
+                    <span className={`text-[11px] text-center leading-tight ${active ? 'text-blueberry dark:text-white font-semibold' : 'text-steel dark:text-light-grey'}`}>{cat.name}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {type === 'expense' && isFundCategory && (
+          <div className="px-5 mt-8">
+            <p className="text-steel dark:text-light-grey text-xs bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3">Khoản này được trừ trực tiếp từ quỹ "{activeCat.name}" — không cần chọn nguồn tiền.</p>
+          </div>
+        )}
+
+        {type === 'expense' && !isFundCategory && (
+          <div className="px-5 mt-8">
+            <p className="text-blueberry dark:text-white font-bold text-sm mb-3">Nguồn tiền <span className="text-cotton-candy">*</span></p>
+            <div className="grid grid-cols-4 sm:grid-cols-5 gap-3">
+              <button onClick={() => handleExpenseSourceSelect('income')} className="flex flex-col items-center gap-1.5">
+                <EmojiCircle emoji="💵" size={48} active={expenseSource === 'income'} activeColor="#0DBACC" />
+                <span className={`text-[11px] text-center leading-tight ${expenseSource === 'income' ? 'text-blueberry dark:text-white font-semibold' : 'text-steel dark:text-light-grey'}`}>Thu nhập</span>
+              </button>
+              {accounts.map((acc) => {
+                const active = expenseSource === acc.id;
+                return (
+                  <button key={acc.id} onClick={() => handleExpenseSourceSelect(acc.id)} className="flex flex-col items-center gap-1.5">
+                    <EmojiCircle emoji={acc.icon} size={48} active={active} activeColor="#0DBACC" />
+                    <span className={`text-[11px] text-center leading-tight ${active ? 'text-blueberry dark:text-white font-semibold' : 'text-steel dark:text-light-grey'}`}>{acc.name}</span>
+                  </button>
+                );
+              })}
+            </div>
+            <p className="text-steel dark:text-light-grey text-xs mt-2">Chỉ được chọn 1 nguồn tiền cho khoản chi này.</p>
+          </div>
+        )}
+
+        {usesPeriod && (
+          <div className="px-5 mt-8">
+            <p className="text-blueberry dark:text-white font-bold text-sm mb-3">Năm <span className="text-cotton-candy">*</span></p>
+            <select value={selectedYear} onChange={(e) => handleYearChange(Number(e.target.value))} className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none mb-3 dark:text-white text-blueberry">
+              {years.map((y) => <option key={y} value={y}>{y}</option>)}
+            </select>
+            <p className="text-blueberry dark:text-white font-bold text-sm mb-3">Kỳ <span className="text-cotton-candy">*</span></p>
+            <select value={selectedPeriod} onChange={(e) => setSelectedPeriod(e.target.value)} className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none dark:text-white text-blueberry">
+              {periods.map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
+            </select>
+            {pool && (
+              <p className="text-steel dark:text-light-grey text-xs mt-2">
+                Thu nhập kỳ này: <span className="text-blueberry dark:text-white font-semibold">{formatMoney(pool.total)}</span> — Đã phân bổ: <span className="text-blueberry dark:text-white font-semibold">{formatMoney(pool.used)}</span> — Còn lại: <span className={`font-semibold ${pool.remaining < 0 ? 'text-cotton-candy' : 'text-turquoise'}`}>{formatMoney(pool.remaining)}</span>
+              </p>
+            )}
+          </div>
+        )}
+
+        <div className="px-5 mt-8">
+          <p className="text-blueberry dark:text-white font-bold text-sm mb-3">Ngày giờ</p>
+          <input type="datetime-local" value={dateTime} onChange={(e) => setDateTime(e.target.value)} className="w-full bg-ice-cream dark:bg-night-sky rounded-2xl px-4 py-3 text-sm outline-none dark:text-white dark:placeholder:text-light-grey text-blueberry" />
+        </div>
+        <div className="px-5 mt-8">
+          <p className="text-blueberry dark:text-white font-bold text-sm mb-3">Ghi chú</p>
+          <input type="text" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Không bắt buộc" className="w-full bg-ice-cream dark:bg-night-sky rounded-2xl px-4 py-3 text-sm outline-none dark:text-white dark:placeholder:text-light-grey text-blueberry" />
+        </div>
+        <div className="px-5 mt-10 pb-10">
+          <button onClick={handleSave} disabled={saving} className="w-full bg-gradient-primary text-white rounded-2xl py-4 font-bold flex items-center justify-center gap-2 disabled:opacity-60 shadow-md shadow-turquoise/30">{saving ? <Loader2 size={18} className="animate-spin" /> : <Check size={18} />}{saving ? 'Đang lưu...' : 'Cập nhật'}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function categoryList() { /* dummy, actual logic inside component */ }
+
 function EditAccountModal({ account, onClose, onSaved, isNew }) {
   const [form, setForm] = useState({ name: account?.name || '', icon: account?.icon || '', type: account?.type || 'cash', initial_balance: account?.initial_balance || '' });
   const [saving, setSaving] = useState(false);
@@ -1177,8 +1751,8 @@ function EditFundForm({ category, onClose, onSaved, isNew, initialAmount, firstA
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
 
-  async function handleFileUpload(e) {
-    const file = e.target.files?.[0];
+  // Nhận file ảnh đã crop từ ImageUploader dùng chung (giống flow avatar), rồi upload lên storage
+  async function handleCroppedBannerUpload(file) {
     if (!file) return;
     setUploading(true);
     const fileName = `${Date.now()}-${sanitizeFileName(file.name)}`;
@@ -1257,10 +1831,13 @@ function EditFundForm({ category, onClose, onSaved, isNew, initialAmount, firstA
           </div>
         )}
         <div className="flex gap-2 mb-3">
-          <label className="flex-1 bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm text-steel dark:text-light-grey text-center cursor-pointer hover:bg-light-grey/30 transition">
-            {uploading ? 'Đang tải...' : 'Tải ảnh từ thiết bị'}
-            <input type="file" accept="image/*" onChange={handleFileUpload} className="hidden" disabled={uploading} />
-          </label>
+          <ImageUploader
+            aspectRatio="16:9"
+            uploading={uploading}
+            triggerLabel="Tải ảnh từ thiết bị"
+            triggerClassName="flex-1 bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm text-steel dark:text-light-grey text-center cursor-pointer hover:bg-light-grey/30 transition flex items-center justify-center gap-2"
+            onConfirm={handleCroppedBannerUpload}
+          />
         </div>
         <input value={form.background_url} onChange={(e) => setForm({ ...form, background_url: e.target.value })} placeholder="Hoặc dán link ảnh" className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none mb-4 dark:text-white dark:placeholder:text-light-grey text-blueberry" />
 
@@ -1485,6 +2062,7 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
   const [search, setSearch] = useState('');
   const [recentTxFilter, setRecentTxFilter] = useState('7d');
   const [showAccountMenu, setShowAccountMenu] = useState(false);
+  useCloseOnEscape(showAccountMenu, () => setShowAccountMenu(false));
   const [showAddWidget, setShowAddWidget] = useState(false);
   const [showWalletPopover, setShowWalletPopover] = useState(false);
   const [showAddWallet, setShowAddWallet] = useState(false);
@@ -1671,7 +2249,7 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
     );
   }
 
-  const totalFunds = expenseCats.reduce((s, c) => s + fundBalanceWithProfit(c, transactions), 0);
+  const totalFunds = fundCategories.reduce((s, c) => s + fundBalanceWithProfit(c, transactions), 0);
   const totalAccounts = accounts.reduce((s, a) => s + accountBalance(a, transactions), 0);
   const totalAssets = totalFunds + totalAccounts;
 
@@ -1813,6 +2391,40 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
   const groupedRecentTx = groupTransactionsByDate(recentTxList);
   const sortedGroupKeys = Object.keys(groupedRecentTx).sort((a, b) => new Date(b) - new Date(a));
 
+  // Trong dashboard mobile, thêm carousel ví
+  const mobileWalletCarousel = (
+    <div className="mt-4 px-5">
+      <div className="flex items-center justify-between mb-2">
+        <p className="text-white/80 text-xs font-semibold">Ví của bạn</p>
+        <button onClick={() => setScreen('accounts')} className="text-white/70 text-xs font-bold">Xem tất cả</button>
+      </div>
+      <div className="overflow-x-auto snap-x snap-mandatory scrollbar-hide -mx-1 px-1">
+        <div className="flex gap-3 py-1">
+          {accounts.length === 0 ? (
+            <div className="snap-start shrink-0 w-[85%] bg-white/10 backdrop-blur rounded-2xl p-4 text-center text-white/60 text-sm">
+              Chưa có ví nào. Bấm + để thêm.
+            </div>
+          ) : (
+            accounts.map((acc) => (
+              <div key={acc.id} className="snap-start shrink-0 w-[85%] max-w-[280px]">
+                <button onClick={() => onOpenAccount(acc.id, 'dashboard')} className="w-full text-left bg-white/90 dark:bg-[#2a2a44]/90 backdrop-blur rounded-3xl p-4 shadow-lg shadow-black/5">
+                  <div className="flex items-center gap-3">
+                    <EmojiCircle emoji={acc.icon} size={36} active activeColor="#0DBACC" />
+                    <div>
+                      <p className="text-blueberry dark:text-white font-bold text-sm">{acc.name}</p>
+                      <p className="text-steel dark:text-light-grey text-xs capitalize">{ACCOUNT_TYPES.find(t => t.value === acc.type)?.label || acc.type}</p>
+                    </div>
+                  </div>
+                  <p className="text-blueberry dark:text-white font-bold text-lg mt-2">{formatMoney(accountBalance(acc, transactions))}</p>
+                </button>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+    </div>
+  );
+
   // Remove outer layout wrapper, just return the content
   return (
     <>
@@ -1846,6 +2458,10 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
             <p className="text-white/70 text-xs font-semibold">Tổng tài sản</p>
             <p className="text-white text-3xl font-bold">{formatMoney(totalAssets)}</p>
           </div>
+
+          {/* Mobile wallet carousel */}
+          {mobileWalletCarousel}
+
           <div className="mt-6 px-5 flex gap-3 overflow-x-auto pb-2 scrollbar-hide hide-scrollbar" style={{ WebkitOverflowScrolling: 'touch', scrollSnapType: 'x mandatory', scrollPaddingLeft: 20 }}>
             {fundCategories.length === 0 ? <p className="text-white/70 text-sm">Đánh dấu danh mục là "Quỹ" trong Cài đặt để hiện ở đây.</p>
               : fundCategories.map((f) => (
@@ -1952,10 +2568,17 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
                       <div className="flex flex-col divide-y divide-[rgba(189,189,203,0.2)] dark:divide-[rgba(189,189,203,0.1)]">
                         {groupedRecentTx[key].map((tx) => {
                           const cat = categories.find((c) => c.id === tx.category_id);
+                          const isOverLimit = (tx.note || '').startsWith('[Vượt hạn mức]');
                           return (
                             <div key={tx.id} className="flex items-center gap-3 py-3 first:pt-0 last:pb-0">
                               <EmojiCircle emoji={cat?.icon} size={40} bg={tx.type === 'income' ? '#B4F1F1' : '#E3D6FF'} />
-                              <div className="flex-1 min-w-0"><p className="text-blueberry dark:text-white font-bold text-sm">{cat?.name || 'Khác'}</p><p className="text-steel dark:text-light-grey text-xs">{stripPeriodTag(tx.note) || new Date(tx.date || tx.created_at).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}</p></div>
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-1.5">
+                                  <p className="text-blueberry dark:text-white font-bold text-sm">{cat?.name || 'Khác'}</p>
+                                  {isOverLimit && <span className="text-[10px] font-bold text-white bg-cotton-candy px-2 py-0.5 rounded-full">Vượt hạn mức</span>}
+                                </div>
+                                <p className="text-steel dark:text-light-grey text-xs">{stripPeriodTag(tx.note) || new Date(tx.date || tx.created_at).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}</p>
+                              </div>
                               <p className={`font-bold text-sm flex-shrink-0 ${tx.type === 'income' ? 'text-turquoise' : 'text-blueberry dark:text-white'}`}>{tx.type === 'income' ? '+' : '-'}{formatMoney(tx.amount)}</p>
                             </div>
                           );
@@ -2124,11 +2747,15 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
                         <div className="flex flex-col divide-y divide-[rgba(189,189,203,0.2)] dark:divide-[rgba(189,189,203,0.1)]">
                           {groupedRecentTx[key].map((tx) => {
                             const cat = categories.find((c) => c.id === tx.category_id);
+                            const isOverLimit = (tx.note || '').startsWith('[Vượt hạn mức]');
                             return (
                               <div key={tx.id} className="flex items-center gap-3 py-2.5 first:pt-0 last:pb-0">
                                 <EmojiCircle emoji={cat?.icon} size={36} bg={tx.type === 'income' ? '#B4F1F1' : '#E3D6FF'} />
                                 <div className="flex-1 min-w-0">
-                                  <p className="text-blueberry dark:text-white font-bold text-sm truncate">{cat?.name || (tx.type === 'income' ? 'Thu nhập' : 'Chi tiêu')}</p>
+                                  <div className="flex items-center gap-1.5">
+                                    <p className="text-blueberry dark:text-white font-bold text-sm truncate">{cat?.name || (tx.type === 'income' ? 'Thu nhập' : 'Chi tiêu')}</p>
+                                    {isOverLimit && <span className="text-[10px] font-bold text-white bg-cotton-candy px-2 py-0.5 rounded-full">Vượt hạn mức</span>}
+                                  </div>
                                   <p className="text-steel dark:text-light-grey text-xs">{new Date(tx.date || tx.created_at).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}</p>
                                 </div>
                                 <p className={`font-bold text-sm flex-shrink-0 ${tx.type === 'income' ? 'text-turquoise' : 'text-blueberry dark:text-white'}`}>{tx.type === 'income' ? '+' : '-'}{formatMoney(tx.amount)}</p>
@@ -2681,6 +3308,7 @@ function FundDetail({ category, transactions, onBack, reload, softDelete, setScr
   const [filter, setFilter] = useState('all');
   const [showEdit, setShowEdit] = useState(false);
   const [quickMode, setQuickMode] = useState(null);
+  const [editingTx, setEditingTx] = useState(null);
 
   // Lấy tất cả giao dịch nạp/rút, sắp xếp theo thời gian tăng dần
   const allHistory = transactions
@@ -2862,6 +3490,7 @@ function FundDetail({ category, transactions, onBack, reload, softDelete, setScr
                   const iconBg = item.type === 'expense' ? 'bg-cotton-candy/10' : 'bg-turquoise/10';
                   const amountColor = item.type === 'expense' ? 'text-cotton-candy' : 'text-turquoise';
                   const timeDisplay = formatDisplayTime(item);
+                  const isOverLimit = (item.note || '').startsWith('[Vượt hạn mức]');
                   // Nhóm theo ngày thực hiện thực tế: giao dịch dùng "date" (thời điểm thật khi bấm nạp/rút),
                   // lợi nhuận dùng "created_at" (= ngày được credit theo quy tắc)
                   const itemDate = new Date(isProfit ? item.created_at : (item.date || item.created_at));
@@ -2885,15 +3514,23 @@ function FundDetail({ category, transactions, onBack, reload, softDelete, setScr
                         </div>
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center justify-between gap-2">
-                            <p className="text-blueberry dark:text-white font-bold text-sm truncate">
-                              {label}{isInitial && <span className="ml-1.5 text-[10px] font-bold text-turquoise bg-turquoise/20 px-1.5 py-0.5 rounded-full align-middle">Nạp ban đầu</span>}
-                            </p>
+                            <div className="flex items-center gap-1.5">
+                              <p className="text-blueberry dark:text-white font-bold text-sm truncate">
+                                {label}{isInitial && <span className="ml-1.5 text-[10px] font-bold text-turquoise bg-turquoise/20 px-1.5 py-0.5 rounded-full align-middle">Nạp ban đầu</span>}
+                              </p>
+                              {isOverLimit && <span className="text-[10px] font-bold text-white bg-cotton-candy px-2 py-0.5 rounded-full">Vượt hạn mức</span>}
+                            </div>
                             <p className={`font-bold text-sm flex-shrink-0 ${amountColor}`}>{item.type === 'expense' ? '-' : '+'}{formatMoney(item.amount)}</p>
                           </div>
                           <p className="text-steel dark:text-light-grey text-xs mt-0.5">{timeDisplay}</p>
                           {noteText && <p className="text-steel dark:text-light-grey text-xs mt-0.5 truncate">{noteText}</p>}
                           {item.balanceAfter !== undefined && <p className="text-steel dark:text-light-grey text-xs mt-0.5">Số dư: {formatMoney(item.balanceAfter)}</p>}
                         </div>
+                        {!isProfit && (
+                          <button onClick={() => setEditingTx(item)} className="w-7 h-7 rounded-full hover:bg-ice-cream dark:hover:bg-night-sky/30 flex items-center justify-center text-steel dark:text-light-grey flex-shrink-0">
+                            <Pencil size={14} />
+                          </button>
+                        )}
                       </div>
                     </Fragment>
                   );
@@ -3011,22 +3648,31 @@ function FundDetail({ category, transactions, onBack, reload, softDelete, setScr
                 <div className="flex flex-col divide-y divide-[rgba(189,189,203,0.2)] dark:divide-[rgba(189,189,203,0.1)] scrollbar-hide">
                   {displayHistory.map((item) => {
                     const isInitial = item.type === 'allocation' && firstAllocation && item.id === firstAllocation.id;
+                    const isOverLimit = (item.note || '').startsWith('[Vượt hạn mức]');
                     return (
                       <div key={item.id} className={`flex items-center gap-3 py-3 ${isInitial ? 'bg-turquoise/10 -mx-2 px-2 rounded-xl border border-turquoise' : ''}`}>
                         <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${isInitial ? 'bg-turquoise' : item.type === 'allocation' ? 'bg-turquoise/10' : item.isProfit ? 'bg-turquoise/10' : 'bg-cotton-candy/10'}`}>
                           {isInitial ? <Star size={16} className="text-white fill-white" /> : item.type === 'allocation' ? <TrendingUp size={16} className="text-turquoise" /> : item.isProfit ? <Sparkles size={16} className="text-turquoise" /> : <TrendingDown size={16} className="text-cotton-candy" />}
                         </div>
                         <div className="flex-1 min-w-0">
-                          <p className="text-blueberry dark:text-white font-bold text-sm">
-                            {item.type === 'allocation' ? 'Nạp quỹ' : item.isProfit ? 'Lợi nhuận' : 'Rút quỹ (chi tiêu)'}
-                            {isInitial && <span className="ml-1.5 text-[10px] font-bold text-turquoise bg-turquoise/20 px-1.5 py-0.5 rounded-full align-middle">Nạp ban đầu</span>}
-                          </p>
+                          <div className="flex items-center gap-1.5">
+                            <p className="text-blueberry dark:text-white font-bold text-sm">
+                              {item.type === 'allocation' ? 'Nạp quỹ' : item.isProfit ? 'Lợi nhuận' : 'Rút quỹ (chi tiêu)'}
+                              {isInitial && <span className="ml-1.5 text-[10px] font-bold text-turquoise bg-turquoise/20 px-1.5 py-0.5 rounded-full align-middle">Nạp ban đầu</span>}
+                            </p>
+                            {isOverLimit && <span className="text-[10px] font-bold text-white bg-cotton-candy px-2 py-0.5 rounded-full">Vượt hạn mức</span>}
+                          </div>
                           <p className="text-steel dark:text-light-grey text-xs">
                             {item.isProfit ? item.note : stripPeriodTag(item.note) || new Date(item.date || item.created_at).toLocaleString('vi-VN')}
                           </p>
                           {item.balanceAfter !== undefined && <p className="text-steel dark:text-light-grey text-xs">Số dư: {formatMoney(item.balanceAfter)}</p>}
                         </div>
                         <p className={`font-bold text-sm flex-shrink-0 ${item.type === 'expense' ? 'text-cotton-candy' : 'text-turquoise'}`}>{item.type === 'expense' ? '-' : '+'}{formatMoney(item.amount)}</p>
+                        {!item.isProfit && (
+                          <button onClick={() => setEditingTx(item)} className="w-7 h-7 rounded-full hover:bg-ice-cream dark:hover:bg-night-sky/30 flex items-center justify-center text-steel dark:text-light-grey flex-shrink-0">
+                            <Pencil size={14} />
+                          </button>
+                        )}
                       </div>
                     );
                   })}
@@ -3050,6 +3696,16 @@ function FundDetail({ category, transactions, onBack, reload, softDelete, setScr
 
       {showEdit && <EditFundForm category={category} onClose={() => setShowEdit(false)} onSaved={reload} isNew={false} initialAmount={initialAmount} firstAllocation={firstAllocation} />}
       {quickMode && <QuickAllocateWithdrawForm category={category} mode={quickMode} onClose={() => setQuickMode(null)} onSaved={reload} />}
+      {editingTx && (
+        <EditTransaction
+          transaction={editingTx}
+          onClose={() => setEditingTx(null)}
+          accounts={[]} /* Chỉ truyền nếu cần */
+          categories={[]}
+          transactions={transactions}
+          onSaved={() => { reload(); setEditingTx(null); }}
+        />
+      )}
     </>
   );
 }
@@ -3138,6 +3794,7 @@ function Accounts({ setScreen, accounts, transactions, onOpenAccount, reload, on
 function AccountDetail({ account, transactions, categories, onBack, reload, softDelete, setScreen, onAddClick, displayName, avatarUrl, theme, toggleTheme, openSettings, sidebarCollapsed, toggleSidebar }) {
   const [showAdjust, setShowAdjust] = useState(false);
   const [showEdit, setShowEdit] = useState(false);
+  const [editingTx, setEditingTx] = useState(null);
 
   const history = transactions
     .filter((t) => t.account_id === account.id && (t.type === 'income' || t.type === 'expense' || t.type === 'adjustment'))
@@ -3192,16 +3849,25 @@ function AccountDetail({ account, transactions, categories, onBack, reload, soft
                 const displayNote = isDirectSet ? (tx.note || '').replace('[SET] ', '') : tx.note;
                 const isPositive = tx.type === 'income' || (tx.type === 'adjustment' && !isDirectSet && Number(tx.amount) > 0);
                 const label = tx.type === 'adjustment' ? 'Cập nhật số dư' : (cat?.name || (tx.type === 'income' ? 'Thu nhập' : 'Chi tiêu'));
+                const isOverLimit = (tx.note || '').startsWith('[Vượt hạn mức]');
                 return (
                   <div key={tx.id} className="flex items-center gap-3 py-3">
                     <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${isDirectSet ? 'bg-ice-cream dark:bg-night-sky' : isPositive ? 'bg-turquoise/10' : 'bg-cotton-candy/10'}`}>
                       {isDirectSet ? <Pencil size={15} className="text-steel dark:text-light-grey" /> : isPositive ? <TrendingUp size={16} className="text-turquoise" /> : <TrendingDown size={16} className="text-cotton-candy" />}
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-blueberry dark:text-white font-bold text-sm">{label}</p>
+                      <div className="flex items-center gap-1.5">
+                        <p className="text-blueberry dark:text-white font-bold text-sm">{label}</p>
+                        {isOverLimit && <span className="text-[10px] font-bold text-white bg-cotton-candy px-2 py-0.5 rounded-full">Vượt hạn mức</span>}
+                      </div>
                       <p className="text-steel dark:text-light-grey text-xs">{displayNote || new Date(tx.date || tx.created_at).toLocaleString('vi-VN')}</p>
                     </div>
                     <p className={`font-bold text-sm flex-shrink-0 ${isDirectSet ? 'text-blueberry dark:text-white' : isPositive ? 'text-turquoise' : 'text-cotton-candy'}`}>{isDirectSet ? '' : isPositive ? '+' : '-'}{formatMoney(Math.abs(tx.amount))}</p>
+                    {!isDirectSet && (
+                      <button onClick={() => setEditingTx(tx)} className="w-7 h-7 rounded-full hover:bg-ice-cream dark:hover:bg-night-sky/30 flex items-center justify-center text-steel dark:text-light-grey flex-shrink-0">
+                        <Pencil size={14} />
+                      </button>
+                    )}
                   </div>
                 );
               })}
@@ -3245,16 +3911,25 @@ function AccountDetail({ account, transactions, categories, onBack, reload, soft
                     const displayNote = isDirectSet ? (tx.note || '').replace('[SET] ', '') : tx.note;
                     const isPositive = tx.type === 'income' || (tx.type === 'adjustment' && !isDirectSet && Number(tx.amount) > 0);
                     const label = tx.type === 'adjustment' ? 'Cập nhật số dư' : (cat?.name || (tx.type === 'income' ? 'Thu nhập' : 'Chi tiêu'));
+                    const isOverLimit = (tx.note || '').startsWith('[Vượt hạn mức]');
                     return (
                       <div key={tx.id} className="flex items-center gap-3 py-3">
                         <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${isDirectSet ? 'bg-ice-cream dark:bg-night-sky' : isPositive ? 'bg-turquoise/10' : 'bg-cotton-candy/10'}`}>
                           {isDirectSet ? <Pencil size={15} className="text-steel dark:text-light-grey" /> : isPositive ? <TrendingUp size={16} className="text-turquoise" /> : <TrendingDown size={16} className="text-cotton-candy" />}
                         </div>
                         <div className="flex-1 min-w-0">
-                          <p className="text-blueberry dark:text-white font-bold text-sm">{label}</p>
+                          <div className="flex items-center gap-1.5">
+                            <p className="text-blueberry dark:text-white font-bold text-sm">{label}</p>
+                            {isOverLimit && <span className="text-[10px] font-bold text-white bg-cotton-candy px-2 py-0.5 rounded-full">Vượt hạn mức</span>}
+                          </div>
                           <p className="text-steel dark:text-light-grey text-xs">{displayNote || new Date(tx.date || tx.created_at).toLocaleString('vi-VN')}</p>
                         </div>
                         <p className={`font-bold text-sm flex-shrink-0 ${isDirectSet ? 'text-blueberry dark:text-white' : isPositive ? 'text-turquoise' : 'text-cotton-candy'}`}>{isDirectSet ? '' : isPositive ? '+' : '-'}{formatMoney(Math.abs(tx.amount))}</p>
+                        {!isDirectSet && (
+                          <button onClick={() => setEditingTx(tx)} className="w-7 h-7 rounded-full hover:bg-ice-cream dark:hover:bg-night-sky/30 flex items-center justify-center text-steel dark:text-light-grey flex-shrink-0">
+                            <Pencil size={14} />
+                          </button>
+                        )}
                       </div>
                     );
                   })}
@@ -3274,6 +3949,16 @@ function AccountDetail({ account, transactions, categories, onBack, reload, soft
 
       {showAdjust && <QuickAdjustBalanceForm account={account} currentBalance={balance} onClose={() => setShowAdjust(false)} onSaved={reload} />}
       {showEdit && <EditAccountModal account={account} onClose={() => setShowEdit(false)} onSaved={reload} />}
+      {editingTx && (
+        <EditTransaction
+          transaction={editingTx}
+          onClose={() => setEditingTx(null)}
+          accounts={[]}
+          categories={categories}
+          transactions={transactions}
+          onSaved={() => { reload(); setEditingTx(null); }}
+        />
+      )}
     </>
   );
 }
@@ -3842,7 +4527,7 @@ function Settings({ setScreen, categories, accounts, reload, softDelete, user, o
 }
 
 /* ==============================================================================
-   15. SETTINGS SUB-COMPONENTS
+   15. SETTINGS SUB-COMPONENTS (ProfileSection, CategorySection) + CROP AVATAR
    ============================================================================== */
 function ProfileSection({ user, onUpdated, logActivity }) {
   const [firstName, setFirstName] = useState(user?.user_metadata?.first_name || '');
@@ -3864,8 +4549,7 @@ function ProfileSection({ user, onUpdated, logActivity }) {
     setAvatarUrl(user?.user_metadata?.avatar_url || '');
   }, [user]);
 
-  async function handleAvatarUpload(e) {
-    const file = e.target.files?.[0];
+  async function handleAvatarUpload(file) {
     if (!file) return;
     setUploading(true);
     const fileName = `${user.id}-${Date.now()}-${sanitizeFileName(file.name)}`;
@@ -3880,8 +4564,8 @@ function ProfileSection({ user, onUpdated, logActivity }) {
     const { error } = await supabase.auth.updateUser({ data: { avatar_url: data.publicUrl } });
     setUploading(false);
     if (error) {
-      console.error('Avatar upload failed:', error);
-      alert('Không thể tải ảnh lên. Vui lòng thử lại.');
+      console.error('Avatar update failed:', error);
+      alert('Không thể cập nhật ảnh. Vui lòng thử lại.');
       return;
     }
     setAvatarUrl(data.publicUrl);
@@ -3920,10 +4604,13 @@ function ProfileSection({ user, onUpdated, logActivity }) {
           <div className="w-16 h-16 rounded-full overflow-hidden bg-ice-cream dark:bg-night-sky flex items-center justify-center flex-shrink-0">
             {avatarUrl ? <img src={avatarUrl} alt="" className="w-full h-full object-cover" /> : <span className="text-xl font-bold text-steel dark:text-light-grey">{(firstName || user?.email || 'B')[0].toUpperCase()}</span>}
           </div>
-          <label className="bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-2.5 text-sm text-blueberry dark:text-white font-semibold cursor-pointer hover:bg-turquoise/10 transition flex items-center gap-2">
-            {uploading ? <Loader2 size={14} className="animate-spin" /> : <Camera size={14} />} {uploading ? 'Đang tải...' : 'Đổi ảnh đại diện'}
-            <input type="file" accept="image/*" onChange={handleAvatarUpload} className="hidden" disabled={uploading} />
-          </label>
+          <ImageUploader
+            aspectRatio="1:1"
+            circularCrop
+            uploading={uploading}
+            triggerLabel="Đổi ảnh đại diện"
+            onConfirm={handleAvatarUpload}
+          />
         </div>
       </div>
 
@@ -3957,6 +4644,8 @@ function ProfileSection({ user, onUpdated, logActivity }) {
 
 function CategorySection({ categories, reload, softDelete }) {
   const [tab, setTab] = useState('expense');
+  // Bộ lọc hiển thị theo isFund — chỉ lọc hiển thị, không đổi dữ liệu
+  const [fundFilter, setFundFilter] = useState('all'); // 'all' | 'fund' | 'not_fund'
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState({ name: '', icon: '', monthly_limit: '', is_fund: false, interest_rate: '' });
   const [saving, setSaving] = useState(false);
@@ -3982,7 +4671,16 @@ function CategorySection({ categories, reload, softDelete }) {
     reload();
   }
 
-  const list = categories.filter((c) => c.type === tab);
+  // Filter chỉ dựa trực tiếp trên is_fund === true / false, không tạo dữ liệu mới
+  const list = categories
+    .filter((c) => c.type === tab)
+    .filter((c) => (fundFilter === 'all' ? true : fundFilter === 'fund' ? c.is_fund === true : c.is_fund !== true));
+
+  const FUND_FILTERS = [
+    { key: 'all', label: 'Tất cả' },
+    { key: 'fund', label: 'Quỹ' },
+    { key: 'not_fund', label: 'Không phải quỹ' },
+  ];
 
   return (
     <>
@@ -3990,13 +4688,33 @@ function CategorySection({ categories, reload, softDelete }) {
         <button onClick={() => setTab('expense')} className={`flex-1 py-2 rounded-full text-sm font-bold ${tab === 'expense' ? 'bg-white dark:bg-[#2a2a44] text-turquoise shadow' : 'text-steel dark:text-light-grey'}`}>Chi tiêu</button>
         <button onClick={() => setTab('income')} className={`flex-1 py-2 rounded-full text-sm font-bold ${tab === 'income' ? 'bg-white dark:bg-[#2a2a44] text-turquoise shadow' : 'text-steel dark:text-light-grey'}`}>Thu nhập</button>
       </div>
+      <div className="flex items-center gap-2 mb-4 overflow-x-auto scrollbar-hide">
+        {FUND_FILTERS.map((f) => (
+          <button
+            key={f.key}
+            onClick={() => setFundFilter(f.key)}
+            className={`px-3.5 py-1.5 rounded-full text-xs font-bold flex-shrink-0 transition ${fundFilter === f.key ? 'bg-gradient-primary text-white shadow-md shadow-turquoise/30' : 'bg-ice-cream dark:bg-night-sky text-steel dark:text-light-grey'}`}
+          >
+            {f.label}
+          </button>
+        ))}
+      </div>
       <button onClick={startNew} className="w-full border-2 border-dashed border-[rgba(126,127,144,0.4)] dark:border-[rgba(189,189,203,0.2)] rounded-2xl py-3 text-sm text-steel dark:text-light-grey font-bold mb-4 flex items-center justify-center gap-2 hover:border-turquoise dark:hover:border-turquoise transition"><Plus size={16} /> Thêm danh mục mới</button>
       <div className="flex flex-col gap-2">
-        {list.map((cat) => (
+        {list.length === 0 ? (
+          <p className="text-steel dark:text-light-grey text-sm text-center py-4">Không có danh mục nào phù hợp bộ lọc.</p>
+        ) : list.map((cat) => (
           <div key={cat.id} className="flex items-center gap-3 bg-ice-cream dark:bg-night-sky rounded-2xl p-3">
             <EmojiCircle emoji={cat.icon} size={36} bg="#E3D6FF" />
             <div className="flex-1 min-w-0">
-              <p className="text-blueberry dark:text-white font-bold text-sm">{cat.name} {cat.is_fund && <span className="text-[10px] bg-turquoise/10 text-turquoise px-1.5 py-0.5 rounded-full ml-1 font-bold">Quỹ</span>}</p>
+              <p className="text-blueberry dark:text-white font-bold text-sm flex items-center gap-1">
+                {cat.name}
+                {cat.is_fund ? (
+                  <span className="text-[10px] bg-turquoise/10 text-turquoise px-1.5 py-0.5 rounded-full font-bold">Quỹ</span>
+                ) : (
+                  <span className="text-[10px] bg-steel/10 text-steel dark:bg-light-grey/10 dark:text-light-grey px-1.5 py-0.5 rounded-full font-bold">Chi tiêu</span>
+                )}
+              </p>
               <p className="text-steel dark:text-light-grey text-xs font-semibold">
                 {cat.monthly_limit ? `Hạn mức: ${formatMoney(cat.monthly_limit)}` : ''}
                 {cat.monthly_limit && cat.interest_rate > 0 ? ' • ' : ''}
@@ -4932,12 +5650,22 @@ function MainApp({ user, theme, toggleTheme }) {
   }
 
   const [showAdd, setShowAdd] = useState(false);
+  const [addType, setAddType] = useState('expense');
   const [selectedFundId, setSelectedFundId] = useState(null);
   const [fundReturnScreen, setFundReturnScreen] = useState('dashboard');
   function openFund(id, from = 'dashboard') { setSelectedFundId(id); setFundReturnScreen(from); setScreen('fund-detail'); }
   const [selectedAccountId, setSelectedAccountId] = useState(null);
   const [accountReturnScreen, setAccountReturnScreen] = useState('accounts');
   function openAccount(id, from = 'accounts') { setSelectedAccountId(id); setAccountReturnScreen(from); setScreen('account-detail'); }
+
+  function handleAddClick(type = 'expense') {
+    setAddType(type);
+    if (type === 'transfer') {
+      alert('Tính năng chuyển khoản đang được phát triển.');
+      return;
+    }
+    setShowAdd(true);
+  }
 
   // Helper to render screen content inside layout
   function renderScreenContent() {
@@ -4996,9 +5724,10 @@ function MainApp({ user, theme, toggleTheme }) {
       <BottomNavMobile
         screen={screen}
         setScreen={setScreen}
-        onAddClick={() => setShowAdd(true)}
+        onAddClick={handleAddClick}
         theme={theme}
         toggleTheme={toggleTheme}
+        openSettings={goToSettings}
       />
 
       {/* AddTransaction Modal - rendered globally */}
@@ -5009,6 +5738,7 @@ function MainApp({ user, theme, toggleTheme }) {
           categories={categories}
           transactions={transactions}
           onSaved={loadAll}
+          initialType={addType}
         />
       )}
     </div>
