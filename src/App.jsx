@@ -629,16 +629,21 @@ function filterTransactionsByDate(transactions, start, end) {
   });
 }
 
-// Aggregate period data
-function aggregatePeriodData(txs) {
+// Aggregate period data. "Quỹ" và "danh mục chi tiêu thường" được phân biệt qua
+// category.is_fund (không suy luận qua account_id) để không lẫn số liệu khi
+// khoản chi từ quỹ và khoản chi từ nguồn tiền "Thu nhập" đều có account_id = null.
+function aggregatePeriodData(txs, categories) {
+  const fundIds = new Set((categories || []).filter((c) => c.is_fund).map((c) => c.id));
   const income = txs.filter(t => t.type === 'income').reduce((s, t) => s + Number(t.amount), 0);
   const allocation = txs.filter(t => t.type === 'allocation').reduce((s, t) => s + Number(t.amount), 0);
-  const expenses = txs.filter(t => t.type === 'expense');
-  const expenseFromIncome = expenses.filter(t => t.account_id === null).reduce((s, t) => s + Number(t.amount), 0);
-  const expenseFromFund = expenses.filter(t => t.account_id !== null).reduce((s, t) => s + Number(t.amount), 0);
-  const totalActualExpense = expenseFromIncome + expenseFromFund;
+  const normalExpenses = txs.filter(t => t.type === 'expense' && !fundIds.has(t.category_id));
+  const fundExpenses = txs.filter(t => t.type === 'expense' && fundIds.has(t.category_id));
+  const expenseFromIncome = normalExpenses.filter(t => t.account_id === null).reduce((s, t) => s + Number(t.amount), 0);
+  const expenseFromWallet = normalExpenses.filter(t => t.account_id !== null).reduce((s, t) => s + Number(t.amount), 0);
+  const expenseFromFund = fundExpenses.reduce((s, t) => s + Number(t.amount), 0);
+  const totalActualExpense = expenseFromIncome + expenseFromWallet + expenseFromFund;
   const remaining = income - allocation - expenseFromIncome;
-  return { income, allocation, expenseFromIncome, expenseFromFund, totalActualExpense, remaining };
+  return { income, allocation, expenseFromIncome, expenseFromWallet, expenseFromFund, totalActualExpense, remaining };
 }
 
 /* ==============================================================================
@@ -912,9 +917,13 @@ function AddTransaction({ onClose, accounts, categories, transactions, onSaved }
   const isFundCategory = type === 'expense' && !!activeCat?.is_fund;
   const overLimit = type === 'expense' && activeCat?.monthly_limit && Number(amount) > Number(activeCat.monthly_limit);
 
-  const usesPeriod = type === 'income' || type === 'allocation' || (type === 'expense' && expenseSource === 'income');
+  const usesPeriod = type === 'income' || type === 'allocation' || (type === 'expense' && !isFundCategory && expenseSource === 'income');
   const pool = usesPeriod ? periodPool(transactions || [], selectedPeriod) : null;
-  const periodOverLimit = (type === 'allocation' || (type === 'expense' && expenseSource === 'income')) && pool && Number(amount) > pool.remaining;
+  const periodOverLimit = (type === 'allocation' || (type === 'expense' && !isFundCategory && expenseSource === 'income')) && pool && Number(amount) > pool.remaining;
+  const fundBalanceNow = isFundCategory ? fundBalanceWithProfit(activeCat, transactions || []) : null;
+  const fundOverBalance = isFundCategory && amount && Number(amount) > fundBalanceNow;
+  const sourceAccount = type === 'expense' && !isFundCategory && expenseSource && expenseSource !== 'income' ? accounts.find((a) => a.id === expenseSource) : null;
+  const sourceOverBalance = sourceAccount && amount && Number(amount) > accountBalance(sourceAccount, transactions || []);
 
   function handleAmountChange(e) { setAmount(e.target.value.replace(/\D/g, '')); }
 
@@ -939,7 +948,6 @@ function AddTransaction({ onClose, accounts, categories, transactions, onSaved }
 
   function handleExpenseSourceSelect(source) {
     setExpenseSource(source);
-    setSelectedCategory(null);
   }
 
   function resetForm() {
@@ -964,14 +972,22 @@ function AddTransaction({ onClose, accounts, categories, transactions, onSaved }
       noteToSave = tagPeriodNote(selectedPeriod, note);
     } else if (type === 'allocation') {
       if (!selectedPeriod) { alert('Vui lòng chọn Kỳ (nguồn thu nhập để nạp quỹ)'); return; }
+      if (periodOverLimit) { alert('Số tiền nạp vượt quá số dư còn lại của kỳ thu nhập.'); return; }
       noteToSave = tagPeriodNote(selectedPeriod, note);
     } else if (type === 'expense') {
-      if (!expenseSource) { alert('Vui lòng chọn Nguồn tiền: Thu nhập hoặc 1 ví'); return; }
-      if (expenseSource === 'income') {
-        if (!selectedPeriod) { alert('Vui lòng chọn Kỳ'); return; }
-        noteToSave = tagPeriodNote(selectedPeriod, note);
+      if (isFundCategory) {
+        // Chi tiêu từ quỹ: trừ thẳng vào quỹ, không cần chọn nguồn tiền.
+        if (fundOverBalance) { alert('Số dư quỹ không đủ.'); return; }
       } else {
-        accountIdToSave = expenseSource;
+        if (!expenseSource) { alert('Vui lòng chọn Nguồn tiền cho khoản chi tiêu này.'); return; }
+        if (expenseSource === 'income') {
+          if (!selectedPeriod) { alert('Vui lòng chọn Kỳ'); return; }
+          if (periodOverLimit) { alert('Số dư nguồn tiền không đủ.'); return; }
+          noteToSave = tagPeriodNote(selectedPeriod, note);
+        } else {
+          if (sourceOverBalance) { alert('Số dư nguồn tiền không đủ.'); return; }
+          accountIdToSave = expenseSource;
+        }
       }
     }
 
@@ -1013,6 +1029,8 @@ function AddTransaction({ onClose, accounts, categories, transactions, onSaved }
           </div>
           {overLimit && <p className="text-cotton-candy text-xs mt-2 font-semibold">⚠️ Vượt hạn mức {formatMoney(activeCat.monthly_limit)} của danh mục này!</p>}
           {periodOverLimit && <p className="text-cotton-candy text-xs mt-2 font-semibold">⚠️ Vượt số tiền còn lại của Kỳ này ({formatMoney(pool.remaining)})!</p>}
+          {fundOverBalance && <p className="text-cotton-candy text-xs mt-2 font-semibold">⚠️ Vượt số dư hiện có của quỹ ({formatMoney(fundBalanceNow)})!</p>}
+          {sourceOverBalance && <p className="text-cotton-candy text-xs mt-2 font-semibold">⚠️ Vượt số dư hiện có của nguồn tiền này ({formatMoney(accountBalance(sourceAccount, transactions || []))})!</p>}
         </div>
         <div className="px-5 mt-8">
           <p className="text-blueberry dark:text-white font-bold text-sm mb-3">{type === 'income' ? 'Danh mục thu nhập' : 'Quỹ / Danh mục'} <span className="text-cotton-candy">*</span></p>
@@ -1032,17 +1050,20 @@ function AddTransaction({ onClose, accounts, categories, transactions, onSaved }
           )}
         </div>
 
-        {type === 'expense' && (
+        {type === 'expense' && isFundCategory && (
+          <div className="px-5 mt-8">
+            <p className="text-steel dark:text-light-grey text-xs bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3">Khoản này được trừ trực tiếp từ quỹ "{activeCat.name}" — không cần chọn nguồn tiền.</p>
+          </div>
+        )}
+
+        {type === 'expense' && !isFundCategory && (
           <div className="px-5 mt-8">
             <p className="text-blueberry dark:text-white font-bold text-sm mb-3">Nguồn tiền <span className="text-cotton-candy">*</span></p>
-            {isFundCategory && <p className="text-steel dark:text-light-grey text-xs mb-3">Rút từ quỹ "{activeCat.name}" — chọn ví nhận tiền.</p>}
             <div className="grid grid-cols-4 sm:grid-cols-5 gap-3">
-              {!isFundCategory && (
-                <button onClick={() => handleExpenseSourceSelect('income')} className="flex flex-col items-center gap-1.5">
-                  <EmojiCircle emoji="💵" size={48} active={expenseSource === 'income'} activeColor="#0DBACC" />
-                  <span className={`text-[11px] text-center leading-tight ${expenseSource === 'income' ? 'text-blueberry dark:text-white font-semibold' : 'text-steel dark:text-light-grey'}`}>Thu nhập</span>
-                </button>
-              )}
+              <button onClick={() => handleExpenseSourceSelect('income')} className="flex flex-col items-center gap-1.5">
+                <EmojiCircle emoji="💵" size={48} active={expenseSource === 'income'} activeColor="#0DBACC" />
+                <span className={`text-[11px] text-center leading-tight ${expenseSource === 'income' ? 'text-blueberry dark:text-white font-semibold' : 'text-steel dark:text-light-grey'}`}>Thu nhập</span>
+              </button>
               {accounts.map((acc) => {
                 const active = expenseSource === acc.id;
                 return (
@@ -1057,7 +1078,7 @@ function AddTransaction({ onClose, accounts, categories, transactions, onSaved }
           </div>
         )}
 
-        {(type === 'income' || type === 'allocation' || (type === 'expense' && expenseSource === 'income')) && (
+        {usesPeriod && (
           <div className="px-5 mt-8">
             <p className="text-blueberry dark:text-white font-bold text-sm mb-3">Năm <span className="text-cotton-candy">*</span></p>
             <select value={selectedYear} onChange={(e) => handleYearChange(Number(e.target.value))} className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none mb-3 dark:text-white text-blueberry">
@@ -1069,7 +1090,7 @@ function AddTransaction({ onClose, accounts, categories, transactions, onSaved }
             </select>
             {pool && (
               <p className="text-steel dark:text-light-grey text-xs mt-2">
-                Thu nhập kỳ này: <span className="text-blueberry dark:text-white font-semibold">{formatMoney(pool.total)}</span> — Còn lại: <span className={`font-semibold ${pool.remaining < 0 ? 'text-cotton-candy' : 'text-turquoise'}`}>{formatMoney(pool.remaining)}</span>
+                Thu nhập kỳ này: <span className="text-blueberry dark:text-white font-semibold">{formatMoney(pool.total)}</span> — Đã phân bổ: <span className="text-blueberry dark:text-white font-semibold">{formatMoney(pool.used)}</span> — Còn lại: <span className={`font-semibold ${pool.remaining < 0 ? 'text-cotton-candy' : 'text-turquoise'}`}>{formatMoney(pool.remaining)}</span>
               </p>
             )}
           </div>
@@ -1459,10 +1480,49 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
     const cur = new Date().getFullYear();
     return Array.from({ length: 21 }, (_, i) => cur - 10 + i);
   })();
-  function scrollToWalletCard(id) {
-    const el = document.getElementById(`wallet-card-${id}`);
-    if (el) el.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+  const [walletActiveIndex, setWalletActiveIndex] = useState(0);
+  const walletTouchStartX = useRef(null);
+  const walletWheelLocked = useRef(false);
+  function goToWalletIndex(idx) {
+    setWalletActiveIndex((cur) => {
+      const clamped = Math.max(0, Math.min(accounts.length - 1, idx));
+      return clamped;
+    });
   }
+  function walletStep(dir) {
+    setWalletActiveIndex((cur) => Math.max(0, Math.min(accounts.length - 1, cur + dir)));
+  }
+  function handleWalletTouchStart(e) {
+    walletTouchStartX.current = e.touches[0].clientX;
+  }
+  function handleWalletTouchEnd(e) {
+    if (walletTouchStartX.current == null) return;
+    const deltaX = e.changedTouches[0].clientX - walletTouchStartX.current;
+    walletTouchStartX.current = null;
+    if (Math.abs(deltaX) < 40) return;
+    walletStep(deltaX < 0 ? 1 : -1);
+  }
+  function handleWalletWheel(e) {
+    const delta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+    if (Math.abs(delta) < 12) return;
+    const dir = delta > 0 ? 1 : -1;
+    if ((dir === 1 && walletActiveIndex >= accounts.length - 1) || (dir === -1 && walletActiveIndex <= 0)) return;
+    e.preventDefault();
+    if (walletWheelLocked.current) return;
+    walletWheelLocked.current = true;
+    walletStep(dir);
+    setTimeout(() => { walletWheelLocked.current = false; }, 380);
+  }
+  function walletStackStyle(depth) {
+    if (depth < 0) return { transform: 'translateY(14px) scale(0.92)', opacity: 0, zIndex: 0, pointerEvents: 'none' };
+    if (depth === 0) return { transform: 'translateY(0px) scale(1)', opacity: 1, zIndex: 30 };
+    if (depth === 1) return { transform: 'translateY(-10px) scale(0.97)', opacity: 0.85, zIndex: 20, pointerEvents: 'none' };
+    if (depth === 2) return { transform: 'translateY(-18px) scale(0.94)', opacity: 0.55, zIndex: 10, pointerEvents: 'none' };
+    return { transform: 'translateY(-18px) scale(0.94)', opacity: 0, zIndex: 0, pointerEvents: 'none' };
+  }
+  useEffect(() => {
+    setWalletActiveIndex((cur) => Math.max(0, Math.min(accounts.length - 1, cur)));
+  }, [accounts.length]);
   const [breakdownPeriod, setBreakdownPeriod] = useState('month');
   const [breakdownYear, setBreakdownYear] = useState(new Date().getFullYear());
   const [breakdownPeriodKey, setBreakdownPeriodKey] = useState(currentPeriodKey());
@@ -1477,20 +1537,6 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
   let cumulative = 0;
   const palette = ['#0DBACC', '#74ACEF', '#F18AB5', '#9F7FE0', '#B4F1F1', '#C1DDFF', '#FFCDDB', '#E3D6FF'];
   const weekDayLabels = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'];
-
-  const walletScrollRef = useRef(null);
-  const walletContainerRef = useRef(null);
-  const [walletIndex, setWalletIndex] = useState(0);
-  const [walletViewport, setWalletViewport] = useState(288);
-  useEffect(() => {
-    const el = walletContainerRef.current;
-    if (!el) return;
-    const measure = () => setWalletViewport(el.offsetWidth || 288);
-    measure();
-    const ro = new ResizeObserver(measure);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
 
   const breakdownBuckets = (() => {
     if (breakdownPeriod === 'week') {
@@ -1523,51 +1569,6 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
     }
     return buckets;
   })();
-
-  useEffect(() => {
-    const el = walletScrollRef.current;
-    if (!el) return;
-    let tid = null;
-    function handleScroll() {
-      if (tid) clearTimeout(tid);
-      tid = setTimeout(() => {
-        const cards = el.querySelectorAll('[id^="wallet-card-"]');
-        if (!cards || cards.length === 0) return;
-        const scrollLeft = el.scrollLeft;
-        let nearest = null; let best = Infinity;
-        const centerScroll = scrollLeft + (el.clientWidth / 2);
-        cards.forEach((c) => {
-          const left = c.offsetLeft;
-          const cCenter = left + (c.clientWidth / 2);
-          const d = Math.abs(cCenter - centerScroll);
-          if (d < best) { best = d; nearest = c; }
-        });
-        if (nearest) {
-          const targetLeft = Math.max(0, nearest.offsetLeft - (el.clientWidth - nearest.clientWidth) / 2);
-          el.scrollTo({ left: targetLeft, behavior: 'smooth' });
-        }
-        if (nearest) {
-          const cardsArr = Array.from(cards);
-          const idx = cardsArr.indexOf(nearest);
-          if (idx !== -1) setWalletIndex(idx);
-        }
-      }, 100);
-    }
-    el.addEventListener('scroll', handleScroll, { passive: true });
-    return () => { el.removeEventListener('scroll', handleScroll); if (tid) clearTimeout(tid); };
-  }, [accounts]);
-
-  function scrollToCardIndex(idx) {
-    const el = walletScrollRef.current;
-    if (!el) return;
-    const cards = el.querySelectorAll('[id^="wallet-card-"]');
-    if (!cards || cards.length === 0) return;
-    const target = cards[idx];
-    if (!target) return;
-    const targetLeft = Math.max(0, target.offsetLeft - (el.clientWidth - target.clientWidth) / 2);
-    el.scrollTo({ left: targetLeft, behavior: 'smooth' });
-    setWalletIndex(idx);
-  }
 
   function buildCategorySeries(cats, txType) {
     const isPeriodMode = breakdownPeriod === 'month';
@@ -2029,8 +2030,8 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
                         <div className="absolute top-9 right-0 bg-white dark:bg-[#1e1e32] rounded-2xl shadow-card border-0 dark:border dark:border-[rgba(189,189,203,0.1)] py-1.5 w-56 z-40 max-h-72 overflow-y-auto">
                           {accounts.length === 0 ? (
                             <p className="text-steel dark:text-light-grey text-xs text-center py-4 px-4">Chưa có ví nào.</p>
-                          ) : accounts.map((acc) => (
-                            <button key={acc.id} onClick={() => { setShowWalletPopover(false); scrollToWalletCard(acc.id); }} className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-blueberry dark:text-white hover:bg-ice-cream dark:hover:bg-night-sky/30 text-left">
+                          ) : accounts.map((acc, idx) => (
+                            <button key={acc.id} onClick={() => { setShowWalletPopover(false); goToWalletIndex(idx); }} className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-blueberry dark:text-white hover:bg-ice-cream dark:hover:bg-night-sky/30 text-left">
                               <EmojiCircle emoji={acc.icon} size={26} bg="#F7F7F8" />
                               <span className="flex-1 min-w-0 truncate font-semibold">{acc.name}</span>
                               <span className="text-steel dark:text-light-grey text-xs flex-shrink-0">{formatMoney(accountBalance(acc, transactions))}</span>
@@ -2049,47 +2050,40 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
                   <span className="text-xs font-bold">Chưa có ví nào — bấm để thêm ví đầu tiên</span>
                 </button>
               ) : (
-                <div className="w-full" ref={walletContainerRef}>
-                  <div className="mb-2">
-                    {(() => {
-                      const gap = 12;
-                      // Thẻ có bề rộng cố định (tối đa viewport nếu màn quá hẹp),
-                      // để khi sidebar thu gọn / có thêm chỗ thì hiện thêm thẻ kế bên,
-                      // và nếu không đủ chỗ cho hết thẻ thì tự động cho scroll ngang.
-                      const cardWidth = Math.min(240, walletViewport);
-                      const viewport = walletViewport;
-                      const stackTotalWidth = Math.max(viewport, (accounts.length * cardWidth) + (accounts.length - 1) * gap);
-                      return (
-                        <div className="relative" style={{ width: viewport }}>
-                          <div ref={walletScrollRef} className="hide-scrollbar overflow-x-auto scrollbar-hide" style={{ width: viewport, scrollSnapType: 'x mandatory', WebkitOverflowScrolling: 'touch' }}>
-                            <div className="flex items-start" style={{ width: stackTotalWidth, gap }}>
-                            {accounts.map((acc, i) => {
-                              return (
-                                <div key={acc.id} style={{ scrollSnapAlign: 'start', marginLeft: 0 }}>
-                                  <button
-                                    id={`wallet-card-${acc.id}`}
-                                    onClick={() => onOpenAccount(acc.id, 'dashboard')}
-                                    className="rounded-2xl p-5 text-left shadow-card hover:-translate-y-1 transition-transform"
-                                    style={{ width: cardWidth, background: accountCardGradient(acc.type) }}
-                                  >
-                                    <div className="flex items-start justify-between">
-                                      <EmojiCircle emoji={acc.icon} size={36} active activeColor="rgba(255,255,255,0.3)" bg="rgba(255,255,255,0.14)" />
-                                      <div className="text-right text-xs text-white/90 font-semibold">{ACCOUNT_TYPES.find((t) => t.value === acc.type)?.label || acc.type}</div>
-                                    </div>
-                                    <div className="mt-6">
-                                      <div className="text-sm text-white/90 truncate font-semibold">{acc.name}</div>
-                                      <div className="text-lg font-bold text-white mt-1">{formatMoney(accountBalance(acc, transactions))}</div>
-                                    </div>
-                                  </button>
-                                </div>
-                              );
-                            })}
-                            </div>
-                          </div>
+                <div
+                  className="relative w-full overflow-hidden"
+                  style={{ height: 172 }}
+                  onTouchStart={handleWalletTouchStart}
+                  onTouchEnd={handleWalletTouchEnd}
+                  onWheel={handleWalletWheel}
+                >
+                  {accounts.map((acc, idx) => {
+                    const depth = idx - walletActiveIndex;
+                    if (depth < -1 || depth > 3) return null;
+                    const style = walletStackStyle(depth);
+                    return (
+                      <button
+                        key={acc.id}
+                        id={`wallet-card-${acc.id}`}
+                        onClick={() => { if (depth === 0) onOpenAccount(acc.id, 'dashboard'); else goToWalletIndex(idx); }}
+                        className="absolute inset-0 rounded-2xl p-5 text-left shadow-card hover:shadow-lg"
+                        style={{
+                          ...style,
+                          background: accountCardGradient(acc.type),
+                          transition: 'transform 320ms cubic-bezier(.22,.9,.32,1), opacity 320ms ease, box-shadow 200ms ease',
+                        }}
+                      >
+                        <div className="flex items-start justify-between">
+                          <EmojiCircle emoji={acc.icon} size={36} active activeColor="rgba(255,255,255,0.3)" bg="rgba(255,255,255,0.14)" />
+                          <div className="text-right text-xs text-white/90 font-semibold">{ACCOUNT_TYPES.find((t) => t.value === acc.type)?.label || acc.type}</div>
                         </div>
-                      );
-                    })()}
-                  </div>
+                        <div className="mt-6">
+                          <div className="text-sm text-white/90 truncate font-semibold">{acc.name}</div>
+                          <div className="text-lg font-bold text-white mt-1">{formatMoney(accountBalance(acc, transactions))}</div>
+                        </div>
+                      </button>
+                    );
+                  })}
                 </div>
               )}
               {showAddWallet && <EditAccountModal onClose={() => setShowAddWallet(false)} onSaved={reload} isNew={true} />}
@@ -4078,7 +4072,7 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
   });
 
   // Aggregate
-  const agg = aggregatePeriodData(periodTxs);
+  const agg = aggregatePeriodData(periodTxs, categories);
   const { income, allocation, expenseFromIncome, expenseFromFund, totalActualExpense, remaining } = agg;
 
   // Previous period
@@ -4135,7 +4129,7 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
       const d = new Date(t.date || t.created_at);
       return d >= prev.start && d <= prev.end;
     });
-    prevAgg = aggregatePeriodData(prevTxs);
+    prevAgg = aggregatePeriodData(prevTxs, categories);
   }
 
   // Asset snapshot at end of period
@@ -4156,13 +4150,13 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
     amount: periodTxs.filter(t => t.category_id === c.id && t.type === 'income').reduce((s, t) => s + Number(t.amount), 0)
   })).filter(c => c.amount > 0).sort((a,b) => b.amount - a.amount);
 
-  // Expense breakdown
-  const expenseCats = categories.filter(c => c.type === 'expense');
+  // Expense breakdown — chỉ tính danh mục chi tiêu thường (không gồm quỹ, quỹ đã có mục riêng ở trên)
+  const expenseCats = categories.filter(c => c.type === 'expense' && !c.is_fund);
   const expenseBreakdown = expenseCats.map(c => ({
     ...c,
     amount: periodTxs.filter(t => t.category_id === c.id && t.type === 'expense').reduce((s, t) => s + Number(t.amount), 0),
     fromIncome: periodTxs.filter(t => t.category_id === c.id && t.type === 'expense' && t.account_id === null).reduce((s, t) => s + Number(t.amount), 0),
-    fromFund: periodTxs.filter(t => t.category_id === c.id && t.type === 'expense' && t.account_id !== null).reduce((s, t) => s + Number(t.amount), 0)
+    fromWallet: periodTxs.filter(t => t.category_id === c.id && t.type === 'expense' && t.account_id !== null).reduce((s, t) => s + Number(t.amount), 0)
   })).filter(c => c.amount > 0).sort((a,b) => b.amount - a.amount);
 
   // Fund data
@@ -4186,7 +4180,7 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
           const d = new Date(t.date || t.created_at);
           return d >= s && d <= e;
         });
-        const a = aggregatePeriodData(txs);
+        const a = aggregatePeriodData(txs, categories);
         months.push({ label: `Th${m}`, income: a.income, allocation: a.allocation, expenseFromIncome: a.expenseFromIncome, remaining: a.remaining });
       }
       return months;
@@ -4201,7 +4195,7 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
           const d = new Date(t.date || t.created_at);
           return d >= s && d <= e;
         });
-        const a = aggregatePeriodData(txs);
+        const a = aggregatePeriodData(txs, categories);
         months.push({ label: `Th${m}`, income: a.income, allocation: a.allocation, expenseFromIncome: a.expenseFromIncome, remaining: a.remaining });
       }
       return months;
@@ -4216,7 +4210,7 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
           const d = new Date(t.date || t.created_at);
           return d >= s && d <= e;
         });
-        const a = aggregatePeriodData(txs);
+        const a = aggregatePeriodData(txs, categories);
         months.push({ label: `Th${m}`, income: a.income, allocation: a.allocation, expenseFromIncome: a.expenseFromIncome, remaining: a.remaining });
       }
       return months;
@@ -4547,7 +4541,7 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
           {expenseBreakdown.length === 0 ? <p className="text-steel dark:text-light-grey">Không có chi tiêu.</p> : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               {expenseBreakdown.map(c => {
-                const total = c.fromIncome + c.fromFund;
+                const total = c.fromIncome + c.fromWallet;
                 const pct = totalActualExpense > 0 ? Math.round((total / totalActualExpense) * 100) : 0;
                 return (
                   <button key={c.id} onClick={() => openDrilldown(c.id)} className="bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-left hover:bg-turquoise/10 transition">
@@ -4561,7 +4555,7 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
                     <div className="flex justify-between text-xs text-steel dark:text-light-grey mt-1">
                       <span>{pct}%</span>
                       <span>{c.fromIncome > 0 ? `Từ thu nhập: ${formatMoney(c.fromIncome)}` : ''}</span>
-                      <span>{c.fromFund > 0 ? `Từ quỹ: ${formatMoney(c.fromFund)}` : ''}</span>
+                      <span>{c.fromWallet > 0 ? `Từ ví: ${formatMoney(c.fromWallet)}` : ''}</span>
                     </div>
                   </button>
                 );
