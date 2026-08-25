@@ -233,6 +233,22 @@ function formatMoney(n) {
   return Math.abs(n).toLocaleString('en-US') + 'đ';
 }
 
+// Supabase Storage object key không chấp nhận dấu tiếng Việt, khoảng trắng, ký tự đặc biệt.
+// Chuẩn hoá tên file trước khi upload để tránh lỗi "Invalid key".
+function sanitizeFileName(name) {
+  const dotIndex = name.lastIndexOf('.');
+  const base = dotIndex > -1 ? name.slice(0, dotIndex) : name;
+  const ext = dotIndex > -1 ? name.slice(dotIndex + 1) : '';
+  const cleanBase = base
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // bỏ dấu
+    .replace(/đ/g, 'd').replace(/Đ/g, 'D')
+    .replace(/[^a-zA-Z0-9]+/g, '-') // ký tự khác -> gạch ngang
+    .replace(/^-+|-+$/g, '') // bỏ gạch ngang ở đầu/cuối
+    .toLowerCase() || 'file';
+  const cleanExt = ext.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+  return cleanExt ? `${cleanBase}.${cleanExt}` : cleanBase;
+}
+
 function fundCardBackground(f, index) {
   if (f.background_url) return `linear-gradient(rgba(0,0,0,0.15),rgba(0,0,0,0.15)), url(${f.background_url})`;
   return FUND_CARD_GRADIENTS[index % FUND_CARD_GRADIENTS.length];
@@ -912,7 +928,7 @@ function AddTransaction({ onClose, accounts, categories, transactions, onSaved }
   const periods = buildPeriods(selectedYear);
 
   const categoryType = type === 'income' ? 'income' : 'expense';
-  const categoryList = categories.filter((c) => c.type === categoryType);
+  const categoryList = categories.filter((c) => c.type === categoryType && (type !== 'allocation' || c.is_fund));
   const activeCat = categories.find((c) => c.id === selectedCategory);
   const isFundCategory = type === 'expense' && !!activeCat?.is_fund;
   const overLimit = type === 'expense' && activeCat?.monthly_limit && Number(amount) > Number(activeCat.monthly_limit);
@@ -1165,7 +1181,7 @@ function EditFundForm({ category, onClose, onSaved, isNew, initialAmount, firstA
     const file = e.target.files?.[0];
     if (!file) return;
     setUploading(true);
-    const fileName = `${Date.now()}-${file.name}`;
+    const fileName = `${Date.now()}-${sanitizeFileName(file.name)}`;
     const { error: uploadError } = await supabase.storage.from('fund-images').upload(fileName, file);
     if (uploadError) { alert('Lỗi tải ảnh lên: ' + uploadError.message); setUploading(false); return; }
     const { data } = supabase.storage.from('fund-images').getPublicUrl(fileName);
@@ -2309,7 +2325,7 @@ function Funds({ setScreen, categories, transactions, onOpenFund, reload, onAddC
   const [sortDir, setSortDir] = useState('desc');
   const [showSortMenu, setShowSortMenu] = useState(false);
 
-  const funds = categories.filter((c) => c.type === 'expense');
+  const funds = categories.filter((c) => c.type === 'expense' && c.is_fund);
   const totalFunds = funds.reduce((s, c) => s + fundBalanceWithProfit(c, transactions), 0);
   const totalIn = funds.reduce((s, c) => s + transactions.filter((t) => t.category_id === c.id && t.type === 'allocation').reduce((a, t) => a + Number(t.amount), 0), 0);
   const totalOut = funds.reduce((s, c) => s + transactions.filter((t) => t.category_id === c.id && t.type === 'expense').reduce((a, t) => a + Number(t.amount), 0), 0);
@@ -3852,13 +3868,22 @@ function ProfileSection({ user, onUpdated, logActivity }) {
     const file = e.target.files?.[0];
     if (!file) return;
     setUploading(true);
-    const fileName = `${user.id}-${Date.now()}-${file.name}`;
+    const fileName = `${user.id}-${Date.now()}-${sanitizeFileName(file.name)}`;
     const { error: uploadError } = await supabase.storage.from('avatars').upload(fileName, file, { upsert: true });
-    if (uploadError) { alert('Lỗi tải ảnh lên: ' + uploadError.message); setUploading(false); return; }
+    if (uploadError) {
+      console.error('Avatar upload failed:', uploadError);
+      alert('Không thể tải ảnh lên. Vui lòng thử lại.');
+      setUploading(false);
+      return;
+    }
     const { data } = supabase.storage.from('avatars').getPublicUrl(fileName);
     const { error } = await supabase.auth.updateUser({ data: { avatar_url: data.publicUrl } });
     setUploading(false);
-    if (error) { alert('Lỗi: ' + error.message); return; }
+    if (error) {
+      console.error('Avatar upload failed:', error);
+      alert('Không thể tải ảnh lên. Vui lòng thử lại.');
+      return;
+    }
     setAvatarUrl(data.publicUrl);
     onUpdated();
   }
@@ -4000,6 +4025,113 @@ function CategorySection({ categories, reload, softDelete }) {
         </div>
       )}
     </>
+  );
+}
+
+/* ==============================================================================
+   15B. HOVER / TAP DETAIL CARD (dùng chung cho các card tổng quan ở Báo cáo)
+   ============================================================================== */
+function HoverDetailCard({ className, children, detail, align = 'left' }) {
+  const [open, setOpen] = useState(false);
+  const [hasHover, setHasHover] = useState(true);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined' && window.matchMedia) {
+      setHasHover(window.matchMedia('(hover: hover)').matches);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!open || hasHover) return;
+    function handleOutside(e) {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+    }
+    document.addEventListener('mousedown', handleOutside);
+    document.addEventListener('touchstart', handleOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleOutside);
+      document.removeEventListener('touchstart', handleOutside);
+    };
+  }, [open, hasHover]);
+
+  return (
+    <div
+      ref={ref}
+      className={`relative ${className || ''}`}
+      onMouseEnter={() => { if (hasHover) setOpen(true); }}
+      onMouseLeave={() => { if (hasHover) setOpen(false); }}
+      onClick={() => { if (!hasHover) setOpen((v) => !v); }}
+    >
+      {children}
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className={`absolute ${align === 'right' ? 'right-0' : 'left-0'} top-[calc(100%+8px)] z-40 w-72 max-w-[85vw] bg-white dark:bg-[#1e1e32] border-0 dark:border dark:border-[rgba(189,189,203,0.1)] rounded-2xl shadow-card p-4 max-h-72 overflow-y-auto scrollbar-hide transition-all duration-150 origin-top ${open ? 'opacity-100 scale-100 translate-y-0 pointer-events-auto' : 'opacity-0 scale-95 -translate-y-1 pointer-events-none'}`}
+      >
+        {detail}
+      </div>
+    </div>
+  );
+}
+
+function BreakdownDetailList({ title, items, total, colorClass }) {
+  return (
+    <div>
+      <p className="text-[11px] font-bold text-steel dark:text-light-grey mb-2 uppercase tracking-wide">{title}</p>
+      {items.length === 0 ? (
+        <p className="text-steel dark:text-light-grey text-sm py-1">Không có dữ liệu trong khoảng thời gian này.</p>
+      ) : (
+        <div className="flex flex-col gap-2 mb-2">
+          {items.map((it) => (
+            <div key={it.key} className="flex items-center justify-between gap-3">
+              <span className="text-blueberry dark:text-white text-sm font-semibold truncate">{it.name}</span>
+              <div className="text-right flex-shrink-0">
+                <p className={`text-sm font-bold ${colorClass}`}>{formatMoney(it.amount)}</p>
+                {total > 0 && <p className="text-[10px] text-steel dark:text-light-grey">{(it.amount / total * 100).toFixed(1)}%</p>}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="flex items-center justify-between border-t border-light-grey/30 dark:border-[rgba(189,189,203,0.15)] pt-2 mt-1">
+        <span className="text-sm font-bold text-blueberry dark:text-white">Tổng</span>
+        <span className={`text-sm font-bold ${colorClass}`}>{formatMoney(total)}</span>
+      </div>
+    </div>
+  );
+}
+
+function AssetBreakdownDetail({ wallets, funds, gold, total }) {
+  const Section = ({ label, items }) => (items.length === 0 ? null : (
+    <div className="mb-3 last:mb-0">
+      <p className="text-[10px] font-bold text-steel dark:text-light-grey uppercase tracking-wide mb-1.5">{label}</p>
+      <div className="flex flex-col gap-1.5">
+        {items.map((it) => (
+          <div key={it.key} className="flex items-center justify-between gap-3">
+            <span className="text-blueberry dark:text-white text-sm font-semibold truncate">{it.name}</span>
+            <span className="text-sm font-bold text-blueberry dark:text-white flex-shrink-0">{formatMoney(it.amount)}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  ));
+  return (
+    <div>
+      <p className="text-[11px] font-bold text-steel dark:text-light-grey mb-2 uppercase tracking-wide">Tổng tài sản</p>
+      {wallets.length === 0 && funds.length === 0 && gold.length === 0 ? (
+        <p className="text-steel dark:text-light-grey text-sm py-1">Không có dữ liệu.</p>
+      ) : (
+        <>
+          <Section label="Ví" items={wallets} />
+          <Section label="Quỹ" items={funds} />
+          <Section label="Vàng" items={gold} />
+        </>
+      )}
+      <div className="flex items-center justify-between border-t border-light-grey/30 dark:border-[rgba(189,189,203,0.15)] pt-2 mt-1">
+        <span className="text-sm font-bold text-blueberry dark:text-white">Tổng tài sản</span>
+        <span className="text-sm font-bold text-blueberry dark:text-white">{formatMoney(total)}</span>
+      </div>
+    </div>
   );
 }
 
@@ -4158,6 +4290,21 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
     fromIncome: periodTxs.filter(t => t.category_id === c.id && t.type === 'expense' && t.account_id === null).reduce((s, t) => s + Number(t.amount), 0),
     fromWallet: periodTxs.filter(t => t.category_id === c.id && t.type === 'expense' && t.account_id !== null).reduce((s, t) => s + Number(t.amount), 0)
   })).filter(c => c.amount > 0).sort((a,b) => b.amount - a.amount);
+
+  // Hover-card breakdown data (dùng đúng periodTxs / mốc "end" của filter thời gian đang chọn)
+  const incomeDetailItems = incomeBreakdown.map(c => ({ key: c.id, name: c.name, amount: c.amount }));
+  const expenseFundWithdrawn = fundCats.map(c => ({
+    key: c.id,
+    name: c.name,
+    amount: periodTxs.filter(t => t.category_id === c.id && t.type === 'expense').reduce((s, t) => s + Number(t.amount), 0),
+  })).filter(c => c.amount > 0);
+  const expenseDetailItems = [
+    ...expenseBreakdown.map(c => ({ key: c.id, name: c.name, amount: c.amount })),
+    ...expenseFundWithdrawn,
+  ].sort((a, b) => b.amount - a.amount);
+  const assetWalletItems = accounts.filter(a => a.type !== 'gold').map(a => ({ key: a.id, name: a.name, amount: accountBalanceAtDate(a, transactions, end) }));
+  const assetGoldItems = accounts.filter(a => a.type === 'gold').map(a => ({ key: a.id, name: a.name, amount: accountBalanceAtDate(a, transactions, end) }));
+  const assetFundItems = fundCats.map(c => ({ key: c.id, name: c.name, amount: fundBalanceAtDate(c, transactions, end) }));
 
   // Fund data
   const fundData = fundCats.map(c => {
@@ -4375,10 +4522,17 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
           </div>
           <div className="px-5 mt-4 bg-white dark:bg-[#1e1e32] rounded-3xl shadow-soft p-4">
             <h2 className="text-blueberry dark:text-white font-extrabold text-base mb-3">Tổng quan</h2>
+            <p className="text-steel dark:text-light-grey text-[11px] mb-2">Chạm vào 1 dòng để xem chi tiết</p>
             <div className="grid grid-cols-1 gap-2">
-              <div className="flex justify-between"><span className="text-steel dark:text-light-grey">Tài sản (cuối kỳ)</span><span className="font-bold text-blueberry dark:text-white">{formatMoney(totalAssetsEnd)}</span></div>
-              <div className="flex justify-between"><span className="text-steel dark:text-light-grey">Thu nhập</span><span className="font-bold text-turquoise">{formatMoney(income)}</span></div>
-              <div className="flex justify-between"><span className="text-steel dark:text-light-grey">Chi tiêu</span><span className="font-bold text-cotton-candy">{formatMoney(totalActualExpense)}</span></div>
+              <HoverDetailCard className="flex justify-between items-center py-1" detail={<AssetBreakdownDetail wallets={assetWalletItems} funds={assetFundItems} gold={assetGoldItems} total={totalAssetsEnd} />}>
+                <span className="text-steel dark:text-light-grey">Tài sản (cuối kỳ)</span><span className="font-bold text-blueberry dark:text-white">{formatMoney(totalAssetsEnd)}</span>
+              </HoverDetailCard>
+              <HoverDetailCard className="flex justify-between items-center py-1" detail={<BreakdownDetailList title="Tổng thu nhập" items={incomeDetailItems} total={income} colorClass="text-turquoise" />}>
+                <span className="text-steel dark:text-light-grey">Thu nhập</span><span className="font-bold text-turquoise">{formatMoney(income)}</span>
+              </HoverDetailCard>
+              <HoverDetailCard className="flex justify-between items-center py-1" detail={<BreakdownDetailList title="Chi tiêu" items={expenseDetailItems} total={totalActualExpense} colorClass="text-cotton-candy" />}>
+                <span className="text-steel dark:text-light-grey">Chi tiêu</span><span className="font-bold text-cotton-candy">{formatMoney(totalActualExpense)}</span>
+              </HoverDetailCard>
             </div>
           </div>
           <div className="px-5 mt-4 bg-white dark:bg-[#1e1e32] rounded-3xl shadow-soft p-4">
@@ -4467,18 +4621,28 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
         </div>
 
         <div className="grid grid-cols-3 gap-6 mb-6">
-          <div className="bg-white dark:bg-[#1e1e32] rounded-3xl p-6 shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)] cursor-pointer hover:shadow-card transition" onClick={() => alert(incomeBreakdown.map(c => `${c.name}: ${formatMoney(c.amount)}`).join('\n'))}>
+          <HoverDetailCard
+            className="bg-white dark:bg-[#1e1e32] rounded-3xl p-6 shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)] cursor-pointer hover:shadow-card transition"
+            detail={<AssetBreakdownDetail wallets={assetWalletItems} funds={assetFundItems} gold={assetGoldItems} total={totalAssetsEnd} />}
+          >
             <p className="text-steel dark:text-light-grey text-sm font-semibold">Tổng tài sản</p>
             <p className="text-blueberry dark:text-white text-2xl font-bold">{formatMoney(totalAssetsEnd)}</p>
-          </div>
-          <div className="bg-white dark:bg-[#1e1e32] rounded-3xl p-6 shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)] cursor-pointer hover:shadow-card transition" onClick={() => alert(incomeBreakdown.map(c => `${c.name}: ${formatMoney(c.amount)}`).join('\n'))}>
+          </HoverDetailCard>
+          <HoverDetailCard
+            className="bg-white dark:bg-[#1e1e32] rounded-3xl p-6 shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)] cursor-pointer hover:shadow-card transition"
+            detail={<BreakdownDetailList title="Tổng thu nhập" items={incomeDetailItems} total={income} colorClass="text-turquoise" />}
+          >
             <p className="text-steel dark:text-light-grey text-sm font-semibold">Thu nhập</p>
             <p className="text-turquoise text-2xl font-bold">{formatMoney(income)}</p>
-          </div>
-          <div className="bg-white dark:bg-[#1e1e32] rounded-3xl p-6 shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)] cursor-pointer hover:shadow-card transition" onClick={() => alert(expenseBreakdown.map(c => `${c.name}: ${formatMoney(c.amount)}`).join('\n'))}>
+          </HoverDetailCard>
+          <HoverDetailCard
+            className="bg-white dark:bg-[#1e1e32] rounded-3xl p-6 shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)] cursor-pointer hover:shadow-card transition"
+            align="right"
+            detail={<BreakdownDetailList title="Chi tiêu" items={expenseDetailItems} total={totalActualExpense} colorClass="text-cotton-candy" />}
+          >
             <p className="text-steel dark:text-light-grey text-sm font-semibold">Chi tiêu</p>
             <p className="text-cotton-candy text-2xl font-bold">{formatMoney(totalActualExpense)}</p>
-          </div>
+          </HoverDetailCard>
         </div>
 
         <div className="bg-white dark:bg-[#1e1e32] rounded-3xl p-6 shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)] mb-6">
