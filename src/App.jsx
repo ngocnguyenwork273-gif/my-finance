@@ -449,6 +449,19 @@ function firstProfitCreditDate(depositDate) {
   return d;
 }
 
+// FIX: xác định giao dịch "nạp ban đầu" của 1 quỹ dựa vào cờ is_initial (được set khi
+// tạo quỹ hoặc khi sửa "Số tiền nạp ban đầu" trong form chỉnh sửa quỹ), KHÔNG suy luận
+// bằng "giao dịch allocation có ngày sớm nhất" như trước — vì cách cũ có thể nổi bật/ghi đè
+// nhầm lên một lần nạp quỹ bình thường chỉ vì nó tình cờ có ngày sớm hơn.
+// Dữ liệu cũ (tạo trước khi có cột is_initial) sẽ tạm thời fallback về "sớm nhất" cho tới
+// khi người dùng mở form chỉnh sửa quỹ và lưu lại — lúc đó 1 giao dịch is_initial mới sẽ được tạo.
+function findInitialAllocation(transactions, categoryId) {
+  const allocations = transactions.filter((t) => t.category_id === categoryId && t.type === 'allocation');
+  const marked = allocations.find((t) => t.is_initial === true);
+  if (marked) return marked;
+  return allocations.sort((a, b) => new Date(a.date || a.created_at) - new Date(b.date || b.created_at))[0] || null;
+}
+
 function fundBalance(categoryId, transactions) {
   return transactions
     .filter((t) => t.category_id === categoryId)
@@ -705,6 +718,18 @@ function periodKeyToRange(periodKey) {
   return { start, end };
 }
 
+// Gộp nhiều "kỳ tài chính" (21 → 20) liên tiếp thành 1 khoảng — dùng cho filter
+// Quý / 6 tháng / Năm của Report để KHÔNG phá vỡ financial period (không dùng
+// tháng lịch đơn giản 1 → cuối tháng).
+function financialMonthRange(year, month) {
+  return periodKeyToRange(`${year}-${String(month).padStart(2, '0')}`);
+}
+function financialMultiMonthRange(year, months) {
+  const first = financialMonthRange(year, months[0]);
+  const last = financialMonthRange(year, months[months.length - 1]);
+  return { start: first.start, end: last.end };
+}
+
 // ========== TIME RANGE HELPERS ==========
 function getPeriodStartEnd(type, value, year) {
   // value: for month: month number (1-12), for quarter: 1-4, for half: 1 or 2, for year: year, for day: date string, for week: week number? We'll handle week separately.
@@ -816,6 +841,115 @@ function aggregatePeriodData(txs, categories) {
   const remaining = income - allocation - expenseFromIncome;
   return { income, allocation, expenseFromIncome, expenseFromWallet, expenseFromFund, totalActualExpense, remaining };
 }
+
+// ==== [PHASE 1 — logic tài chính mới theo yêu cầu nghiệp vụ Excel] ====================
+// calculatePeriodFinancials: hàm aggregation DUY NHẤT cho 1 "kỳ thu nhập" (21 → 20).
+// KHÔNG dùng remaining = income - allocation - expense nữa.
+// Dashboard/Report nên chuyển sang gọi hàm này thay cho aggregatePeriodData/periodPool
+// (việc thay thế các nơi gọi cũ sẽ làm ở các bước tiếp theo, chưa động vào ở bước này
+// để không phá vỡ những màn hình chưa sẵn sàng dùng logic mới).
+//
+// spendingPoolOverride: số tiền "được phép chi" do người dùng tự cài đặt cho kỳ này
+// (lưu ở bảng period_spending_pool). Nếu chưa cài đặt (null/undefined) thì mặc định
+// spendingPool = incomeForSpendingPool (giống Ví dụ 1 trong yêu cầu: tích lũy trước chi = 0).
+function calculatePeriodFinancials(periodKey, transactions, categories, spendingPoolOverride) {
+  const periodTxs = (transactions || []).filter((t) => transactionPeriodKey(t) === periodKey);
+  return { periodKey, ...calculateFinancialsFromTxs(periodTxs, categories, spendingPoolOverride) };
+}
+
+// Core: tính toàn bộ 10 khái niệm tài chính từ 1 danh sách transaction ĐÃ được lọc sẵn
+// (theo kỳ, theo ngày, theo khoảng tuỳ chọn...). Dùng chung cho Dashboard/Report ở mọi chế độ xem.
+function calculateFinancialsFromTxs(txs, categories, spendingPoolOverride) {
+  const catById = new Map((categories || []).map((c) => [c.id, c]));
+  const fundIds = new Set((categories || []).filter((c) => c.is_fund).map((c) => c.id));
+  const periodTxs = txs || [];
+
+  // 1-2. Tổng thu nhập + thu nhập tính Chi pool / thu nhập đặc biệt
+  const incomeTxs = periodTxs.filter((t) => t.type === 'income');
+  const totalIncome = incomeTxs.reduce((s, t) => s + Number(t.amount), 0);
+  const incomeForSpendingPool = incomeTxs
+    .filter((t) => {
+      const cat = catById.get(t.category_id);
+      // Dữ liệu cũ chưa có include_in_spending_pool -> coi như true để không đổi hành vi cũ
+      return cat ? cat.include_in_spending_pool !== false : true;
+    })
+    .reduce((s, t) => s + Number(t.amount), 0);
+  const specialIncome = totalIncome - incomeForSpendingPool;
+
+  // 5. Chi pool = số tiền người dùng cho phép chi trong kỳ (mặc định = thu nhập tính Chi pool)
+  const spendingPool = spendingPoolOverride != null && spendingPoolOverride !== ''
+    ? Number(spendingPoolOverride)
+    : incomeForSpendingPool;
+
+  // 6. Tích lũy trước chi
+  const accumulationBeforeSpend = Math.max(incomeForSpendingPool - spendingPool, 0);
+
+  // 8A. Nạp quỹ từ Chi pool
+  const allocationFromSpendingPool = periodTxs
+    .filter((t) => t.type === 'allocation')
+    .reduce((s, t) => s + Number(t.amount), 0);
+
+  // 8B/8C. Chi tiêu: phân biệt chi từ quỹ (isFund) vs chi thường (theo nguồn tiền)
+  const expenseTxs = periodTxs.filter((t) => t.type === 'expense');
+  const fundExpenseTxs = expenseTxs.filter((t) => fundIds.has(t.category_id));
+  const nonFundExpenseTxs = expenseTxs.filter((t) => !fundIds.has(t.category_id));
+  // Nguồn tiền = "Thu nhập" được lưu với account_id === null
+  const expenseFromSpendingPool = nonFundExpenseTxs.filter((t) => t.account_id === null).reduce((s, t) => s + Number(t.amount), 0);
+  const expenseFromWallet = nonFundExpenseTxs.filter((t) => t.account_id !== null).reduce((s, t) => s + Number(t.amount), 0);
+  const expenseFromFund = fundExpenseTxs.reduce((s, t) => s + Number(t.amount), 0);
+
+  const totalSpentFromSpendingPool = allocationFromSpendingPool + expenseFromSpendingPool;
+  const remainingAfterSpend = spendingPool - totalSpentFromSpendingPool;
+  const totalActualExpense = expenseFromSpendingPool + expenseFromFund;
+  const isOverSpendingPool = totalSpentFromSpendingPool > spendingPool;
+
+  return {
+    totalIncome,
+    incomeForSpendingPool,
+    specialIncome,
+    spendingPool,
+    accumulationBeforeSpend,
+    allocationFromSpendingPool,
+    expenseFromSpendingPool,
+    expenseFromWallet, // giữ lại để hiển thị breakdown, KHÔNG nằm trong totalActualExpense theo spec
+    expenseFromFund,
+    totalSpentFromSpendingPool,
+    remainingAfterSpend,
+    totalActualExpense,
+    isOverSpendingPool,
+  };
+}
+
+// Gộp calculatePeriodFinancials của nhiều kỳ liên tiếp (dùng cho Quý / 6 tháng / Năm)
+// — cộng dồn theo từng kỳ, KHÔNG gộp transactions rồi tính 1 lần, vì spendingPool
+// là khái niệm theo TỪNG kỳ (mỗi kỳ có thể có Chi pool khác nhau).
+function calculateFinancialsForPeriods(periodKeys, transactions, categories, spendingPoolByPeriod) {
+  const results = (periodKeys || []).map((pk) => calculatePeriodFinancials(pk, transactions, categories, spendingPoolByPeriod?.[pk]));
+  const sum = (field) => results.reduce((s, r) => s + r[field], 0);
+  return {
+    periodKeys,
+    totalIncome: sum('totalIncome'),
+    incomeForSpendingPool: sum('incomeForSpendingPool'),
+    specialIncome: sum('specialIncome'),
+    spendingPool: sum('spendingPool'),
+    accumulationBeforeSpend: sum('accumulationBeforeSpend'),
+    allocationFromSpendingPool: sum('allocationFromSpendingPool'),
+    expenseFromSpendingPool: sum('expenseFromSpendingPool'),
+    expenseFromWallet: sum('expenseFromWallet'),
+    expenseFromFund: sum('expenseFromFund'),
+    totalSpentFromSpendingPool: sum('totalSpentFromSpendingPool'),
+    remainingAfterSpend: sum('remainingAfterSpend'),
+    totalActualExpense: sum('totalActualExpense'),
+    byPeriod: results,
+  };
+}
+
+// Sinh danh sách periodKey (kỳ 21->20) liên tiếp cho 1 khoảng Quý/6 tháng/Năm — dùng để
+// gọi calculateFinancialsForPeriods thay vì gộp transaction theo ngày (phá vỡ khái niệm Chi pool theo kỳ).
+function periodKeysForMonths(year, months) {
+  return months.map((m) => `${year}-${String(m).padStart(2, '0')}`);
+}
+
 
 /* ==============================================================================
    05. SHARED COMPONENTS
@@ -1029,6 +1163,7 @@ function HeaderDesktop({ onAddClick, displayName, avatarUrl, theme, toggleTheme,
 }
 
 function BottomNavMobile({ screen, setScreen, onAddClick, theme, toggleTheme, openSettings }) {
+  const isDark = theme === 'dark';
   // "Quản lý" (funds / accounts / goals) floating glass sub-menu
   const [manageOpen, setManageOpen] = useState(false);
   const [manageMounted, setManageMounted] = useState(false);
@@ -1092,21 +1227,21 @@ function BottomNavMobile({ screen, setScreen, onAddClick, theme, toggleTheme, op
   const NavIcon = ({ icon: Icon, label, active, onClick }) => (
     <button
       onClick={onClick}
-      className="relative flex flex-col items-center justify-center gap-1 w-12 py-1 active:scale-90 transition-transform duration-150"
+      aria-label={label}
+      title={label}
+      className="relative flex items-center justify-center w-11 h-11 active:scale-90 transition-transform duration-150"
     >
       {active && (
         <span
-          className="absolute -top-1 w-1 h-1 rounded-full"
+          className="absolute top-0.5 w-1 h-1 rounded-full"
           style={{ background: '#0DBACC', boxShadow: '0 0 8px 1px rgba(13,186,204,0.8)' }}
         />
       )}
-      <Icon size={20} strokeWidth={2.1} style={{ color: active ? '#0DBACC' : 'rgba(255,255,255,0.72)' }} />
-      <span
-        className="text-[10px] font-bold leading-none"
-        style={{ color: active ? '#0DBACC' : 'rgba(255,255,255,0.55)' }}
-      >
-        {label}
-      </span>
+      <Icon
+        size={20}
+        strokeWidth={2.1}
+        style={{ color: active ? '#0DBACC' : isDark ? 'rgba(255,255,255,0.72)' : 'rgba(48,49,80,0.55)' }}
+      />
     </button>
   );
 
@@ -1133,18 +1268,20 @@ function BottomNavMobile({ screen, setScreen, onAddClick, theme, toggleTheme, op
           {/* Floating "Quản lý" glass popup menu */}
           {manageMounted && (
             <div
-              className="absolute left-1 bottom-[86px] w-[240px] max-w-[80%] rounded-[22px] overflow-hidden transition-all ease-out"
+              className="absolute left-1 bottom-[70px] w-[240px] max-w-[80%] rounded-[22px] overflow-hidden transition-all ease-out"
               style={{
                 transitionDuration: '220ms',
                 transformOrigin: 'bottom left',
                 opacity: manageOpen ? 1 : 0,
                 transform: manageOpen ? 'translateY(0) scale(1)' : 'translateY(12px) scale(0.96)',
                 pointerEvents: manageOpen ? 'auto' : 'none',
-                background: 'rgba(25,27,48,0.72)',
+                background: isDark ? 'rgba(25,27,48,0.72)' : 'rgba(255,255,255,0.85)',
                 backdropFilter: 'blur(24px) saturate(160%)',
                 WebkitBackdropFilter: 'blur(24px) saturate(160%)',
-                border: '1px solid rgba(255,255,255,0.12)',
-                boxShadow: '0 20px 50px rgba(0,0,0,0.35), 0 0 30px -8px rgba(13,186,204,0.20), inset 0 1px 0 rgba(255,255,255,0.16)',
+                border: isDark ? '1px solid rgba(255,255,255,0.12)' : '1px solid rgba(48,49,80,0.08)',
+                boxShadow: isDark
+                  ? '0 20px 50px rgba(0,0,0,0.35), 0 0 30px -8px rgba(13,186,204,0.20), inset 0 1px 0 rgba(255,255,255,0.16)'
+                  : '0 20px 50px rgba(48,49,80,0.18), 0 0 30px -8px rgba(13,186,204,0.12), inset 0 1px 0 rgba(255,255,255,0.6)',
               }}
             >
               {/* subtle color reflections, purely decorative */}
@@ -1153,7 +1290,7 @@ function BottomNavMobile({ screen, setScreen, onAddClick, theme, toggleTheme, op
               <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/40 to-transparent" />
 
               <div className="relative px-3.5 pt-3.5 pb-2.5">
-                <p className="text-[11px] font-extrabold tracking-wide mb-2 px-1" style={{ color: 'rgba(255,255,255,0.95)' }}>
+                <p className="text-[11px] font-extrabold tracking-wide mb-2 px-1" style={{ color: isDark ? 'rgba(255,255,255,0.95)' : 'rgba(48,49,80,0.85)' }}>
                   Quản lý tài chính
                 </p>
                 <div className="flex flex-col gap-0.5">
@@ -1161,17 +1298,17 @@ function BottomNavMobile({ screen, setScreen, onAddClick, theme, toggleTheme, op
                     <button
                       key={key}
                       onClick={() => go(key)}
-                      className="flex items-center gap-2.5 px-1.5 py-2 rounded-2xl text-left hover:bg-white/[0.06] active:scale-[0.98] transition"
+                      className={`flex items-center gap-2.5 px-1.5 py-2 rounded-2xl text-left active:scale-[0.98] transition ${isDark ? 'hover:bg-white/[0.06]' : 'hover:bg-black/[0.04]'}`}
                     >
                       <span
                         className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0"
-                        style={{ background: 'linear-gradient(135deg, rgba(13,186,204,0.25), rgba(159,127,224,0.25))', border: '1px solid rgba(255,255,255,0.14)' }}
+                        style={{ background: 'linear-gradient(135deg, rgba(13,186,204,0.25), rgba(159,127,224,0.25))', border: isDark ? '1px solid rgba(255,255,255,0.14)' : '1px solid rgba(48,49,80,0.10)' }}
                       >
                         <Icon size={16} style={{ color: screen === key ? '#0DBACC' : '#B88CFF' }} />
                       </span>
                       <span className="min-w-0">
-                        <span className="block text-[13px] font-bold leading-tight" style={{ color: 'rgba(255,255,255,0.95)' }}>{label}</span>
-                        <span className="block text-[11px] leading-tight truncate" style={{ color: 'rgba(255,255,255,0.60)' }}>{sub}</span>
+                        <span className="block text-[13px] font-bold leading-tight" style={{ color: isDark ? 'rgba(255,255,255,0.95)' : 'rgba(48,49,80,0.90)' }}>{label}</span>
+                        <span className="block text-[11px] leading-tight truncate" style={{ color: isDark ? 'rgba(255,255,255,0.60)' : 'rgba(48,49,80,0.55)' }}>{sub}</span>
                       </span>
                     </button>
                   ))}
@@ -1183,26 +1320,28 @@ function BottomNavMobile({ screen, setScreen, onAddClick, theme, toggleTheme, op
           {/* Quick action menu (from + button) */}
           {quickMenuOpen && (
             <div
-              className="absolute left-1/2 -translate-x-1/2 bottom-[86px] w-[220px] rounded-[22px] overflow-hidden transition-all ease-out"
+              className="absolute left-1/2 -translate-x-1/2 bottom-[70px] w-[220px] rounded-[22px] overflow-hidden transition-all ease-out"
               style={{
-                background: 'rgba(25,27,48,0.80)',
+                background: isDark ? 'rgba(25,27,48,0.80)' : 'rgba(255,255,255,0.88)',
                 backdropFilter: 'blur(24px) saturate(160%)',
                 WebkitBackdropFilter: 'blur(24px) saturate(160%)',
-                border: '1px solid rgba(255,255,255,0.12)',
-                boxShadow: '0 20px 50px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.16)',
+                border: isDark ? '1px solid rgba(255,255,255,0.12)' : '1px solid rgba(48,49,80,0.08)',
+                boxShadow: isDark
+                  ? '0 20px 50px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.16)'
+                  : '0 20px 50px rgba(48,49,80,0.18), inset 0 1px 0 rgba(255,255,255,0.6)',
                 padding: '10px 0',
               }}
             >
-              <button onClick={() => { setQuickMenuOpen(false); onAddClick('income'); }} className="w-full flex items-center gap-3 px-5 py-2.5 text-white hover:bg-white/10 transition">
+              <button onClick={() => { setQuickMenuOpen(false); onAddClick('income'); }} className={`w-full flex items-center gap-3 px-5 py-2.5 transition ${isDark ? 'text-white hover:bg-white/10' : 'text-blueberry hover:bg-black/[0.04]'}`}>
                 <TrendingUp size={18} className="text-turquoise" /> Thu nhập
               </button>
-              <button onClick={() => { setQuickMenuOpen(false); onAddClick('allocation'); }} className="w-full flex items-center gap-3 px-5 py-2.5 text-white hover:bg-white/10 transition">
+              <button onClick={() => { setQuickMenuOpen(false); onAddClick('allocation'); }} className={`w-full flex items-center gap-3 px-5 py-2.5 transition ${isDark ? 'text-white hover:bg-white/10' : 'text-blueberry hover:bg-black/[0.04]'}`}>
                 <PiggyBank size={18} className="text-baby-blue" /> Nạp quỹ
               </button>
-              <button onClick={() => { setQuickMenuOpen(false); onAddClick('expense'); }} className="w-full flex items-center gap-3 px-5 py-2.5 text-white hover:bg-white/10 transition">
+              <button onClick={() => { setQuickMenuOpen(false); onAddClick('expense'); }} className={`w-full flex items-center gap-3 px-5 py-2.5 transition ${isDark ? 'text-white hover:bg-white/10' : 'text-blueberry hover:bg-black/[0.04]'}`}>
                 <TrendingDown size={18} className="text-cotton-candy" /> Chi tiêu
               </button>
-              <button onClick={() => { setQuickMenuOpen(false); onAddClick('transfer'); }} className="w-full flex items-center gap-3 px-5 py-2.5 text-white hover:bg-white/10 transition">
+              <button onClick={() => { setQuickMenuOpen(false); onAddClick('transfer'); }} className={`w-full flex items-center gap-3 px-5 py-2.5 transition ${isDark ? 'text-white hover:bg-white/10' : 'text-blueberry hover:bg-black/[0.04]'}`}>
                 <SendHorizontal size={18} className="text-lavender" /> Chuyển khoản
               </button>
             </div>
@@ -1214,35 +1353,39 @@ function BottomNavMobile({ screen, setScreen, onAddClick, theme, toggleTheme, op
             aria-label="Thêm giao dịch"
             className="absolute left-1/2 z-10 flex items-center justify-center rounded-full active:scale-95 transition-transform duration-150"
             style={{
-              top: '-24px',
+              top: '-18px',
               transform: 'translateX(-50%)',
-              width: '58px',
-              height: '58px',
+              width: '48px',
+              height: '48px',
               background: 'linear-gradient(135deg, #0DBACC 0%, #3BC9E8 55%, #B88CFF 100%)',
-              boxShadow: '0 10px 24px -4px rgba(13,186,204,0.55), 0 0 0 6px rgba(13,186,204,0.10), 0 4px 10px rgba(0,0,0,0.30)',
+              boxShadow: '0 8px 18px -4px rgba(13,186,204,0.55), 0 0 0 5px rgba(13,186,204,0.10), 0 3px 8px rgba(0,0,0,0.30)',
             }}
           >
             <span
               className="pointer-events-none absolute inset-0 rounded-full"
               style={{ background: 'linear-gradient(180deg, rgba(255,255,255,0.55) 0%, rgba(255,255,255,0) 55%)', mixBlendMode: 'overlay' }}
             />
-            <Plus size={24} strokeWidth={2.5} className="text-white relative z-10" />
+            <Plus size={20} strokeWidth={2.5} className="text-white relative z-10" />
           </button>
 
           {/* Curved liquid-glass bar */}
           <div
-            className="relative rounded-[28px] h-[72px] flex items-center justify-between px-3 overflow-hidden"
+            className="relative rounded-[24px] h-[58px] flex items-center justify-between px-3 overflow-hidden"
             style={{
-              background: 'linear-gradient(180deg, rgba(29,30,56,0.80) 0%, rgba(17,18,37,0.86) 100%)',
-              backdropFilter: 'blur(26px) saturate(170%)',
-              WebkitBackdropFilter: 'blur(26px) saturate(170%)',
-              border: '1px solid rgba(255,255,255,0.12)',
-              boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.16), inset 0 -14px 24px -18px rgba(159,127,224,0.18), 0 18px 40px -12px rgba(0,0,0,0.55), 0 0 36px -14px rgba(13,186,204,0.22)',
+              background: isDark
+                ? 'linear-gradient(180deg, rgba(29,30,56,0.72) 0%, rgba(17,18,37,0.78) 100%)'
+                : 'linear-gradient(180deg, rgba(255,255,255,0.55) 0%, rgba(255,255,255,0.68) 100%)',
+              backdropFilter: 'blur(26px) saturate(180%)',
+              WebkitBackdropFilter: 'blur(26px) saturate(180%)',
+              border: isDark ? '1px solid rgba(255,255,255,0.12)' : '1px solid rgba(255,255,255,0.5)',
+              boxShadow: isDark
+                ? 'inset 0 1px 0 rgba(255,255,255,0.16), inset 0 -14px 24px -18px rgba(159,127,224,0.18), 0 18px 40px -12px rgba(0,0,0,0.55), 0 0 36px -14px rgba(13,186,204,0.22)'
+                : 'inset 0 1px 0 rgba(255,255,255,0.85), 0 14px 32px -12px rgba(48,49,80,0.22), 0 6px 18px -8px rgba(48,49,80,0.12)',
             }}
           >
             {/* top highlight line + soft inner glow blobs — decorative only */}
-            <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/45 to-transparent" />
-            <div className="pointer-events-none absolute -top-6 left-8 w-24 h-16 rounded-full bg-white/10 blur-2xl" />
+            <div className={`pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent to-transparent ${isDark ? 'via-white/45' : 'via-white/80'}`} />
+            <div className={`pointer-events-none absolute -top-6 left-8 w-24 h-16 rounded-full blur-2xl ${isDark ? 'bg-white/10' : 'bg-turquoise/15'}`} />
             <div className="pointer-events-none absolute -bottom-6 right-10 w-20 h-16 rounded-full bg-lavender/15 blur-2xl" />
 
             <div className="relative z-10 flex items-center justify-between w-full">
@@ -1250,7 +1393,7 @@ function BottomNavMobile({ screen, setScreen, onAddClick, theme, toggleTheme, op
               <NavIcon icon={LayoutGrid} label="Quản lý" active={isManageActive || manageOpen} onClick={() => setManageOpen((v) => !v)} />
 
               {/* spacer reserving space under the raised + button */}
-              <span className="w-12 flex-shrink-0" aria-hidden="true" />
+              <span className="w-11 flex-shrink-0" aria-hidden="true" />
 
               <NavIcon icon={BarChart3} label="Báo cáo" active={screen === 'report'} onClick={() => go('report')} />
               <NavIcon icon={User} label="Profile" active={screen === 'settings'} onClick={handleProfile} />
@@ -1265,7 +1408,7 @@ function BottomNavMobile({ screen, setScreen, onAddClick, theme, toggleTheme, op
 /* ==============================================================================
    07. MODALS
    ============================================================================== */
-function AddTransaction({ onClose, accounts, categories, transactions, onSaved, initialType }) {
+function AddTransaction({ onClose, accounts, categories, transactions, onSaved, initialType, spendingPoolByPeriod }) {
   const [type, setType] = useState(initialType || 'expense');
   const [amount, setAmount] = useState('');
   const [selectedCategory, setSelectedCategory] = useState(null);
@@ -1288,8 +1431,15 @@ function AddTransaction({ onClose, accounts, categories, transactions, onSaved, 
   const overLimit = type === 'expense' && activeCat?.monthly_limit && Number(amount) > Number(activeCat.monthly_limit);
 
   const usesPeriod = type === 'income' || type === 'allocation' || (type === 'expense' && !isFundCategory && expenseSource === 'income');
-  const pool = usesPeriod ? periodPool(transactions || [], selectedPeriod) : null;
-  const periodOverLimit = (type === 'allocation' || (type === 'expense' && !isFundCategory && expenseSource === 'income')) && pool && Number(amount) > pool.remaining;
+  // Compute financials for the selected period using the new logic
+  const financials = usesPeriod && selectedPeriod
+    ? calculatePeriodFinancials(selectedPeriod, transactions, categories, spendingPoolByPeriod?.[selectedPeriod])
+    : null;
+  const remainingAfterSpend = financials?.remainingAfterSpend ?? 0;
+  const periodOverLimit = (type === 'allocation' || (type === 'expense' && !isFundCategory && expenseSource === 'income'))
+    && amount
+    && Number(amount) > remainingAfterSpend;
+
   const fundBalanceNow = isFundCategory ? fundBalanceWithProfit(activeCat, transactions || []) : null;
   const fundOverBalance = isFundCategory && amount && Number(amount) > fundBalanceNow;
   const sourceAccount = type === 'expense' && !isFundCategory && expenseSource && expenseSource !== 'income' ? accounts.find((a) => a.id === expenseSource) : null;
@@ -1351,7 +1501,7 @@ function AddTransaction({ onClose, accounts, categories, transactions, onSaved, 
       noteToSave = tagPeriodNote(selectedPeriod, note);
     } else if (type === 'allocation') {
       if (!selectedPeriod) { alert('Vui lòng chọn Kỳ (nguồn thu nhập để nạp quỹ)'); return; }
-      if (periodOverLimit) { alert('Số tiền nạp vượt quá số dư còn lại của kỳ thu nhập.'); return; }
+      if (periodOverLimit) { alert('Số tiền nạp vượt quá Thu nhập được chi còn lại của kỳ thu nhập.'); return; }
       noteToSave = tagPeriodNote(selectedPeriod, note);
     } else if (type === 'expense') {
       if (isFundCategory) {
@@ -1361,7 +1511,7 @@ function AddTransaction({ onClose, accounts, categories, transactions, onSaved, 
         if (!expenseSource) { alert('Vui lòng chọn Nguồn tiền cho khoản chi tiêu này.'); return; }
         if (expenseSource === 'income') {
           if (!selectedPeriod) { alert('Vui lòng chọn Kỳ'); return; }
-          if (periodOverLimit) { alert('Số dư nguồn tiền không đủ.'); return; }
+          if (periodOverLimit) { alert('Số tiền chi vượt quá Thu nhập được chi còn lại của kỳ thu nhập.'); return; }
           noteToSave = tagPeriodNote(selectedPeriod, note);
         } else {
           if (sourceOverBalance) { alert('Số dư nguồn tiền không đủ.'); return; }
@@ -1407,7 +1557,7 @@ function AddTransaction({ onClose, accounts, categories, transactions, onSaved, 
             <span className="text-4xl font-bold text-light-grey">đ</span>
           </div>
           {overLimit && <p className="text-cotton-candy text-xs mt-2 font-semibold">⚠️ Vượt hạn mức {formatMoney(activeCat.monthly_limit)} của danh mục này!</p>}
-          {periodOverLimit && <p className="text-cotton-candy text-xs mt-2 font-semibold">⚠️ Vượt số tiền còn lại của Kỳ này ({formatMoney(pool.remaining)})!</p>}
+          {periodOverLimit && <p className="text-cotton-candy text-xs mt-2 font-semibold">⚠️ Vượt Thu nhập được chi còn lại ({formatMoney(remainingAfterSpend)}) của kỳ này!</p>}
           {fundOverBalance && <p className="text-cotton-candy text-xs mt-2 font-semibold">⚠️ Vượt số dư hiện có của quỹ ({formatMoney(fundBalanceNow)})!</p>}
           {sourceOverBalance && <p className="text-cotton-candy text-xs mt-2 font-semibold">⚠️ Vượt số dư hiện có của nguồn tiền này ({formatMoney(accountBalance(sourceAccount, transactions || []))})!</p>}
         </div>
@@ -1467,10 +1617,19 @@ function AddTransaction({ onClose, accounts, categories, transactions, onSaved, 
             <select value={selectedPeriod} onChange={(e) => setSelectedPeriod(e.target.value)} className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none dark:text-white text-blueberry">
               {periods.map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
             </select>
-            {pool && (
-              <p className="text-steel dark:text-light-grey text-xs mt-2">
-                Thu nhập kỳ này: <span className="text-blueberry dark:text-white font-semibold">{formatMoney(pool.total)}</span> — Đã phân bổ: <span className="text-blueberry dark:text-white font-semibold">{formatMoney(pool.used)}</span> — Còn lại: <span className={`font-semibold ${pool.remaining < 0 ? 'text-cotton-candy' : 'text-turquoise'}`}>{formatMoney(pool.remaining)}</span>
-              </p>
+            {financials && (
+              <div className="mt-2 text-xs space-y-1 text-steel dark:text-light-grey">
+                <p><span className="font-semibold">Thu nhập tính vào Thu nhập được chi:</span> <span className="text-blueberry dark:text-white font-bold">{formatMoney(financials.incomeForSpendingPool)}</span></p>
+                <p><span className="font-semibold">Thu nhập được chi:</span> <span className="text-blueberry dark:text-white font-bold">{formatMoney(financials.spendingPool)}</span></p>
+                <p><span className="font-semibold">Đã sử dụng (nạp quỹ + chi từ Thu nhập được chi):</span> <span className="text-blueberry dark:text-white font-bold">{formatMoney(financials.totalSpentFromSpendingPool)}</span></p>
+                <p><span className="font-semibold">Còn lại trong Thu nhập được chi:</span> <span className={`font-bold ${financials.remainingAfterSpend >= 0 ? 'text-turquoise' : 'text-cotton-candy'}`}>{formatMoney(financials.remainingAfterSpend)}</span></p>
+                {financials.specialIncome > 0 && (
+                  <p><span className="font-semibold">Thu nhập đặc biệt:</span> <span className="text-lavender font-bold">{formatMoney(financials.specialIncome)}</span></p>
+                )}
+                {financials.accumulationBeforeSpend > 0 && (
+                  <p><span className="font-semibold">Tích lũy trước chi:</span> <span className="text-lavender font-bold">{formatMoney(financials.accumulationBeforeSpend)}</span></p>
+                )}
+              </div>
             )}
           </div>
         )}
@@ -1492,7 +1651,7 @@ function AddTransaction({ onClose, accounts, categories, transactions, onSaved, 
   );
 }
 
-function EditTransaction({ transaction, onClose, accounts, categories, transactions: allTx, onSaved }) {
+function EditTransaction({ transaction, onClose, accounts, categories, transactions: allTx, onSaved, spendingPoolByPeriod }) {
   const [type, setType] = useState(transaction.type);
   const [amount, setAmount] = useState(String(transaction.amount));
   const [selectedCategory, setSelectedCategory] = useState(transaction.category_id);
@@ -1504,7 +1663,7 @@ function EditTransaction({ transaction, onClose, accounts, categories, transacti
   const [expenseSource, setExpenseSource] = useState(transaction.account_id || null);
   const [note, setNote] = useState(stripPeriodTag(transaction.note || ''));
   const [dateTime, setDateTime] = useState(() => {
-    const d = new Date(transaction.date || transaction.created_at);
+    const d = new Date(transaction.created_at || transaction.date);
     d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
     return d.toISOString().slice(0, 16);
   });
@@ -1518,12 +1677,27 @@ function EditTransaction({ transaction, onClose, accounts, categories, transacti
   const isFundCategory = type === 'expense' && !!activeCat?.is_fund;
   const overLimit = type === 'expense' && activeCat?.monthly_limit && Number(amount) > Number(activeCat.monthly_limit);
   const usesPeriod = type === 'income' || type === 'allocation' || (type === 'expense' && !isFundCategory && expenseSource === 'income');
-  const pool = usesPeriod ? periodPool(allTx || [], selectedPeriod) : null;
-  const periodOverLimit = (type === 'allocation' || (type === 'expense' && !isFundCategory && expenseSource === 'income')) && pool && Number(amount) > pool.remaining;
+
+  // Exclude the current transaction from the pool calculation to check if the new amount exceeds remaining
+  const otherTxs = (allTx || []).filter(t => t.id !== transaction.id);
+  const financials = usesPeriod && selectedPeriod
+    ? calculatePeriodFinancials(selectedPeriod, otherTxs, categories, spendingPoolByPeriod?.[selectedPeriod])
+    : null;
+  const remainingAfterSpend = financials?.remainingAfterSpend ?? 0;
+  const periodOverLimit = (type === 'allocation' || (type === 'expense' && !isFundCategory && expenseSource === 'income'))
+    && amount
+    && Number(amount) > remainingAfterSpend;
+
   const fundBalanceNow = isFundCategory ? fundBalanceWithProfit(activeCat, allTx || []) : null;
   const fundOverBalance = isFundCategory && amount && Number(amount) > fundBalanceNow;
   const sourceAccount = type === 'expense' && !isFundCategory && expenseSource && expenseSource !== 'income' ? accounts.find((a) => a.id === expenseSource) : null;
   const sourceOverBalance = sourceAccount && amount && Number(amount) > accountBalance(sourceAccount, allTx || []);
+
+  // Fix categoryList bug
+  const categoryList = categories.filter(c => {
+    if (type === 'allocation') return c.is_fund;
+    return c.type === (type === 'income' ? 'income' : 'expense');
+  });
 
   function handleAmountChange(e) { setAmount(e.target.value.replace(/\D/g, '')); }
   function handleYearChange(y) {
@@ -1566,7 +1740,7 @@ function EditTransaction({ transaction, onClose, accounts, categories, transacti
       noteToSave = tagPeriodNote(selectedPeriod, note);
     } else if (type === 'allocation') {
       if (!selectedPeriod) { alert('Vui lòng chọn Kỳ (nguồn thu nhập để nạp quỹ)'); return; }
-      if (periodOverLimit) { alert('Số tiền nạp vượt quá số dư còn lại của kỳ thu nhập.'); return; }
+      if (periodOverLimit) { alert('Số tiền nạp vượt quá Thu nhập được chi còn lại của kỳ thu nhập.'); return; }
       noteToSave = tagPeriodNote(selectedPeriod, note);
     } else if (type === 'expense') {
       if (isFundCategory) {
@@ -1575,7 +1749,7 @@ function EditTransaction({ transaction, onClose, accounts, categories, transacti
         if (!expenseSource) { alert('Vui lòng chọn Nguồn tiền cho khoản chi tiêu này.'); return; }
         if (expenseSource === 'income') {
           if (!selectedPeriod) { alert('Vui lòng chọn Kỳ'); return; }
-          if (periodOverLimit) { alert('Số dư nguồn tiền không đủ.'); return; }
+          if (periodOverLimit) { alert('Số tiền chi vượt quá Thu nhập được chi còn lại của kỳ thu nhập.'); return; }
           noteToSave = tagPeriodNote(selectedPeriod, note);
         } else {
           if (sourceOverBalance) { alert('Số dư nguồn tiền không đủ.'); return; }
@@ -1617,15 +1791,15 @@ function EditTransaction({ transaction, onClose, accounts, categories, transacti
             <span className="text-4xl font-bold text-light-grey">đ</span>
           </div>
           {overLimit && <p className="text-cotton-candy text-xs mt-2 font-semibold">⚠️ Vượt hạn mức {formatMoney(activeCat.monthly_limit)} của danh mục này!</p>}
-          {periodOverLimit && <p className="text-cotton-candy text-xs mt-2 font-semibold">⚠️ Vượt số tiền còn lại của Kỳ này ({formatMoney(pool.remaining)})!</p>}
+          {periodOverLimit && <p className="text-cotton-candy text-xs mt-2 font-semibold">⚠️ Vượt Thu nhập được chi còn lại ({formatMoney(remainingAfterSpend)}) của kỳ này!</p>}
           {fundOverBalance && <p className="text-cotton-candy text-xs mt-2 font-semibold">⚠️ Vượt số dư hiện có của quỹ ({formatMoney(fundBalanceNow)})!</p>}
           {sourceOverBalance && <p className="text-cotton-candy text-xs mt-2 font-semibold">⚠️ Vượt số dư hiện có của nguồn tiền này ({formatMoney(accountBalance(sourceAccount, allTx || []))})!</p>}
         </div>
         <div className="px-5 mt-8">
           <p className="text-blueberry dark:text-white font-bold text-sm mb-3">{type === 'income' ? 'Danh mục thu nhập' : 'Quỹ / Danh mục'} <span className="text-cotton-candy">*</span></p>
-          {categoryList().length === 0 ? <p className="text-steel dark:text-light-grey text-sm">Chưa có danh mục. Vào Cài đặt để thêm.</p> : (
+          {categoryList.length === 0 ? <p className="text-steel dark:text-light-grey text-sm">Chưa có danh mục. Vào Cài đặt để thêm.</p> : (
             <div className="grid grid-cols-4 sm:grid-cols-5 gap-3">
-              {categoryList().map((cat) => {
+              {categoryList.map((cat) => {
                 const active = selectedCategory === cat.id;
                 const willExceed = type === 'expense' && cat.monthly_limit && Number(amount) > Number(cat.monthly_limit);
                 return (
@@ -1677,10 +1851,19 @@ function EditTransaction({ transaction, onClose, accounts, categories, transacti
             <select value={selectedPeriod} onChange={(e) => setSelectedPeriod(e.target.value)} className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none dark:text-white text-blueberry">
               {periods.map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
             </select>
-            {pool && (
-              <p className="text-steel dark:text-light-grey text-xs mt-2">
-                Thu nhập kỳ này: <span className="text-blueberry dark:text-white font-semibold">{formatMoney(pool.total)}</span> — Đã phân bổ: <span className="text-blueberry dark:text-white font-semibold">{formatMoney(pool.used)}</span> — Còn lại: <span className={`font-semibold ${pool.remaining < 0 ? 'text-cotton-candy' : 'text-turquoise'}`}>{formatMoney(pool.remaining)}</span>
-              </p>
+            {financials && (
+              <div className="mt-2 text-xs space-y-1 text-steel dark:text-light-grey">
+                <p><span className="font-semibold">Thu nhập tính vào Thu nhập được chi:</span> <span className="text-blueberry dark:text-white font-bold">{formatMoney(financials.incomeForSpendingPool)}</span></p>
+                <p><span className="font-semibold">Thu nhập được chi:</span> <span className="text-blueberry dark:text-white font-bold">{formatMoney(financials.spendingPool)}</span></p>
+                <p><span className="font-semibold">Đã sử dụng (nạp quỹ + chi từ Thu nhập được chi):</span> <span className="text-blueberry dark:text-white font-bold">{formatMoney(financials.totalSpentFromSpendingPool)}</span></p>
+                <p><span className="font-semibold">Còn lại trong Thu nhập được chi:</span> <span className={`font-bold ${financials.remainingAfterSpend >= 0 ? 'text-turquoise' : 'text-cotton-candy'}`}>{formatMoney(financials.remainingAfterSpend)}</span></p>
+                {financials.specialIncome > 0 && (
+                  <p><span className="font-semibold">Thu nhập đặc biệt:</span> <span className="text-lavender font-bold">{formatMoney(financials.specialIncome)}</span></p>
+                )}
+                {financials.accumulationBeforeSpend > 0 && (
+                  <p><span className="font-semibold">Tích lũy trước chi:</span> <span className="text-lavender font-bold">{formatMoney(financials.accumulationBeforeSpend)}</span></p>
+                )}
+              </div>
             )}
           </div>
         )}
@@ -1700,8 +1883,6 @@ function EditTransaction({ transaction, onClose, accounts, categories, transacti
     </div>
   );
 }
-
-function categoryList() { /* dummy, actual logic inside component */ }
 
 function EditAccountModal({ account, onClose, onSaved, isNew }) {
   const [form, setForm] = useState({ name: account?.name || '', icon: account?.icon || '', type: account?.type || 'cash', initial_balance: account?.initial_balance || '' });
@@ -1780,6 +1961,7 @@ function EditFundForm({ category, onClose, onSaved, isNew, initialAmount, firstA
         await supabase.from('transactions').insert({
           category_id: newCat.id, type: 'allocation', amount: Number(form.initial_allocation),
           note: 'Nạp quỹ lần đầu', date: new Date().toISOString().slice(0, 10),
+          is_initial: true, // FIX: đánh dấu rõ đây là khoản nạp ban đầu, không suy luận theo ngày
         });
       }
     } else {
@@ -1787,7 +1969,12 @@ function EditFundForm({ category, onClose, onSaved, isNew, initialAmount, firstA
       if (error) { setSaving(false); alert('Lỗi: ' + error.message); return; }
       const newInitial = form.initial_allocation ? Number(form.initial_allocation) : 0;
       if (newInitial !== Number(initialAmount || 0)) {
-        if (firstAllocation) {
+        // FIX: chỉ cập nhật amount nếu firstAllocation THỰC SỰ đã được đánh dấu is_initial.
+        // Nếu firstAllocation chỉ là kết quả fallback "giao dịch sớm nhất" (dữ liệu cũ,
+        // chưa có cờ is_initial) thì KHÔNG được ghi đè amount của nó — vì đó có thể là
+        // một lần nạp quỹ bình thường, không phải khoản "ban đầu". Thay vào đó tạo mới
+        // một giao dịch is_initial riêng để làm đại diện chính xác cho "nạp ban đầu".
+        if (firstAllocation && firstAllocation.is_initial === true) {
           if (newInitial > 0) {
             await supabase.from('transactions').update({ amount: newInitial }).eq('id', firstAllocation.id);
           }
@@ -1795,6 +1982,7 @@ function EditFundForm({ category, onClose, onSaved, isNew, initialAmount, firstA
           await supabase.from('transactions').insert({
             category_id: category.id, type: 'allocation', amount: newInitial,
             note: 'Nạp quỹ lần đầu', date: new Date().toISOString().slice(0, 10),
+            is_initial: true,
           });
         }
       }
@@ -1855,6 +2043,8 @@ function QuickAllocateWithdrawForm({ category, mode, onClose, onSaved }) {
   const [saving, setSaving] = useState(false);
   const [selectedYear, setSelectedYear] = useState(Number(currentPeriodKey().split('-')[0]));
   const [selectedPeriod, setSelectedPeriod] = useState(currentPeriodKey());
+  // FIX: cho phép chỉnh sửa ngày nhập (trước đây hard-code là ngày hôm nay)
+  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const yearNow = new Date().getFullYear();
   const years = Array.from({ length: 5 }, (_, i) => yearNow - 2 + i);
   const periods = buildPeriods(selectedYear);
@@ -1867,14 +2057,17 @@ function QuickAllocateWithdrawForm({ category, mode, onClose, onSaved }) {
 
   async function handleSave() {
     if (!amount || Number(amount) === 0) { alert('Nhập số tiền'); return; }
+    if (!date) { alert('Chọn ngày nhập'); return; }
     setSaving(true);
     let noteToSave = note || null;
     if (mode === 'allocation' && selectedPeriod) {
       noteToSave = tagPeriodNote(selectedPeriod, note);
     }
+    // Giữ giờ:phút:giây hiện tại, chỉ thay phần ngày theo lựa chọn của người dùng
+    const createdAt = new Date(date + 'T' + new Date().toTimeString().slice(0, 8)).toISOString();
     const { error } = await supabase.from('transactions').insert({
       category_id: category.id, type: mode, amount: Number(amount), note: noteToSave,
-      date: new Date().toISOString().slice(0, 10), created_at: new Date().toISOString(),
+      date, created_at: createdAt,
     });
     setSaving(false);
     if (error) { alert('Lỗi: ' + error.message); return; }
@@ -1889,6 +2082,7 @@ function QuickAllocateWithdrawForm({ category, mode, onClose, onSaved }) {
           <button onClick={onClose}><X size={18} className="text-steel dark:text-light-grey" /></button>
         </div>
         <MoneyInput value={amount} onChange={setAmount} placeholder="Số tiền" className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-lg font-bold outline-none mb-3 dark:text-white dark:placeholder:text-light-grey text-blueberry" />
+        <input type="date" value={date} onChange={(e) => setDate(e.target.value)} max={new Date().toISOString().slice(0, 10)} className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none mb-3 dark:text-white text-blueberry" />
         <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Ghi chú (không bắt buộc)" className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none mb-3 dark:text-white dark:placeholder:text-light-grey text-blueberry" />
 
         {mode === 'allocation' && (
@@ -2058,8 +2252,9 @@ function EditGoalForm({ goal, onClose, onSaved, isNew, softDelete }) {
 /* ==============================================================================
    08. DASHBOARD
    ============================================================================== */
-function Dashboard({ setScreen, transactions, categories, accounts, goals, loading, displayName, avatarUrl, onAddClick, theme, toggleTheme, onOpenFund, onOpenAccount, reload, openSettings, sidebarCollapsed, toggleSidebar }) {
+function Dashboard({ setScreen, transactions, categories, accounts, goals, loading, displayName, avatarUrl, onAddClick, theme, toggleTheme, onOpenFund, onOpenAccount, reload, openSettings, sidebarCollapsed, toggleSidebar, spendingPoolByPeriod, saveSpendingPoolForPeriod }) {
   const [search, setSearch] = useState('');
+  const [editingTx, setEditingTx] = useState(null);
   const [recentTxFilter, setRecentTxFilter] = useState('7d');
   const [showAccountMenu, setShowAccountMenu] = useState(false);
   useCloseOnEscape(showAccountMenu, () => setShowAccountMenu(false));
@@ -2260,6 +2455,69 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
   const incomeThisMonth = thisMonthTx.filter((t) => t.type === 'income').reduce((s, t) => s + Number(t.amount), 0);
   const expenseThisMonth = thisMonthTx.filter((t) => t.type === 'expense').reduce((s, t) => s + Number(t.amount), 0);
 
+  // ==== [PHASE 2] Thu nhập được chi kỳ hiện tại — logic tài chính mới (calculatePeriodFinancials) ====
+  const curFinancials = calculatePeriodFinancials(curPeriodKey, transactions, categories, spendingPoolByPeriod?.[curPeriodKey]);
+  const [editingPool, setEditingPool] = useState(false);
+  const [poolInput, setPoolInput] = useState('');
+  function startEditPool() { setPoolInput(String(curFinancials.spendingPool)); setEditingPool(true); }
+  async function confirmEditPool() {
+    if (poolInput === '' || Number.isNaN(Number(poolInput))) { alert('Nhập số tiền hợp lệ'); return; }
+    const ok = await saveSpendingPoolForPeriod(curPeriodKey, poolInput);
+    if (ok) setEditingPool(false);
+  }
+  const spendingPoolCard = (
+      <div className="bg-white dark:bg-[#1e1e32] rounded-3xl p-5 shadow-soft">
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-blueberry dark:text-white font-extrabold text-base">Thu nhập được chi kỳ này</h2>
+          {!editingPool && (
+            <button onClick={startEditPool} className="text-turquoise text-xs font-bold flex items-center gap-1"><Pencil size={12} /> Sửa</button>
+          )}
+        </div>
+        {editingPool ? (
+          <div className="flex items-center gap-2 mb-3">
+            <MoneyInput value={poolInput} onChange={setPoolInput} placeholder="Số tiền được phép chi" className="flex-1 bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-2.5 text-sm outline-none dark:text-white text-blueberry" />
+            <button onClick={confirmEditPool} className="w-9 h-9 rounded-full bg-gradient-primary text-white flex items-center justify-center flex-shrink-0"><Check size={16} /></button>
+            <button onClick={() => setEditingPool(false)} className="w-9 h-9 rounded-full bg-ice-cream dark:bg-night-sky text-steel dark:text-light-grey flex items-center justify-center flex-shrink-0"><X size={16} /></button>
+          </div>
+        ) : (
+          <p className="text-blueberry dark:text-white text-2xl font-bold mb-3">{formatMoney(curFinancials.spendingPool)}</p>
+        )}
+        <div className="grid grid-cols-2 gap-3 text-sm">
+          <div>
+            <p className="text-steel dark:text-light-grey text-xs">Thu nhập tính vào Thu nhập được chi</p>
+            <p className="text-blueberry dark:text-white font-bold">{formatMoney(curFinancials.incomeForSpendingPool)}</p>
+          </div>
+          <div>
+            <p className="text-steel dark:text-light-grey text-xs">Thu nhập đặc biệt</p>
+            <p className="text-blueberry dark:text-white font-bold">{formatMoney(curFinancials.specialIncome)}</p>
+          </div>
+          <div>
+            <p className="text-steel dark:text-light-grey text-xs">Đã dùng (nạp quỹ + chi)</p>
+            <p className="text-blueberry dark:text-white font-bold">{formatMoney(curFinancials.totalSpentFromSpendingPool)}</p>
+          </div>
+          <div>
+            <p className="text-steel dark:text-light-grey text-xs">Dư sau chi</p>
+            <p className={`font-bold ${curFinancials.remainingAfterSpend >= 0 ? 'text-turquoise' : 'text-cotton-candy'}`}>{formatMoney(curFinancials.remainingAfterSpend)}</p>
+          </div>
+          {curFinancials.accumulationBeforeSpend > 0 && (
+            <div className="col-span-2">
+              <p className="text-steel dark:text-light-grey text-xs">Tích lũy trước chi</p>
+              <p className="text-lavender font-bold">{formatMoney(curFinancials.accumulationBeforeSpend)}</p>
+            </div>
+          )}
+          {curFinancials.expenseFromFund > 0 && (
+            <div className="col-span-2">
+              <p className="text-steel dark:text-light-grey text-xs">Chi từ quỹ (không trừ Thu nhập được chi)</p>
+              <p className="text-blueberry dark:text-white font-bold">{formatMoney(curFinancials.expenseFromFund)}</p>
+            </div>
+          )}
+        </div>
+        {curFinancials.isOverSpendingPool && (
+          <p className="text-cotton-candy text-xs mt-3 font-semibold">⚠️ Đã sử dụng vượt quá Thu nhập được chi của kỳ này.</p>
+        )}
+      </div>
+  );
+
   const prevPeriodDate = new Date(curPeriodStart); prevPeriodDate.setDate(prevPeriodDate.getDate() - 1);
   const prevPeriodKey = currentPeriodKey(prevPeriodDate);
   const prevMonthTx = transactions.filter((t) => transactionPeriodKey(t) === prevPeriodKey);
@@ -2385,7 +2643,7 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
     } else if (recentTxFilter === 'year') {
       list = transactions.filter((t) => Number(transactionPeriodKey(t).split('-')[0]) === nowD.getFullYear());
     }
-    return [...list].sort((a, b) => new Date(b.date || b.created_at) - new Date(a.date || a.created_at)).slice(0, 20);
+    return [...list].sort((a, b) => new Date(b.date || b.created_at) - new Date(a.date || a.created_at)).slice(0, 5);
   })();
 
   const groupedRecentTx = groupTransactionsByDate(recentTxList);
@@ -2472,6 +2730,9 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
                 </button>
               ))}
           </div>
+          <div className="mt-6 px-5">
+            {spendingPoolCard}
+          </div>
           <div className="mt-6 bg-white dark:bg-[#1e1e32] rounded-[2.5rem] min-h-[60vh] px-5 pt-6 pb-6 shadow-soft">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-blueberry dark:text-white font-extrabold text-lg">Ngân sách tháng này</h2>
@@ -2557,9 +2818,12 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
               )}
             </div>
 
-            <div className="flex items-center justify-between mt-8 mb-3"><h2 className="text-blueberry dark:text-white font-extrabold text-lg">Giao dịch</h2></div>
+            <div className="flex items-center justify-between mt-8 mb-3">
+              <h2 className="text-blueberry dark:text-white font-extrabold text-lg">Hoạt động gần đây</h2>
+              <button onClick={() => setScreen('report')} className="text-turquoise text-sm font-bold">Xem chi tiết</button>
+            </div>
             {loading ? <div className="flex justify-center py-8"><Loader2 size={24} className="animate-spin text-turquoise" /></div>
-              : transactions.length === 0 ? <p className="text-steel dark:text-light-grey text-sm text-center py-8">Chưa có giao dịch nào. Bấm nút + để thêm.</p>
+              : recentTxList.length === 0 ? <p className="text-steel dark:text-light-grey text-sm text-center py-8">Chưa có giao dịch nào. Bấm nút + để thêm.</p>
               : (
                 <div className="flex flex-col gap-4 scrollbar-hide">
                   {sortedGroupKeys.map((key) => (
@@ -2570,14 +2834,14 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
                           const cat = categories.find((c) => c.id === tx.category_id);
                           const isOverLimit = (tx.note || '').startsWith('[Vượt hạn mức]');
                           return (
-                            <div key={tx.id} className="flex items-center gap-3 py-3 first:pt-0 last:pb-0">
+                            <div key={tx.id} onClick={() => setEditingTx(tx)} className="flex items-center gap-3 py-3 first:pt-0 last:pb-0 cursor-pointer hover:bg-ice-cream dark:hover:bg-night-sky/30 rounded-xl -mx-2 px-2 transition">
                               <EmojiCircle emoji={cat?.icon} size={40} bg={tx.type === 'income' ? '#B4F1F1' : '#E3D6FF'} />
                               <div className="flex-1 min-w-0">
                                 <div className="flex items-center gap-1.5">
                                   <p className="text-blueberry dark:text-white font-bold text-sm">{cat?.name || 'Khác'}</p>
                                   {isOverLimit && <span className="text-[10px] font-bold text-white bg-cotton-candy px-2 py-0.5 rounded-full">Vượt hạn mức</span>}
                                 </div>
-                                <p className="text-steel dark:text-light-grey text-xs">{stripPeriodTag(tx.note) || new Date(tx.date || tx.created_at).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}</p>
+                                <p className="text-steel dark:text-light-grey text-xs">{stripPeriodTag(tx.note) || new Date(tx.created_at || tx.date).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}</p>
                               </div>
                               <p className={`font-bold text-sm flex-shrink-0 ${tx.type === 'income' ? 'text-turquoise' : 'text-blueberry dark:text-white'}`}>{tx.type === 'income' ? '+' : '-'}{formatMoney(tx.amount)}</p>
                             </div>
@@ -2599,6 +2863,9 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
           <button onClick={() => setShowAddWidget(true)} className="bg-gradient-primary text-white rounded-full pl-3 pr-4 py-2 text-sm font-bold flex items-center gap-1.5 shadow-md shadow-turquoise/30">
             <Plus size={15} /> Thêm widget
           </button>
+        </div>
+        <div className="mb-6">
+          {spendingPoolCard}
         </div>
         <div
           className="grid gap-6"
@@ -2690,7 +2957,7 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
                 </button>
               ) : (
                 <div
-                  className="relative w-full overflow-hidden"
+                  className="relative isolate w-full overflow-hidden"
                   style={{ height: 172 }}
                   onTouchStart={handleWalletTouchStart}
                   onTouchEnd={handleWalletTouchEnd}
@@ -2729,13 +2996,16 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
             </div>
 
             <div className="bg-white dark:bg-[#1e1e32] rounded-3xl p-6 shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)] transition-colors flex-1">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-blueberry dark:text-white font-extrabold">Giao dịch gần đây</h3>
-                <select value={recentTxFilter} onChange={(e) => setRecentTxFilter(e.target.value)} className="bg-ice-cream dark:bg-night-sky rounded-full text-xs font-bold px-3 py-1.5 outline-none text-blueberry dark:text-white">
-                  <option value="7d">7d</option>
-                  <option value="month">Tháng</option>
-                  <option value="year">Năm</option>
-                </select>
+              <div className="flex items-center justify-between mb-4 gap-2">
+                <h3 className="text-blueberry dark:text-white font-extrabold">Hoạt động gần đây</h3>
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  <select value={recentTxFilter} onChange={(e) => setRecentTxFilter(e.target.value)} className="bg-ice-cream dark:bg-night-sky rounded-full text-xs font-bold px-3 py-1.5 outline-none text-blueberry dark:text-white">
+                    <option value="7d">7d</option>
+                    <option value="month">Tháng</option>
+                    <option value="year">Năm</option>
+                  </select>
+                  <button onClick={() => setScreen('report')} className="text-turquoise text-xs font-bold whitespace-nowrap hover:underline">Xem chi tiết</button>
+                </div>
               </div>
               {loading ? <div className="flex justify-center py-6"><Loader2 size={20} className="animate-spin text-turquoise" /></div>
                 : recentTxList.length === 0 ? <p className="text-steel dark:text-light-grey text-sm text-center py-4">Không có giao dịch nào.</p>
@@ -2748,15 +3018,23 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
                           {groupedRecentTx[key].map((tx) => {
                             const cat = categories.find((c) => c.id === tx.category_id);
                             const isOverLimit = (tx.note || '').startsWith('[Vượt hạn mức]');
+                            // FIX: với khoản chi tiêu KHÔNG phải quỹ (danh mục thường, VD "Điện thoại")
+                            // và được trừ trực tiếp từ thu nhập của kỳ (không qua ví), hiển thị thêm
+                            // "Thu nhập kỳ còn lại" — tương tự cách quỹ hiển thị "Số dư" sau mỗi giao dịch.
+                            const isFromPeriodIncome = tx.type === 'expense' && tx.account_id == null && !cat?.is_fund;
+                            const periodRemaining = isFromPeriodIncome ? periodPool(transactions, transactionPeriodKey(tx)).remaining : null;
                             return (
-                              <div key={tx.id} className="flex items-center gap-3 py-2.5 first:pt-0 last:pb-0">
+                              <div key={tx.id} onClick={() => setEditingTx(tx)} className="flex items-center gap-3 py-2.5 first:pt-0 last:pb-0 cursor-pointer hover:bg-ice-cream dark:hover:bg-night-sky/30 rounded-xl -mx-2 px-2 transition">
                                 <EmojiCircle emoji={cat?.icon} size={36} bg={tx.type === 'income' ? '#B4F1F1' : '#E3D6FF'} />
                                 <div className="flex-1 min-w-0">
                                   <div className="flex items-center gap-1.5">
                                     <p className="text-blueberry dark:text-white font-bold text-sm truncate">{cat?.name || (tx.type === 'income' ? 'Thu nhập' : 'Chi tiêu')}</p>
                                     {isOverLimit && <span className="text-[10px] font-bold text-white bg-cotton-candy px-2 py-0.5 rounded-full">Vượt hạn mức</span>}
                                   </div>
-                                  <p className="text-steel dark:text-light-grey text-xs">{new Date(tx.date || tx.created_at).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}</p>
+                                  <p className="text-steel dark:text-light-grey text-xs">{new Date(tx.created_at || tx.date).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}</p>
+                                  {isFromPeriodIncome && (
+                                    <p className="text-[11px] text-steel dark:text-light-grey">Thu nhập kỳ còn lại: <span className={`font-semibold ${periodRemaining < 0 ? 'text-cotton-candy' : 'text-turquoise'}`}>{formatMoney(periodRemaining)}</span></p>
+                                  )}
                                 </div>
                                 <p className={`font-bold text-sm flex-shrink-0 ${tx.type === 'income' ? 'text-turquoise' : 'text-blueberry dark:text-white'}`}>{tx.type === 'income' ? '+' : '-'}{formatMoney(tx.amount)}</p>
                               </div>
@@ -2931,6 +3209,17 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
           </div>
         </div>
       )}
+      {editingTx && (
+        <EditTransaction
+          transaction={editingTx}
+          onClose={() => setEditingTx(null)}
+          accounts={accounts}
+          categories={categories}
+          transactions={transactions}
+          onSaved={() => { reload(); setEditingTx(null); }}
+          spendingPoolByPeriod={spendingPoolByPeriod}
+        />
+      )}
     </>
   );
 }
@@ -2987,9 +3276,7 @@ function Funds({ setScreen, categories, transactions, onOpenFund, reload, onAddC
   const currentPage = Math.min(page, totalPages);
   const pagedFunds = displayFunds.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
-  const editingFirstAllocation = editingFund
-    ? transactions.filter((t) => t.category_id === editingFund.id && t.type === 'allocation').sort((a, b) => new Date(a.date || a.created_at) - new Date(b.date || b.created_at))[0]
-    : null;
+  const editingFirstAllocation = editingFund ? findInitialAllocation(transactions, editingFund.id) : null;
   const editingInitialAmount = editingFirstAllocation ? Number(editingFirstAllocation.amount) : 0;
 
   // Remove outer wrapper with padding
@@ -3304,7 +3591,7 @@ function Funds({ setScreen, categories, transactions, onOpenFund, reload, onAddC
 /* ==============================================================================
    10. FUND DETAIL
    ============================================================================== */
-function FundDetail({ category, transactions, onBack, reload, softDelete, setScreen, onAddClick, displayName, avatarUrl, theme, toggleTheme, openSettings, sidebarCollapsed, toggleSidebar }) {
+function FundDetail({ category, transactions, onBack, reload, softDelete, setScreen, onAddClick, displayName, avatarUrl, theme, toggleTheme, openSettings, sidebarCollapsed, toggleSidebar, spendingPoolByPeriod }) {
   const [filter, setFilter] = useState('all');
   const [showEdit, setShowEdit] = useState(false);
   const [quickMode, setQuickMode] = useState(null);
@@ -3315,10 +3602,8 @@ function FundDetail({ category, transactions, onBack, reload, softDelete, setScr
     .filter((t) => t.category_id === category.id && (t.type === 'allocation' || t.type === 'expense'))
     .sort((a, b) => new Date(a.date || a.created_at) - new Date(b.date || b.created_at));
 
-  // Tìm khoản nạp đầu tiên (theo thời gian)
-  const firstAllocation = allHistory
-    .filter((t) => t.type === 'allocation')
-    .sort((a, b) => new Date(a.date || a.created_at) - new Date(b.date || b.created_at))[0];
+  // FIX: xác định "khoản nạp ban đầu" qua cờ is_initial, không suy luận theo ngày sớm nhất
+  const firstAllocation = findInitialAllocation(transactions, category.id);
   const initialAmount = firstAllocation ? Number(firstAllocation.amount) : 0;
 
   // Lịch sử lợi nhuận hàng ngày (mỗi ngày 1 dòng, đã làm tròn xuống)
@@ -3399,7 +3684,7 @@ function FundDetail({ category, transactions, onBack, reload, softDelete, setScr
       const d = new Date(item.displayDate || item.created_at);
       return d.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
     }
-    return new Date(item.date || item.created_at).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
+    return new Date(item.created_at || item.date).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
   };
 
   // Remove outer wrapper with padding
@@ -3426,7 +3711,7 @@ function FundDetail({ category, transactions, onBack, reload, softDelete, setScr
           {category.description && <p className="px-5 mt-3 text-white/85 text-sm text-center">{category.description}</p>}
         </div>
 
-        <div className="px-4 -mt-14 relative z-10">
+        <div className="px-5 -mt-14 relative z-10">
           <div className="bg-white dark:bg-[#1e1e32] rounded-3xl shadow-card p-5">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
@@ -3508,7 +3793,7 @@ function FundDetail({ category, transactions, onBack, reload, softDelete, setScr
                           </p>
                         </div>
                       )}
-                      <div className={`flex items-start gap-3 py-3 border-b border-[rgba(189,189,203,0.15)] last:border-b-0 ${isInitial ? 'bg-turquoise/10 -mx-2 px-2 rounded-xl border border-turquoise' : ''}`}>
+                      <div className={`flex items-start gap-3 py-3 ${isInitial ? 'bg-turquoise/10 -mx-2 px-2 rounded-xl border border-turquoise' : 'border-b border-[rgba(189,189,203,0.15)] last:border-b-0'}`}>
                         <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5 ${isInitial ? 'bg-turquoise' : iconBg}`}>
                           {isInitial ? <Star size={16} className="text-white fill-white" /> : isAlloc ? <TrendingUp size={16} className="text-turquoise" /> : isProfit ? <Sparkles size={16} className="text-turquoise" /> : <TrendingDown size={16} className="text-cotton-candy" />}
                         </div>
@@ -3645,12 +3930,13 @@ function FundDetail({ category, transactions, onBack, reload, softDelete, setScr
                   </div>
                 )
               ) : displayHistory.length === 0 ? <p className="text-steel dark:text-light-grey text-sm text-center py-8">Chưa có giao dịch nào.</p> : (
-                <div className="flex flex-col divide-y divide-[rgba(189,189,203,0.2)] dark:divide-[rgba(189,189,203,0.1)] scrollbar-hide">
-                  {displayHistory.map((item) => {
+                <div className="flex flex-col scrollbar-hide">
+                  {displayHistory.map((item, idx) => {
                     const isInitial = item.type === 'allocation' && firstAllocation && item.id === firstAllocation.id;
                     const isOverLimit = (item.note || '').startsWith('[Vượt hạn mức]');
+                    const showTopBorder = idx > 0 && !isInitial;
                     return (
-                      <div key={item.id} className={`flex items-center gap-3 py-3 ${isInitial ? 'bg-turquoise/10 -mx-2 px-2 rounded-xl border border-turquoise' : ''}`}>
+                      <div key={item.id} className={`flex items-center gap-3 py-3 ${isInitial ? 'bg-turquoise/10 -mx-2 px-2 rounded-xl border border-turquoise' : showTopBorder ? 'border-t border-[rgba(189,189,203,0.2)] dark:border-[rgba(189,189,203,0.1)]' : ''}`}>
                         <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${isInitial ? 'bg-turquoise' : item.type === 'allocation' ? 'bg-turquoise/10' : item.isProfit ? 'bg-turquoise/10' : 'bg-cotton-candy/10'}`}>
                           {isInitial ? <Star size={16} className="text-white fill-white" /> : item.type === 'allocation' ? <TrendingUp size={16} className="text-turquoise" /> : item.isProfit ? <Sparkles size={16} className="text-turquoise" /> : <TrendingDown size={16} className="text-cotton-candy" />}
                         </div>
@@ -3663,7 +3949,7 @@ function FundDetail({ category, transactions, onBack, reload, softDelete, setScr
                             {isOverLimit && <span className="text-[10px] font-bold text-white bg-cotton-candy px-2 py-0.5 rounded-full">Vượt hạn mức</span>}
                           </div>
                           <p className="text-steel dark:text-light-grey text-xs">
-                            {item.isProfit ? item.note : stripPeriodTag(item.note) || new Date(item.date || item.created_at).toLocaleString('vi-VN')}
+                            {item.isProfit ? item.note : stripPeriodTag(item.note) || new Date(item.created_at || item.date).toLocaleString('vi-VN')}
                           </p>
                           {item.balanceAfter !== undefined && <p className="text-steel dark:text-light-grey text-xs">Số dư: {formatMoney(item.balanceAfter)}</p>}
                         </div>
@@ -3701,9 +3987,10 @@ function FundDetail({ category, transactions, onBack, reload, softDelete, setScr
           transaction={editingTx}
           onClose={() => setEditingTx(null)}
           accounts={[]} /* Chỉ truyền nếu cần */
-          categories={[]}
+          categories={categories}
           transactions={transactions}
           onSaved={() => { reload(); setEditingTx(null); }}
+          spendingPoolByPeriod={spendingPoolByPeriod}
         />
       )}
     </>
@@ -3791,7 +4078,7 @@ function Accounts({ setScreen, accounts, transactions, onOpenAccount, reload, on
 /* ==============================================================================
    12. ACCOUNT DETAIL
    ============================================================================== */
-function AccountDetail({ account, transactions, categories, onBack, reload, softDelete, setScreen, onAddClick, displayName, avatarUrl, theme, toggleTheme, openSettings, sidebarCollapsed, toggleSidebar }) {
+function AccountDetail({ account, transactions, categories, onBack, reload, softDelete, setScreen, onAddClick, displayName, avatarUrl, theme, toggleTheme, openSettings, sidebarCollapsed, toggleSidebar, spendingPoolByPeriod }) {
   const [showAdjust, setShowAdjust] = useState(false);
   const [showEdit, setShowEdit] = useState(false);
   const [editingTx, setEditingTx] = useState(null);
@@ -3860,7 +4147,7 @@ function AccountDetail({ account, transactions, categories, onBack, reload, soft
                         <p className="text-blueberry dark:text-white font-bold text-sm">{label}</p>
                         {isOverLimit && <span className="text-[10px] font-bold text-white bg-cotton-candy px-2 py-0.5 rounded-full">Vượt hạn mức</span>}
                       </div>
-                      <p className="text-steel dark:text-light-grey text-xs">{displayNote || new Date(tx.date || tx.created_at).toLocaleString('vi-VN')}</p>
+                      <p className="text-steel dark:text-light-grey text-xs">{displayNote || new Date(tx.created_at || tx.date).toLocaleString('vi-VN')}</p>
                     </div>
                     <p className={`font-bold text-sm flex-shrink-0 ${isDirectSet ? 'text-blueberry dark:text-white' : isPositive ? 'text-turquoise' : 'text-cotton-candy'}`}>{isDirectSet ? '' : isPositive ? '+' : '-'}{formatMoney(Math.abs(tx.amount))}</p>
                     {!isDirectSet && (
@@ -3922,7 +4209,7 @@ function AccountDetail({ account, transactions, categories, onBack, reload, soft
                             <p className="text-blueberry dark:text-white font-bold text-sm">{label}</p>
                             {isOverLimit && <span className="text-[10px] font-bold text-white bg-cotton-candy px-2 py-0.5 rounded-full">Vượt hạn mức</span>}
                           </div>
-                          <p className="text-steel dark:text-light-grey text-xs">{displayNote || new Date(tx.date || tx.created_at).toLocaleString('vi-VN')}</p>
+                          <p className="text-steel dark:text-light-grey text-xs">{displayNote || new Date(tx.created_at || tx.date).toLocaleString('vi-VN')}</p>
                         </div>
                         <p className={`font-bold text-sm flex-shrink-0 ${isDirectSet ? 'text-blueberry dark:text-white' : isPositive ? 'text-turquoise' : 'text-cotton-candy'}`}>{isDirectSet ? '' : isPositive ? '+' : '-'}{formatMoney(Math.abs(tx.amount))}</p>
                         {!isDirectSet && (
@@ -3957,6 +4244,7 @@ function AccountDetail({ account, transactions, categories, onBack, reload, soft
           categories={categories}
           transactions={transactions}
           onSaved={() => { reload(); setEditingTx(null); }}
+          spendingPoolByPeriod={spendingPoolByPeriod}
         />
       )}
     </>
@@ -4647,16 +4935,16 @@ function CategorySection({ categories, reload, softDelete }) {
   // Bộ lọc hiển thị theo isFund — chỉ lọc hiển thị, không đổi dữ liệu
   const [fundFilter, setFundFilter] = useState('all'); // 'all' | 'fund' | 'not_fund'
   const [editing, setEditing] = useState(null);
-  const [form, setForm] = useState({ name: '', icon: '', monthly_limit: '', is_fund: false, interest_rate: '' });
+  const [form, setForm] = useState({ name: '', icon: '', monthly_limit: '', is_fund: false, interest_rate: '', include_in_spending_pool: true });
   const [saving, setSaving] = useState(false);
 
-  function startNew() { setForm({ name: '', icon: '', monthly_limit: '', is_fund: false, interest_rate: '' }); setEditing('new'); }
-  function startEdit(cat) { setForm({ name: cat.name, icon: cat.icon || '', monthly_limit: cat.monthly_limit || '', is_fund: cat.is_fund || false, interest_rate: cat.interest_rate || '' }); setEditing(cat.id); }
+  function startNew() { setForm({ name: '', icon: '', monthly_limit: '', is_fund: false, interest_rate: '', include_in_spending_pool: true }); setEditing('new'); }
+  function startEdit(cat) { setForm({ name: cat.name, icon: cat.icon || '', monthly_limit: cat.monthly_limit || '', is_fund: cat.is_fund || false, interest_rate: cat.interest_rate || '', include_in_spending_pool: cat.include_in_spending_pool !== false }); setEditing(cat.id); }
 
   async function handleSave() {
     if (!form.name) { alert('Nhập tên danh mục'); return; }
     setSaving(true);
-    const payload = { name: form.name, icon: form.icon || '❔', type: tab, monthly_limit: form.monthly_limit ? Number(form.monthly_limit) : null, is_fund: form.is_fund, interest_rate: form.interest_rate ? Number(form.interest_rate) : 0 };
+    const payload = { name: form.name, icon: form.icon || '❔', type: tab, monthly_limit: form.monthly_limit ? Number(form.monthly_limit) : null, is_fund: form.is_fund, interest_rate: form.interest_rate ? Number(form.interest_rate) : 0, ...(tab === 'income' ? { include_in_spending_pool: form.include_in_spending_pool } : {}) };
     const { error } = editing === 'new' ? await supabase.from('categories').insert(payload) : await supabase.from('categories').update(payload).eq('id', editing);
     setSaving(false);
     if (error) { alert('Lỗi: ' + error.message); return; }
@@ -4714,6 +5002,11 @@ function CategorySection({ categories, reload, softDelete }) {
                 ) : (
                   <span className="text-[10px] bg-steel/10 text-steel dark:bg-light-grey/10 dark:text-light-grey px-1.5 py-0.5 rounded-full font-bold">Chi tiêu</span>
                 )}
+                {cat.type === 'income' && (cat.include_in_spending_pool === false ? (
+                  <span className="text-[10px] bg-cotton-candy/10 text-cotton-candy px-1.5 py-0.5 rounded-full font-bold">Thu nhập đặc biệt</span>
+                ) : (
+                  <span className="text-[10px] bg-baby-blue/10 text-baby-blue px-1.5 py-0.5 rounded-full font-bold">Vào Thu nhập được chi</span>
+                ))}
               </p>
               <p className="text-steel dark:text-light-grey text-xs font-semibold">
                 {cat.monthly_limit ? `Hạn mức: ${formatMoney(cat.monthly_limit)}` : ''}
@@ -4737,7 +5030,18 @@ function CategorySection({ categories, reload, softDelete }) {
             {tab === 'expense' && (
               <input value={form.interest_rate} onChange={(e) => setForm({ ...form, interest_rate: e.target.value.replace(/[^0-9.]/g, '') })} inputMode="decimal" placeholder="Tỷ suất lợi nhuận %/năm (không bắt buộc)" className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none mb-3 dark:text-white dark:placeholder:text-light-grey text-blueberry" />
             )}
-            <label className="flex items-center gap-2 mb-4 text-sm text-blueberry dark:text-white font-semibold"><input type="checkbox" checked={form.is_fund} onChange={(e) => setForm({ ...form, is_fund: e.target.checked })} /> Đây là 1 "quỹ" — hiện thẻ tổng tiền ở Trang chủ</label>
+            {tab === 'expense' && (
+              <label className="flex items-center gap-2 mb-4 text-sm text-blueberry dark:text-white font-semibold"><input type="checkbox" checked={form.is_fund} onChange={(e) => setForm({ ...form, is_fund: e.target.checked })} /> Đây là 1 "quỹ" — hiện thẻ tổng tiền ở Trang chủ</label>
+            )}
+            {tab === 'income' && (
+              <label className="flex items-start gap-2 mb-4 text-sm text-blueberry dark:text-white font-semibold">
+                <input type="checkbox" className="mt-0.5" checked={form.include_in_spending_pool} onChange={(e) => setForm({ ...form, include_in_spending_pool: e.target.checked })} />
+                <span>
+                  Tính vào Thu nhập được chi (số tiền được phép chi)
+                  <span className="block text-xs font-normal text-steel dark:text-light-grey mt-0.5">Bỏ chọn nếu đây là khoản thu đặc biệt (vd: tiền quý, thưởng) — vẫn tính vào Tổng thu nhập nhưng không tự động làm tăng Thu nhập được chi.</span>
+                </span>
+              </label>
+            )}
             <button onClick={handleSave} disabled={saving} className="w-full bg-gradient-primary text-white rounded-xl py-3 font-bold flex items-center justify-center gap-2 disabled:opacity-60 shadow-md shadow-turquoise/30">{saving ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />} Lưu</button>
           </div>
         </div>
@@ -4856,13 +5160,19 @@ function AssetBreakdownDetail({ wallets, funds, gold, total }) {
 /* ==============================================================================
    16. REPORT COMPONENT
    ============================================================================== */
-function Report({ setScreen, transactions, categories, accounts, goals, onAddClick, displayName, avatarUrl, theme, toggleTheme, openSettings, sidebarCollapsed, toggleSidebar }) {
+function Report({ setScreen, transactions, categories, accounts, goals, onAddClick, displayName, avatarUrl, theme, toggleTheme, openSettings, sidebarCollapsed, toggleSidebar, spendingPoolByPeriod, saveSpendingPoolForPeriod, reload }) {
+  const [editingTx, setEditingTx] = useState(null);
   // Time range state
+  // FIX: dùng kỳ tài chính hiện tại (21 -> 20) làm mặc định, KHÔNG dùng tháng lịch thường.
+  // Lý do: từ ngày 21 trở đi, giao dịch đã thuộc về kỳ tài chính của tháng SAU (xem dateToPeriodKey),
+  // nếu mặc định theo tháng lịch thì giao dịch vừa nhập sau ngày 20 sẽ rơi ra ngoài kỳ đang xem
+  // và không hiển thị trong Báo cáo (Chi tiêu/Thu nhập hiện 0đ dù đã có dữ liệu).
+  const [defaultPeriodYear, defaultPeriodMonth] = currentPeriodKey().split('-').map(Number);
   const [timeType, setTimeType] = useState('month');
-  const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1);
-  const [selectedQuarter, setSelectedQuarter] = useState(Math.floor((new Date().getMonth())/3) + 1);
-  const [selectedHalf, setSelectedHalf] = useState(new Date().getMonth() < 6 ? 1 : 2);
-  const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
+  const [selectedMonth, setSelectedMonth] = useState(defaultPeriodMonth);
+  const [selectedQuarter, setSelectedQuarter] = useState(Math.ceil(defaultPeriodMonth / 3));
+  const [selectedHalf, setSelectedHalf] = useState(defaultPeriodMonth <= 6 ? 1 : 2);
+  const [selectedYear, setSelectedYear] = useState(defaultPeriodYear);
   const [selectedDay, setSelectedDay] = useState(new Date().toISOString().slice(0,10));
   const [selectedWeek, setSelectedWeek] = useState(() => {
     const d = new Date();
@@ -4874,10 +5184,10 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
   const [customStart, setCustomStart] = useState(new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0,10));
   const [customEnd, setCustomEnd] = useState(new Date().toISOString().slice(0,10));
 
-  // Compute start/end based on type
+  // Compute start/end based on type — Tháng/Quý/6 tháng/Năm đều dựa trên
+  // financial period (kỳ 21 → 20) của hệ thống, không dùng tháng lịch đơn giản.
   const getPeriod = () => {
     let start, end;
-    const now = new Date();
     const y = selectedYear;
     if (timeType === 'day') {
       const d = new Date(selectedDay);
@@ -4888,29 +5198,22 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
       start = new Date(d); start.setHours(0,0,0,0);
       end = new Date(d); end.setDate(end.getDate()+6); end.setHours(23,59,59,999);
     } else if (timeType === 'month') {
-      const m = selectedMonth;
-      start = new Date(y, m-1, 1, 0,0,0);
-      end = new Date(y, m, 0, 23,59,59);
+      ({ start, end } = financialMonthRange(y, selectedMonth));
     } else if (timeType === 'quarter') {
       const q = selectedQuarter;
-      const sm = (q-1)*3;
-      start = new Date(y, sm, 1, 0,0,0);
-      end = new Date(y, sm+3, 0, 23,59,59);
+      ({ start, end } = financialMultiMonthRange(y, [(q-1)*3+1, (q-1)*3+2, (q-1)*3+3]));
     } else if (timeType === '6month') {
       const h = selectedHalf;
-      const sm = (h-1)*6;
-      start = new Date(y, sm, 1, 0,0,0);
-      end = new Date(y, sm+6, 0, 23,59,59);
+      const months = h === 1 ? [1,2,3,4,5,6] : [7,8,9,10,11,12];
+      ({ start, end } = financialMultiMonthRange(y, months));
     } else if (timeType === 'year') {
-      start = new Date(y, 0, 1, 0,0,0);
-      end = new Date(y, 11, 31, 23,59,59);
+      ({ start, end } = financialMultiMonthRange(y, [1,2,3,4,5,6,7,8,9,10,11,12]));
     } else if (timeType === 'custom') {
       start = new Date(customStart); start.setHours(0,0,0,0);
       end = new Date(customEnd); end.setHours(23,59,59,999);
     } else {
-      // fallback month
-      start = new Date(y, now.getMonth(), 1);
-      end = new Date(y, now.getMonth()+1, 0, 23,59,59);
+      // fallback: kỳ hiện tại
+      ({ start, end } = periodKeyToRange(currentPeriodKey()));
     }
     return { start, end };
   };
@@ -4921,13 +5224,94 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
     return d >= start && d <= end;
   });
 
-  // Aggregate
-  const agg = aggregatePeriodData(periodTxs, categories);
-  const { income, allocation, expenseFromIncome, expenseFromFund, totalActualExpense, remaining } = agg;
+  // ==== [PHASE 3] Danh sách periodKey (kỳ 21->20) tương ứng với khoảng đang chọn ====
+  // Dùng để tính Thu nhập được chi ĐÚNG theo từng kỳ thay vì gộp transaction theo ngày.
+  const monthPeriodKey = `${selectedYear}-${String(selectedMonth).padStart(2, '0')}`;
+  const periodKeysInRange = (() => {
+    if (timeType === 'month') return [monthPeriodKey];
+    if (timeType === 'quarter') { const q = selectedQuarter; return periodKeysForMonths(selectedYear, [(q-1)*3+1, (q-1)*3+2, (q-1)*3+3]); }
+    if (timeType === '6month') { const h = selectedHalf; return periodKeysForMonths(selectedYear, h === 1 ? [1,2,3,4,5,6] : [7,8,9,10,11,12]); }
+    if (timeType === 'year') return periodKeysForMonths(selectedYear, [1,2,3,4,5,6,7,8,9,10,11,12]);
+    return null; // day / week / custom — không map thẳng theo kỳ
+  })();
 
-  // Previous period
+  // ===== Danh sách giao dịch chi tiết trong khoảng thời gian đang filter =====
+  // "Nguồn trừ/cộng" cho biết tiền được cộng vào đâu (thu nhập, quỹ) hay trừ từ đâu (ví, quỹ, thu nhập kỳ).
+  function getTxSource(tx) {
+    const cat = categories.find((c) => c.id === tx.category_id);
+    if (tx.type === 'income') return { label: cat?.name ? `Thu nhập · ${cat.name}` : 'Thu nhập' };
+    if (tx.type === 'allocation') return { label: `Góp quỹ · ${cat?.name || 'Quỹ'}` };
+    if (cat?.is_fund) return { label: `Rút từ quỹ · ${cat?.name || 'Quỹ'}` };
+    if (tx.account_id) {
+      const acc = accounts.find((a) => a.id === tx.account_id);
+      return { label: `Ví · ${acc?.name || 'Không rõ'}` };
+    }
+    return { label: 'Thu nhập kỳ' };
+  }
+  const allPeriodTxsSorted = [...periodTxs].sort((a, b) => new Date(b.date || b.created_at) - new Date(a.date || a.created_at));
+  function groupTxsByDate(txs) {
+    const groups = {};
+    txs.forEach((tx) => {
+      const key = new Date(tx.date || tx.created_at).toDateString();
+      if (!groups[key]) groups[key] = [];
+      groups[key].push(tx);
+    });
+    return groups;
+  }
+  function formatTxDateLabel(dateStr) {
+    const today = new Date();
+    const yesterday = new Date(today); yesterday.setDate(yesterday.getDate() - 1);
+    const date = new Date(dateStr);
+    if (date.toDateString() === today.toDateString()) return 'Hôm nay';
+    if (date.toDateString() === yesterday.toDateString()) return 'Hôm qua';
+    return date.toLocaleDateString('vi-VN', { weekday: 'long', day: 'numeric', month: 'short', year: 'numeric' });
+  }
+  const groupedPeriodTxs = groupTxsByDate(allPeriodTxsSorted);
+  const sortedPeriodTxKeys = Object.keys(groupedPeriodTxs).sort((a, b) => new Date(b) - new Date(a));
+  function TxDetailRow({ tx }) {
+    const cat = categories.find((c) => c.id === tx.category_id);
+    const src = getTxSource(tx);
+    const isOverLimit = (tx.note || '').startsWith('[Vượt hạn mức]');
+    const noteText = stripPeriodTag(tx.note);
+    const timeLabel = new Date(tx.created_at || tx.date).toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit', year: 'numeric' });
+    return (
+      <div onClick={() => setEditingTx(tx)} className="flex items-center gap-3 py-3 first:pt-0 last:pb-0 cursor-pointer hover:bg-ice-cream dark:hover:bg-night-sky/30 rounded-xl -mx-2 px-2 transition">
+        <EmojiCircle emoji={cat?.icon} size={40} bg={tx.type === 'expense' ? '#E3D6FF' : '#B4F1F1'} />
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <p className="text-blueberry dark:text-white font-bold text-sm truncate">{cat?.name || (tx.type === 'income' ? 'Thu nhập' : 'Chi tiêu')}</p>
+            {isOverLimit && <span className="text-[10px] font-bold text-white bg-cotton-candy px-2 py-0.5 rounded-full flex-shrink-0">Vượt hạn mức</span>}
+          </div>
+          {noteText && <p className="text-steel dark:text-light-grey text-xs truncate">{noteText}</p>}
+          <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+            <span className="text-steel dark:text-light-grey text-[11px] flex items-center gap-1"><Clock size={11} />{timeLabel}</span>
+            <span className="text-[11px] font-semibold text-baby-blue">{src.label}</span>
+          </div>
+        </div>
+        <p className={`font-bold text-sm flex-shrink-0 ${tx.type === 'expense' ? 'text-cotton-candy' : 'text-turquoise'}`}>{tx.type === 'expense' ? '-' : '+'}{formatMoney(tx.amount)}</p>
+      </div>
+    );
+  }
+
+  // ==== [PHASE 3] Aggregate — chuyển sang calculatePeriodFinancials/calculateFinancialsForPeriods ====
+  // Giữ nguyên TÊN biến cũ (income/allocation/expenseFromIncome/totalActualExpense/remaining) để
+  // không phải sửa lại toàn bộ JSX bên dưới đang tham chiếu các tên này — nhưng GIÁ TRỊ giờ được
+  // tính đúng theo logic Thu nhập được chi mới, KHÔNG còn dùng remaining = income - allocation - expense.
+  const financials = periodKeysInRange
+    ? calculateFinancialsForPeriods(periodKeysInRange, transactions, categories, spendingPoolByPeriod)
+    : calculateFinancialsFromTxs(periodTxs, categories, null);
+  const agg = financials;
+  const income = financials.totalIncome;
+  const allocation = financials.allocationFromSpendingPool;
+  const expenseFromIncome = financials.expenseFromSpendingPool;
+  const expenseFromFund = financials.expenseFromFund;
+  const totalActualExpense = financials.totalActualExpense;
+  const remaining = financials.remainingAfterSpend;
+  // Các số liệu MỚI theo yêu cầu nghiệp vụ — dùng cho section "Thu nhập đã đi đâu?" + hover card
+  const { incomeForSpendingPool, specialIncome, spendingPool, accumulationBeforeSpend, isOverSpendingPool } = financials;
+
+  // Previous period — cùng logic financial period với getPeriod()
   const getPrevPeriod = () => {
-    let prevStart, prevEnd;
     if (timeType === 'day') {
       const d = new Date(selectedDay); d.setDate(d.getDate()-1);
       const s = new Date(d); s.setHours(0,0,0,0);
@@ -4941,28 +5325,18 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
     } else if (timeType === 'month') {
       let m = selectedMonth - 1; let y = selectedYear;
       if (m === 0) { m = 12; y--; }
-      const s = new Date(y, m-1, 1, 0,0,0);
-      const e = new Date(y, m, 0, 23,59,59);
-      return { start: s, end: e };
+      return financialMonthRange(y, m);
     } else if (timeType === 'quarter') {
       let q = selectedQuarter - 1; let y = selectedYear;
       if (q === 0) { q = 4; y--; }
-      const sm = (q-1)*3;
-      const s = new Date(y, sm, 1, 0,0,0);
-      const e = new Date(y, sm+3, 0, 23,59,59);
-      return { start: s, end: e };
+      return financialMultiMonthRange(y, [(q-1)*3+1, (q-1)*3+2, (q-1)*3+3]);
     } else if (timeType === '6month') {
       let h = selectedHalf - 1; let y = selectedYear;
       if (h === 0) { h = 2; y--; }
-      const sm = (h-1)*6;
-      const s = new Date(y, sm, 1, 0,0,0);
-      const e = new Date(y, sm+6, 0, 23,59,59);
-      return { start: s, end: e };
+      const months = h === 1 ? [1,2,3,4,5,6] : [7,8,9,10,11,12];
+      return financialMultiMonthRange(y, months);
     } else if (timeType === 'year') {
-      const y = selectedYear - 1;
-      const s = new Date(y, 0, 1, 0,0,0);
-      const e = new Date(y, 11, 31, 23,59,59);
-      return { start: s, end: e };
+      return financialMultiMonthRange(selectedYear - 1, [1,2,3,4,5,6,7,8,9,10,11,12]);
     } else if (timeType === 'custom') {
       const dur = end - start;
       const ps = new Date(start); ps.setTime(ps.getTime() - dur - 1000);
@@ -4973,14 +5347,26 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
   };
 
   const prev = getPrevPeriod();
-  let prevAgg = { income: 0, allocation: 0, expenseFromIncome: 0, expenseFromFund: 0, totalActualExpense: 0, remaining: 0 };
+  const prevPeriodKeysInRange = (() => {
+    if (timeType === 'month') { let m = selectedMonth - 1, y = selectedYear; if (m === 0) { m = 12; y--; } return [`${y}-${String(m).padStart(2, '0')}`]; }
+    if (timeType === 'quarter') { let q = selectedQuarter - 1, y = selectedYear; if (q === 0) { q = 4; y--; } return periodKeysForMonths(y, [(q-1)*3+1, (q-1)*3+2, (q-1)*3+3]); }
+    if (timeType === '6month') { let h = selectedHalf - 1, y = selectedYear; if (h === 0) { h = 2; y--; } return periodKeysForMonths(y, h === 1 ? [1,2,3,4,5,6] : [7,8,9,10,11,12]); }
+    if (timeType === 'year') return periodKeysForMonths(selectedYear - 1, [1,2,3,4,5,6,7,8,9,10,11,12]);
+    return null;
+  })();
+  let prevFinancials = { totalIncome: 0, allocationFromSpendingPool: 0, expenseFromSpendingPool: 0, expenseFromFund: 0, totalActualExpense: 0, remainingAfterSpend: 0 };
   if (prev) {
-    const prevTxs = transactions.filter(t => {
-      const d = new Date(t.date || t.created_at);
-      return d >= prev.start && d <= prev.end;
-    });
-    prevAgg = aggregatePeriodData(prevTxs, categories);
+    if (prevPeriodKeysInRange) {
+      prevFinancials = calculateFinancialsForPeriods(prevPeriodKeysInRange, transactions, categories, spendingPoolByPeriod);
+    } else {
+      const prevTxs = transactions.filter(t => {
+        const d = new Date(t.date || t.created_at);
+        return d >= prev.start && d <= prev.end;
+      });
+      prevFinancials = calculateFinancialsFromTxs(prevTxs, categories, null);
+    }
   }
+  const prevAgg = { income: prevFinancials.totalIncome, allocation: prevFinancials.allocationFromSpendingPool, expenseFromIncome: prevFinancials.expenseFromSpendingPool, expenseFromFund: prevFinancials.expenseFromFund, totalActualExpense: prevFinancials.totalActualExpense, remaining: prevFinancials.remainingAfterSpend };
 
   // Asset snapshot at end of period
   const totalAccountsEnd = accounts.reduce((s, a) => s + accountBalanceAtDate(a, transactions, end), 0);
@@ -5011,6 +5397,8 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
 
   // Hover-card breakdown data (dùng đúng periodTxs / mốc "end" của filter thời gian đang chọn)
   const incomeDetailItems = incomeBreakdown.map(c => ({ key: c.id, name: c.name, amount: c.amount }));
+  const poolIncomeDetailItems = incomeBreakdown.filter(c => c.include_in_spending_pool !== false).map(c => ({ key: c.id, name: c.name, amount: c.amount }));
+  const specialIncomeDetailItems = incomeBreakdown.filter(c => c.include_in_spending_pool === false).map(c => ({ key: c.id, name: c.name, amount: c.amount }));
   const expenseFundWithdrawn = fundCats.map(c => ({
     key: c.id,
     name: c.name,
@@ -5034,55 +5422,32 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
     return { ...c, balanceNow, contributed, withdrawn, target, progress };
   }).filter(f => f.contributed > 0 || f.withdrawn > 0 || f.balanceNow > 0).sort((a,b) => b.contributed - a.contributed);
 
-  // Trends: if year, show 12 months; if quarter, show 3 months; if month, show days? We'll keep simple: for year show monthly, else show sub-periods.
+  // Trends: if year, show 12 tháng (kỳ tài chính); if quarter/6month, show các tháng trong đó.
+  // Luôn tính theo financial period (21 → 20), không dùng tháng lịch.
   const trendData = (() => {
-    if (timeType === 'year') {
-      const months = [];
-      for (let m=1; m<=12; m++) {
-        const s = new Date(selectedYear, m-1, 1, 0,0,0);
-        const e = new Date(selectedYear, m, 0, 23,59,59);
-        const txs = transactions.filter(t => {
-          const d = new Date(t.date || t.created_at);
-          return d >= s && d <= e;
-        });
-        const a = aggregatePeriodData(txs, categories);
-        months.push({ label: `Th${m}`, income: a.income, allocation: a.allocation, expenseFromIncome: a.expenseFromIncome, remaining: a.remaining });
-      }
-      return months;
-    } else if (timeType === 'quarter') {
-      const months = [];
-      const sm = (selectedQuarter-1)*3;
-      for (let i=0; i<3; i++) {
-        const m = sm + i + 1;
-        const s = new Date(selectedYear, m-1, 1, 0,0,0);
-        const e = new Date(selectedYear, m, 0, 23,59,59);
-        const txs = transactions.filter(t => {
-          const d = new Date(t.date || t.created_at);
-          return d >= s && d <= e;
-        });
-        const a = aggregatePeriodData(txs, categories);
-        months.push({ label: `Th${m}`, income: a.income, allocation: a.allocation, expenseFromIncome: a.expenseFromIncome, remaining: a.remaining });
-      }
-      return months;
-    } else if (timeType === '6month') {
-      const months = [];
-      const sm = (selectedHalf-1)*6;
-      for (let i=0; i<6; i++) {
-        const m = sm + i + 1;
-        const s = new Date(selectedYear, m-1, 1, 0,0,0);
-        const e = new Date(selectedYear, m, 0, 23,59,59);
-        const txs = transactions.filter(t => {
-          const d = new Date(t.date || t.created_at);
-          return d >= s && d <= e;
-        });
-        const a = aggregatePeriodData(txs, categories);
-        months.push({ label: `Th${m}`, income: a.income, allocation: a.allocation, expenseFromIncome: a.expenseFromIncome, remaining: a.remaining });
-      }
-      return months;
-    } else {
-      // For month/week/day, show last 6 periods of same type? Not implemented here for brevity.
-      return [];
+    function monthsAgg(year, monthList) {
+      return monthList.map((m) => {
+        const pk = `${year}-${String(m).padStart(2, '0')}`;
+        const a = calculatePeriodFinancials(pk, transactions, categories, spendingPoolByPeriod?.[pk]);
+        return { label: `Th${m}`, month: m, year, income: a.totalIncome, allocation: a.allocationFromSpendingPool, expenseFromIncome: a.expenseFromSpendingPool, expenseFromFund: a.expenseFromFund, totalActualExpense: a.totalActualExpense, remaining: a.remainingAfterSpend };
+      });
     }
+    if (timeType === 'year') return monthsAgg(selectedYear, [1,2,3,4,5,6,7,8,9,10,11,12]);
+    if (timeType === 'quarter') { const sm = (selectedQuarter-1)*3; return monthsAgg(selectedYear, [sm+1, sm+2, sm+3]); }
+    if (timeType === '6month') { const sm = (selectedHalf-1)*6; return monthsAgg(selectedYear, Array.from({length:6}, (_,i)=>sm+i+1)); }
+    return [];
+  })();
+
+  // Tổng kết năm (chỉ khi đang xem theo Năm) — dựa trên trendData 12 tháng đã tính ở trên
+  const yearSummary = (() => {
+    if (timeType !== 'year' || trendData.length === 0) return null;
+    const pick = (key) => trendData.reduce((best, m) => (m[key] > (best ? best[key] : -Infinity) ? m : best), null);
+    return {
+      topIncomeMonth: pick('income'),
+      topAllocationMonth: pick('allocation'),
+      topExpenseMonth: pick('totalActualExpense'),
+      topRemainingMonth: pick('remaining'),
+    };
   })();
 
   // Insights
@@ -5112,11 +5477,11 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
       color: 'text-cotton-candy'
     });
   }
-  if (allocation + expenseFromIncome > income) {
+  if (isOverSpendingPool) {
     insights.push({
       icon: AlertTriangle,
-      title: 'Cảnh báo dòng tiền',
-      desc: `Góp quỹ và chi từ thu nhập vượt quá thu nhập. Bạn đang sử dụng tiền tích lũy.`,
+      title: 'Vượt Thu nhập được chi',
+      desc: `Nạp quỹ + chi tiêu từ Thu nhập được chi đã vượt quá số tiền được phép chi (${formatMoney(spendingPool)}) của kỳ.`,
       color: 'text-cotton-candy'
     });
   }
@@ -5146,9 +5511,9 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
   const [drilldownTransactions, setDrilldownTransactions] = useState([]);
   const [showDrilldown, setShowDrilldown] = useState(false);
 
-  function openDrilldown(categoryId) {
+  function openDrilldown(categoryId, txType = 'expense') {
     const cat = categories.find(c => c.id === categoryId);
-    const txs = periodTxs.filter(t => t.category_id === categoryId && t.type === 'expense')
+    const txs = periodTxs.filter(t => t.category_id === categoryId && t.type === txType)
       .sort((a,b) => new Date(b.date || b.created_at) - new Date(a.date || a.created_at));
     setDrilldownCategory(cat);
     setDrilldownTransactions(txs);
@@ -5248,25 +5613,63 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
               <HoverDetailCard className="flex justify-between items-center py-1" detail={<BreakdownDetailList title="Tổng thu nhập" items={incomeDetailItems} total={income} colorClass="text-turquoise" />}>
                 <span className="text-steel dark:text-light-grey">Thu nhập</span><span className="font-bold text-turquoise">{formatMoney(income)}</span>
               </HoverDetailCard>
+              <HoverDetailCard className="flex justify-between items-center py-1" detail={<BreakdownDetailList title="Thu nhập được chi" items={poolIncomeDetailItems} total={spendingPool} colorClass="text-baby-blue" />}>
+                <span className="text-steel dark:text-light-grey">Thu nhập được chi</span><span className="font-bold text-baby-blue">{formatMoney(spendingPool)}</span>
+              </HoverDetailCard>
+              <HoverDetailCard className="flex justify-between items-center py-1" detail={<BreakdownDetailList title="Thu nhập đặc biệt" items={specialIncomeDetailItems} total={specialIncome} colorClass="text-lavender" />}>
+                <span className="text-steel dark:text-light-grey">Thu nhập đặc biệt</span><span className="font-bold text-lavender">{formatMoney(specialIncome)}</span>
+              </HoverDetailCard>
               <HoverDetailCard className="flex justify-between items-center py-1" detail={<BreakdownDetailList title="Chi tiêu" items={expenseDetailItems} total={totalActualExpense} colorClass="text-cotton-candy" />}>
                 <span className="text-steel dark:text-light-grey">Chi tiêu</span><span className="font-bold text-cotton-candy">{formatMoney(totalActualExpense)}</span>
               </HoverDetailCard>
             </div>
           </div>
           <div className="px-5 mt-4 bg-white dark:bg-[#1e1e32] rounded-3xl shadow-soft p-4">
-            <h2 className="text-blueberry dark:text-white font-extrabold text-base mb-3">Dòng tiền</h2>
+            <h2 className="text-blueberry dark:text-white font-extrabold text-base mb-1">Thu nhập đã đi đâu?</h2>
+            <p className="text-steel dark:text-light-grey text-[11px] mb-3">Tổng thu nhập → Thu nhập được chi + Thu nhập đặc biệt</p>
             <div className="space-y-1">
-              <div className="flex justify-between"><span>Thu nhập</span><span className="font-bold text-turquoise">{formatMoney(income)}</span></div>
-              <div className="flex justify-between"><span>Góp quỹ</span><span className="font-bold text-baby-blue">{formatMoney(allocation)}</span></div>
-              <div className="flex justify-between"><span>Chi từ thu nhập</span><span className="font-bold text-cotton-candy">{formatMoney(expenseFromIncome)}</span></div>
-              <div className="flex justify-between border-t pt-2"><span className="font-bold">Còn lại</span><span className={`font-bold ${remaining >= 0 ? 'text-turquoise' : 'text-cotton-candy'}`}>{formatMoney(remaining)}</span></div>
+              <div className="flex justify-between"><span>Tổng thu nhập</span><span className="font-bold text-blueberry dark:text-white">{formatMoney(income)}</span></div>
+              <div className="flex justify-between"><span className="text-steel dark:text-light-grey pl-3">— Thu nhập tính vào Thu nhập được chi</span><span className="font-semibold text-baby-blue">{formatMoney(incomeForSpendingPool)}</span></div>
+              <div className="flex justify-between"><span className="text-steel dark:text-light-grey pl-3">— Thu nhập đặc biệt</span><span className="font-semibold text-lavender">{formatMoney(specialIncome)}</span></div>
             </div>
+            <div className="border-t border-[rgba(126,127,144,0.2)] dark:border-[rgba(189,189,203,0.15)] my-3" />
+            <p className="text-steel dark:text-light-grey text-xs font-bold mb-1">Trong Thu nhập được chi ({formatMoney(spendingPool)})</p>
+            <div className="space-y-1">
+              <div className="flex justify-between"><span>Nạp quỹ</span><span className="font-bold text-baby-blue">{formatMoney(allocation)}</span></div>
+              <div className="flex justify-between"><span>Chi tiêu</span><span className="font-bold text-cotton-candy">{formatMoney(expenseFromIncome)}</span></div>
+              <div className="flex justify-between border-t pt-2"><span className="font-bold">Dư sau chi</span><span className={`font-bold ${remaining >= 0 ? 'text-turquoise' : 'text-cotton-candy'}`}>{formatMoney(remaining)}</span></div>
+            </div>
+            {accumulationBeforeSpend > 0 && (
+              <p className="text-xs text-lavender mt-2 font-semibold">Tích lũy trước chi: {formatMoney(accumulationBeforeSpend)}</p>
+            )}
+            {expenseFromFund > 0 && (
+              <p className="text-xs text-steel dark:text-light-grey mt-2">Chi từ tiền đã tích lũy (quỹ): <span className="font-bold text-blueberry dark:text-white">{formatMoney(expenseFromFund)}</span> — không trừ vào Dư sau chi.</p>
+            )}
+            {isOverSpendingPool && <p className="text-cotton-candy text-xs mt-2 font-semibold">⚠️ Đã sử dụng vượt quá Thu nhập được chi của kỳ này.</p>}
           </div>
           <div className="px-5 mt-4 bg-white dark:bg-[#1e1e32] rounded-3xl shadow-soft p-4">
             <h2 className="text-blueberry dark:text-white font-extrabold text-base mb-3">Top chi tiêu</h2>
             {expenseBreakdown.slice(0,3).map(c => (
               <div key={c.id} className="flex justify-between py-1"><span>{c.name}</span><span className="font-bold text-cotton-candy">{formatMoney(c.amount)}</span></div>
             ))}
+          </div>
+
+          <div className="px-5 mt-4 bg-white dark:bg-[#1e1e32] rounded-3xl shadow-soft p-4">
+            <h2 className="text-blueberry dark:text-white font-extrabold text-base mb-3">Hoạt động gần đây</h2>
+            {allPeriodTxsSorted.length === 0 ? (
+              <p className="text-steel dark:text-light-grey text-sm text-center py-4">Không có giao dịch nào trong khoảng thời gian này.</p>
+            ) : (
+              <div className="flex flex-col gap-3">
+                {sortedPeriodTxKeys.map((key) => (
+                  <div key={key}>
+                    <p className="text-xs font-bold text-steel dark:text-light-grey mb-1">{formatTxDateLabel(key)}</p>
+                    <div className="flex flex-col divide-y divide-[rgba(189,189,203,0.2)] dark:divide-[rgba(189,189,203,0.1)]">
+                      {groupedPeriodTxs[key].map((tx) => <TxDetailRow key={tx.id} tx={tx} />)}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -5338,7 +5741,7 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
           )}
         </div>
 
-        <div className="grid grid-cols-3 gap-6 mb-6">
+        <div className="grid grid-cols-3 md:grid-cols-5 gap-6 mb-6">
           <HoverDetailCard
             className="bg-white dark:bg-[#1e1e32] rounded-3xl p-6 shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)] cursor-pointer hover:shadow-card transition"
             detail={<AssetBreakdownDetail wallets={assetWalletItems} funds={assetFundItems} gold={assetGoldItems} total={totalAssetsEnd} />}
@@ -5355,6 +5758,20 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
           </HoverDetailCard>
           <HoverDetailCard
             className="bg-white dark:bg-[#1e1e32] rounded-3xl p-6 shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)] cursor-pointer hover:shadow-card transition"
+            detail={<BreakdownDetailList title="Thu nhập được chi" items={poolIncomeDetailItems} total={spendingPool} colorClass="text-baby-blue" />}
+          >
+            <p className="text-steel dark:text-light-grey text-sm font-semibold">Thu nhập được chi</p>
+            <p className="text-baby-blue text-2xl font-bold">{formatMoney(spendingPool)}</p>
+          </HoverDetailCard>
+          <HoverDetailCard
+            className="bg-white dark:bg-[#1e1e32] rounded-3xl p-6 shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)] cursor-pointer hover:shadow-card transition"
+            detail={<BreakdownDetailList title="Thu nhập đặc biệt" items={specialIncomeDetailItems} total={specialIncome} colorClass="text-lavender" />}
+          >
+            <p className="text-steel dark:text-light-grey text-sm font-semibold">Thu nhập đặc biệt</p>
+            <p className="text-lavender text-2xl font-bold">{formatMoney(specialIncome)}</p>
+          </HoverDetailCard>
+          <HoverDetailCard
+            className="bg-white dark:bg-[#1e1e32] rounded-3xl p-6 shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)] cursor-pointer hover:shadow-card transition"
             align="right"
             detail={<BreakdownDetailList title="Chi tiêu" items={expenseDetailItems} total={totalActualExpense} colorClass="text-cotton-candy" />}
           >
@@ -5364,23 +5781,57 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
         </div>
 
         <div className="bg-white dark:bg-[#1e1e32] rounded-3xl p-6 shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)] mb-6">
-          <h2 className="text-blueberry dark:text-white font-extrabold text-lg mb-4">Dòng tiền trong kỳ</h2>
+          <h2 className="text-blueberry dark:text-white font-extrabold text-lg">Thu nhập đã đi đâu?</h2>
+          <p className="text-steel dark:text-light-grey text-xs font-semibold mb-4">Tổng thu nhập → Thu nhập được chi + Thu nhập đặc biệt (không tự động tăng Thu nhập được chi)</p>
           <div className="flex flex-col md:flex-row gap-6">
             <div className="flex-1">
               <div className="space-y-2">
-                <div className="flex justify-between"><span className="text-steel dark:text-light-grey">Thu nhập</span><span className="font-bold text-turquoise">{formatMoney(income)}</span></div>
-                <div className="flex justify-between"><span className="text-steel dark:text-light-grey">Góp quỹ</span><span className="font-bold text-baby-blue">{formatMoney(allocation)}</span></div>
-                <div className="flex justify-between"><span className="text-steel dark:text-light-grey">Chi từ thu nhập</span><span className="font-bold text-cotton-candy">{formatMoney(expenseFromIncome)}</span></div>
-                <div className="flex justify-between border-t pt-2"><span className="font-bold">Còn lại</span><span className={`font-bold ${remaining >= 0 ? 'text-turquoise' : 'text-cotton-candy'}`}>{formatMoney(remaining)}</span></div>
+                <div className="flex justify-between">
+                  <span className="text-steel dark:text-light-grey">Tổng thu nhập</span>
+                  <span className="font-bold text-blueberry dark:text-white">{formatMoney(income)}</span>
+                </div>
+                <div className="flex justify-between pl-3">
+                  <span className="text-steel dark:text-light-grey">— Thu nhập tính vào Thu nhập được chi</span>
+                  <span className="font-semibold text-baby-blue">{formatMoney(incomeForSpendingPool)}</span>
+                </div>
+                <div className="flex justify-between pl-3">
+                  <span className="text-steel dark:text-light-grey">— Thu nhập đặc biệt</span>
+                  <span className="font-semibold text-lavender">{formatMoney(specialIncome)}</span>
+                </div>
+                {accumulationBeforeSpend > 0 && (
+                  <div className="flex justify-between pl-3">
+                    <span className="text-steel dark:text-light-grey">— Tích lũy trước chi</span>
+                    <span className="font-semibold text-lavender">{formatMoney(accumulationBeforeSpend)}</span>
+                  </div>
+                )}
               </div>
+              <div className="border-t border-[rgba(126,127,144,0.2)] dark:border-[rgba(189,189,203,0.15)] my-4" />
+              <p className="text-steel dark:text-light-grey text-xs font-bold mb-2">Trong Thu nhập được chi ({formatMoney(spendingPool)})</p>
+              <div className="space-y-2">
+                <button onClick={() => setScreen('funds')} className="w-full flex justify-between text-left hover:opacity-70 transition">
+                  <span className="text-steel dark:text-light-grey">Nạp quỹ</span>
+                  <span className="font-bold text-baby-blue">{formatMoney(allocation)} {spendingPool > 0 && <span className="text-xs font-semibold">({Math.round((allocation/spendingPool)*100)}%)</span>}</span>
+                </button>
+                <div className="flex justify-between">
+                  <span className="text-steel dark:text-light-grey">Chi tiêu</span>
+                  <span className="font-bold text-cotton-candy">{formatMoney(expenseFromIncome)} {spendingPool > 0 && <span className="text-xs font-semibold">({Math.round((expenseFromIncome/spendingPool)*100)}%)</span>}</span>
+                </div>
+                <div className="flex justify-between border-t pt-2">
+                  <span className="font-bold">Dư sau chi</span>
+                  <span className={`font-bold ${remaining >= 0 ? 'text-turquoise' : 'text-cotton-candy'}`}>{formatMoney(remaining)} {spendingPool > 0 && <span className="text-xs font-semibold">({Math.round((remaining/spendingPool)*100)}%)</span>}</span>
+                </div>
+              </div>
+              {expenseFromFund > 0 && (
+                <p className="text-xs text-steel dark:text-light-grey mt-3">Chi tiêu từ tiền đã tích lũy (quỹ): <span className="font-bold text-blueberry dark:text-white">{formatMoney(expenseFromFund)}</span> — không trừ vào Dư sau chi ở trên.</p>
+              )}
             </div>
             <div className="flex-1">
               <StackedBar data={[
-                { label: 'Góp quỹ', value: allocation, color: '#74ACEF' },
-                { label: 'Chi từ thu nhập', value: expenseFromIncome, color: '#F18AB5' },
-                { label: 'Còn lại', value: Math.max(0, remaining), color: '#0DBACC' }
+                { label: 'Nạp quỹ', value: allocation, color: '#74ACEF' },
+                { label: 'Chi tiêu', value: expenseFromIncome, color: '#F18AB5' },
+                { label: 'Dư sau chi', value: Math.max(0, remaining), color: '#0DBACC' }
               ]} />
-              {remaining < 0 && <p className="text-cotton-candy text-xs mt-2">⚠️ Các khoản phân bổ vượt quá thu nhập.</p>}
+              {isOverSpendingPool && <p className="text-cotton-candy text-xs mt-2">⚠️ Đã sử dụng vượt quá Thu nhập được chi của kỳ này.</p>}
             </div>
           </div>
         </div>
@@ -5390,11 +5841,29 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
           {incomeBreakdown.length === 0 ? <p className="text-steel dark:text-light-grey">Không có thu nhập.</p> : (
             <div className="grid grid-cols-2 gap-2">
               {incomeBreakdown.map(c => (
-                <div key={c.id} className="flex justify-between bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-2">
+                <button key={c.id} onClick={() => openDrilldown(c.id, 'income')} className="flex justify-between bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-2 text-left hover:bg-turquoise/10 transition">
                   <span>{c.icon} {c.name}</span>
                   <span className="font-bold text-turquoise">{formatMoney(c.amount)}</span>
-                </div>
+                </button>
               ))}
+            </div>
+          )}
+        </div>
+
+        <div className="bg-white dark:bg-[#1e1e32] rounded-3xl p-6 shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)] mb-6">
+          <h2 className="text-blueberry dark:text-white font-extrabold text-lg mb-4">Chi tiết đã nạp quỹ</h2>
+          {fundData.filter(f => f.contributed > 0).length === 0 ? <p className="text-steel dark:text-light-grey">Không có khoản nạp quỹ nào trong kỳ.</p> : (
+            <div className="space-y-3">
+              {fundData.filter(f => f.contributed > 0).slice(0,5).map(f => (
+                <button key={f.id} onClick={() => openDrilldown(f.id, 'allocation')} className="w-full flex items-center justify-between border-b last:border-0 py-2 text-left hover:bg-turquoise/5 transition rounded-lg px-1">
+                  <div><p className="font-bold text-blueberry dark:text-white">{f.icon} {f.name}</p><p className="text-xs text-steel dark:text-light-grey">Số dư hiện tại: {formatMoney(f.balanceNow)}</p></div>
+                  <div className="text-right">
+                    <p className="text-sm text-turquoise">+{formatMoney(f.contributed)}</p>
+                    {allocation > 0 && <p className="text-xs text-steel dark:text-light-grey">{Math.round((f.contributed/allocation)*100)}% tổng nạp quỹ</p>}
+                  </div>
+                </button>
+              ))}
+              {fundData.filter(f => f.contributed > 0).length > 5 && <p className="text-steel dark:text-light-grey text-sm">... và {fundData.filter(f => f.contributed > 0).length-5} quỹ khác</p>}
             </div>
           )}
         </div>
@@ -5424,7 +5893,8 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               {expenseBreakdown.map(c => {
                 const total = c.fromIncome + c.fromWallet;
-                const pct = totalActualExpense > 0 ? Math.round((total / totalActualExpense) * 100) : 0;
+                const nonFundTotal = expenseFromIncome + agg.expenseFromWallet;
+                const pct = nonFundTotal > 0 ? Math.round((total / nonFundTotal) * 100) : 0;
                 return (
                   <button key={c.id} onClick={() => openDrilldown(c.id)} className="bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-left hover:bg-turquoise/10 transition">
                     <div className="flex justify-between items-center">
@@ -5445,6 +5915,55 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
             </div>
           )}
         </div>
+
+        <div className="bg-white dark:bg-[#1e1e32] rounded-3xl p-6 shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)] mb-6">
+          <h2 className="text-blueberry dark:text-white font-extrabold text-lg">Chi tiêu từ tiền đã tích lũy</h2>
+          <p className="text-steel dark:text-light-grey text-xs font-semibold mb-4">Đây là các khoản chi sử dụng tiền đã tích lũy trong quỹ — không tính vào "Còn lại từ thu nhập"</p>
+          {fundData.filter(f => f.withdrawn > 0).length === 0 ? (
+            <p className="text-steel dark:text-light-grey">Không có khoản chi nào từ quỹ trong kỳ.</p>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {fundData.filter(f => f.withdrawn > 0).map(f => {
+                const pct = expenseFromFund > 0 ? Math.round((f.withdrawn / expenseFromFund) * 100) : 0;
+                return (
+                  <button key={f.id} onClick={() => openDrilldown(f.id, 'expense')} className="bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-left hover:bg-cotton-candy/10 transition">
+                    <div className="flex justify-between items-center">
+                      <span className="font-bold text-blueberry dark:text-white">{f.icon} Quỹ {f.name}</span>
+                      <span className="font-bold text-cotton-candy">{formatMoney(f.withdrawn)}</span>
+                    </div>
+                    <div className="w-full h-1.5 bg-light-grey/30 rounded-full mt-1">
+                      <div className="h-full bg-cotton-candy rounded-full" style={{ width: `${Math.min(pct, 100)}%` }} />
+                    </div>
+                    <p className="text-xs text-steel dark:text-light-grey mt-1">{pct}% tổng chi từ quỹ</p>
+                  </button>
+                );
+              })}
+              <div className="md:col-span-2 flex justify-between border-t pt-3 mt-1">
+                <span className="font-bold text-blueberry dark:text-white">Tổng chi từ quỹ</span>
+                <span className="font-bold text-cotton-candy">{formatMoney(expenseFromFund)}</span>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {yearSummary && (
+          <div className="bg-white dark:bg-[#1e1e32] rounded-3xl p-6 shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)] mb-6">
+            <h2 className="text-blueberry dark:text-white font-extrabold text-lg mb-4">Tổng kết năm {selectedYear}</h2>
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-4">
+              <div><p className="text-steel dark:text-light-grey text-sm">Tổng thu nhập năm</p><p className="text-lg font-bold text-turquoise">{formatMoney(income)}</p></div>
+              <div><p className="text-steel dark:text-light-grey text-sm">Đã nạp quỹ năm</p><p className="text-lg font-bold text-baby-blue">{formatMoney(allocation)}</p></div>
+              <div><p className="text-steel dark:text-light-grey text-sm">Đã chi từ thu nhập</p><p className="text-lg font-bold text-cotton-candy">{formatMoney(expenseFromIncome)}</p></div>
+              <div><p className="text-steel dark:text-light-grey text-sm">Còn lại từ thu nhập</p><p className={`text-lg font-bold ${remaining >= 0 ? 'text-turquoise' : 'text-cotton-candy'}`}>{formatMoney(remaining)}</p></div>
+              <div><p className="text-steel dark:text-light-grey text-sm">Tổng chi từ quỹ</p><p className="text-lg font-bold text-cotton-candy">{formatMoney(expenseFromFund)}</p></div>
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              {yearSummary.topIncomeMonth && <div className="bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3"><p className="text-xs text-steel dark:text-light-grey">Tháng thu nhập cao nhất</p><p className="font-bold text-blueberry dark:text-white">{yearSummary.topIncomeMonth.label} — {formatMoney(yearSummary.topIncomeMonth.income)}</p></div>}
+              {yearSummary.topAllocationMonth && <div className="bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3"><p className="text-xs text-steel dark:text-light-grey">Tháng nạp quỹ nhiều nhất</p><p className="font-bold text-blueberry dark:text-white">{yearSummary.topAllocationMonth.label} — {formatMoney(yearSummary.topAllocationMonth.allocation)}</p></div>}
+              {yearSummary.topExpenseMonth && <div className="bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3"><p className="text-xs text-steel dark:text-light-grey">Tháng chi tiêu cao nhất</p><p className="font-bold text-blueberry dark:text-white">{yearSummary.topExpenseMonth.label} — {formatMoney(yearSummary.topExpenseMonth.totalActualExpense)}</p></div>}
+              {yearSummary.topRemainingMonth && <div className="bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3"><p className="text-xs text-steel dark:text-light-grey">Tháng còn lại nhiều nhất</p><p className="font-bold text-blueberry dark:text-white">{yearSummary.topRemainingMonth.label} — {formatMoney(yearSummary.topRemainingMonth.remaining)}</p></div>}
+            </div>
+          </div>
+        )}
 
         <div className="bg-white dark:bg-[#1e1e32] rounded-3xl p-6 shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)] mb-6">
           <h2 className="text-blueberry dark:text-white font-extrabold text-lg mb-4">So với kỳ trước</h2>
@@ -5530,6 +6049,27 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
           )}
         </div>
 
+        <div className="bg-white dark:bg-[#1e1e32] rounded-3xl p-6 shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)] mb-6">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-blueberry dark:text-white font-extrabold text-lg">Hoạt động gần đây</h2>
+            <span className="text-steel dark:text-light-grey text-xs font-semibold">{periodLabel} · {allPeriodTxsSorted.length} giao dịch</span>
+          </div>
+          {allPeriodTxsSorted.length === 0 ? (
+            <p className="text-steel dark:text-light-grey text-sm text-center py-6">Không có giao dịch nào trong khoảng thời gian này.</p>
+          ) : (
+            <div className="flex flex-col gap-4 max-h-[600px] overflow-y-auto scrollbar-hide pr-1">
+              {sortedPeriodTxKeys.map((key) => (
+                <div key={key}>
+                  <p className="text-xs font-bold text-steel dark:text-light-grey mb-2">{formatTxDateLabel(key)}</p>
+                  <div className="flex flex-col divide-y divide-[rgba(189,189,203,0.2)] dark:divide-[rgba(189,189,203,0.1)]">
+                    {groupedPeriodTxs[key].map((tx) => <TxDetailRow key={tx.id} tx={tx} />)}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
         {showDrilldown && drilldownCategory && (
           <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={() => setShowDrilldown(false)}>
             <div className="bg-white dark:bg-[#1e1e32] w-full max-w-md rounded-3xl p-6 max-h-[80vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
@@ -5554,6 +6094,17 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
           </div>
         )}
       </div>
+      {editingTx && (
+        <EditTransaction
+          transaction={editingTx}
+          onClose={() => setEditingTx(null)}
+          accounts={accounts}
+          categories={categories}
+          transactions={transactions}
+          onSaved={() => { reload && reload(); setEditingTx(null); }}
+          spendingPoolByPeriod={spendingPoolByPeriod}
+        />
+      )}
     </>
   );
 }
@@ -5567,6 +6118,27 @@ function MainApp({ user, theme, toggleTheme }) {
   const [categories, setCategories] = useState([]);
   const [transactions, setTransactions] = useState([]);
   const [goals, setGoals] = useState([]);
+  // spendingPoolByPeriod: { [periodKey]: amount } — "Số tiền được phép chi" người dùng tự cài đặt cho từng kỳ.
+  // Nếu 1 kỳ chưa có trong map này thì calculatePeriodFinancials sẽ tự lấy mặc định = incomeForSpendingPool.
+  const [spendingPoolByPeriod, setSpendingPoolByPeriod] = useState({});
+
+  async function loadSpendingPoolSettings() {
+    const { data, error } = await supabase.from('period_spending_pool').select('period_key, amount');
+    if (error) { setSpendingPoolByPeriod({}); return; } // bảng có thể chưa được tạo trong Supabase -> fallback an toàn
+    const map = {};
+    (data || []).forEach((row) => { map[row.period_key] = row.amount; });
+    setSpendingPoolByPeriod(map);
+  }
+
+  // Lưu/cập nhật Chi pool cho 1 kỳ cụ thể (upsert theo period_key)
+  async function saveSpendingPoolForPeriod(periodKey, amount) {
+    const { error } = await supabase
+      .from('period_spending_pool')
+      .upsert({ period_key: periodKey, amount: Number(amount) }, { onConflict: 'period_key' });
+    if (error) { alert('Lỗi lưu Thu nhập được chi: ' + error.message); return false; }
+    setSpendingPoolByPeriod((prev) => ({ ...prev, [periodKey]: Number(amount) }));
+    return true;
+  }
   const [loading, setLoading] = useState(true);
   const [loadingGoals, setLoadingGoals] = useState(true);
   const [currentUser, setCurrentUser] = useState(user);
@@ -5611,6 +6183,7 @@ function MainApp({ user, theme, toggleTheme }) {
     setAccounts(accData || []); setCategories(catData || []); setTransactions(txData || []); setGoals(goalData || []);
     setLoading(false); setLoadingGoals(false);
     loadLogs();
+    loadSpendingPoolSettings();
   }
 
   useEffect(() => { loadAll(); }, []);
@@ -5672,20 +6245,20 @@ function MainApp({ user, theme, toggleTheme }) {
     if (screen === 'fund-detail') {
       const cat = categories.find((c) => c.id === selectedFundId);
       if (!cat) { setScreen('dashboard'); return null; }
-      return <FundDetail category={cat} transactions={transactions} onBack={() => setScreen(fundReturnScreen)} reload={loadAll} softDelete={softDelete} setScreen={setScreen} onAddClick={() => setShowAdd(true)} displayName={displayName} avatarUrl={avatarUrl} theme={theme} toggleTheme={toggleTheme} openSettings={goToSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} />;
+      return <FundDetail category={cat} transactions={transactions} onBack={() => setScreen(fundReturnScreen)} reload={loadAll} softDelete={softDelete} setScreen={setScreen} onAddClick={() => setShowAdd(true)} displayName={displayName} avatarUrl={avatarUrl} theme={theme} toggleTheme={toggleTheme} openSettings={goToSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} spendingPoolByPeriod={spendingPoolByPeriod} />;
     }
     if (screen === 'account-detail') {
       const acc = accounts.find((a) => a.id === selectedAccountId);
       if (!acc) { setScreen('accounts'); return null; }
-      return <AccountDetail account={acc} transactions={transactions} categories={categories} onBack={() => setScreen(accountReturnScreen)} reload={loadAll} softDelete={softDelete} setScreen={setScreen} onAddClick={() => setShowAdd(true)} displayName={displayName} avatarUrl={avatarUrl} theme={theme} toggleTheme={toggleTheme} openSettings={goToSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} />;
+      return <AccountDetail account={acc} transactions={transactions} categories={categories} onBack={() => setScreen(accountReturnScreen)} reload={loadAll} softDelete={softDelete} setScreen={setScreen} onAddClick={() => setShowAdd(true)} displayName={displayName} avatarUrl={avatarUrl} theme={theme} toggleTheme={toggleTheme} openSettings={goToSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} spendingPoolByPeriod={spendingPoolByPeriod} />;
     }
     if (screen === 'funds') return <Funds setScreen={setScreen} categories={categories} transactions={transactions} onOpenFund={openFund} reload={loadAll} onAddClick={() => setShowAdd(true)} displayName={displayName} avatarUrl={avatarUrl} theme={theme} toggleTheme={toggleTheme} openSettings={goToSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} />;
     if (screen === 'goals') return <Goals setScreen={setScreen} goals={goals} loadingGoals={loadingGoals} reload={loadAll} softDelete={softDelete} onAddClick={() => setShowAdd(true)} displayName={displayName} avatarUrl={avatarUrl} theme={theme} toggleTheme={toggleTheme} openSettings={goToSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} />;
     if (screen === 'accounts') return <Accounts setScreen={setScreen} accounts={accounts} transactions={transactions} onOpenAccount={openAccount} reload={loadAll} onAddClick={() => setShowAdd(true)} displayName={displayName} avatarUrl={avatarUrl} theme={theme} toggleTheme={toggleTheme} openSettings={goToSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} />;
     if (screen === 'settings') return <Settings setScreen={setScreen} categories={categories} accounts={accounts} reload={loadAll} softDelete={softDelete} user={currentUser} onProfileUpdated={refreshUser} onAddClick={() => setShowAdd(true)} theme={theme} toggleTheme={toggleTheme} initialSection={settingsSection} openSettings={goToSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} onResetData={resetAllData} resettingData={resettingData} logs={logs} logActivity={logActivity} restoreLog={restoreLog} />;
-    if (screen === 'report') return <Report setScreen={setScreen} transactions={transactions} categories={categories} accounts={accounts} goals={goals} onAddClick={() => setShowAdd(true)} displayName={displayName} avatarUrl={avatarUrl} theme={theme} toggleTheme={toggleTheme} openSettings={goToSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} />;
+    if (screen === 'report') return <Report setScreen={setScreen} transactions={transactions} categories={categories} accounts={accounts} goals={goals} onAddClick={() => setShowAdd(true)} displayName={displayName} avatarUrl={avatarUrl} theme={theme} toggleTheme={toggleTheme} openSettings={goToSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} spendingPoolByPeriod={spendingPoolByPeriod} saveSpendingPoolForPeriod={saveSpendingPoolForPeriod} reload={loadAll} />;
     // Dashboard default
-    return <Dashboard setScreen={setScreen} transactions={transactions} categories={categories} accounts={accounts} goals={goals} loading={loading} displayName={displayName} avatarUrl={avatarUrl} onAddClick={() => setShowAdd(true)} theme={theme} toggleTheme={toggleTheme} onOpenFund={openFund} onOpenAccount={openAccount} reload={loadAll} openSettings={goToSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} />;
+    return <Dashboard setScreen={setScreen} transactions={transactions} categories={categories} accounts={accounts} goals={goals} loading={loading} displayName={displayName} avatarUrl={avatarUrl} onAddClick={() => setShowAdd(true)} theme={theme} toggleTheme={toggleTheme} onOpenFund={openFund} onOpenAccount={openAccount} reload={loadAll} openSettings={goToSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} spendingPoolByPeriod={spendingPoolByPeriod} saveSpendingPoolForPeriod={saveSpendingPoolForPeriod} />;
   }
 
   // Layout wrapper — true flex-row App Shell (Sidebar is a real flex item,
@@ -5739,6 +6312,7 @@ function MainApp({ user, theme, toggleTheme }) {
           transactions={transactions}
           onSaved={loadAll}
           initialType={addType}
+          spendingPoolByPeriod={spendingPoolByPeriod}
         />
       )}
     </div>
