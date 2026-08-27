@@ -132,7 +132,56 @@ const fincheckStyles = `
   .bg-gradient-cool { background: linear-gradient(135deg, var(--turquoise-light), var(--baby-blue-light)); }
   .bg-gradient-hero { background: linear-gradient(135deg, var(--turquoise), var(--lavender)); }
 
-  /* Ẩn scrollbar nhưng vẫn cho scroll */
+  /* ==========================================================================
+     Mobile: Frosted-glass + Neumorphism blend (pastel, layered, soft shadows)
+     Reusable across mobile screens — panels, cards, and inset stat tiles.
+     ========================================================================== */
+  .frost-card {
+    position: relative;
+    background: linear-gradient(150deg, rgba(255,255,255,0.94), rgba(255,255,255,0.80));
+    backdrop-filter: blur(22px) saturate(170%);
+    -webkit-backdrop-filter: blur(22px) saturate(170%);
+    border: 1px solid rgba(255,255,255,0.85);
+    box-shadow: 10px 10px 24px rgba(48,49,80,0.12), -8px -8px 18px rgba(255,255,255,0.6), inset 0 1px 0 rgba(255,255,255,0.7);
+  }
+  .dark .frost-card {
+    background: linear-gradient(150deg, rgba(38,38,64,0.92), rgba(30,30,50,0.85));
+    backdrop-filter: blur(22px) saturate(170%);
+    -webkit-backdrop-filter: blur(22px) saturate(170%);
+    border: 1px solid rgba(255,255,255,0.12);
+    box-shadow: 10px 10px 24px rgba(0,0,0,0.4), -6px -6px 16px rgba(255,255,255,0.02), inset 0 1px 0 rgba(255,255,255,0.08);
+  }
+  .frost-inset {
+    background: rgba(255,255,255,0.78);
+    border: 1px solid rgba(255,255,255,0.7);
+    box-shadow: inset 4px 4px 10px rgba(48,49,80,0.09), inset -4px -4px 10px rgba(255,255,255,0.85);
+  }
+  .dark .frost-inset {
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.09);
+    box-shadow: inset 4px 4px 10px rgba(0,0,0,0.32), inset -4px -4px 10px rgba(255,255,255,0.03);
+  }
+  .frost-pill {
+    background: rgba(255,255,255,0.78);
+    backdrop-filter: blur(16px) saturate(160%);
+    -webkit-backdrop-filter: blur(16px) saturate(160%);
+    border: 1px solid rgba(255,255,255,0.75);
+    box-shadow: 4px 4px 10px rgba(48,49,80,0.08), -3px -3px 8px rgba(255,255,255,0.6);
+  }
+  .dark .frost-pill {
+    background: rgba(255,255,255,0.08);
+    border: 1px solid rgba(255,255,255,0.12);
+    box-shadow: 4px 4px 10px rgba(0,0,0,0.3), -3px -3px 8px rgba(255,255,255,0.02);
+  }
+  /* Soft ambient pastel blobs for layered depth behind frosted panels */
+  .frost-blob {
+    position: absolute;
+    border-radius: 9999px;
+    filter: blur(40px);
+    pointer-events: none;
+  }
+
+
   .scrollbar-hide {
     -ms-overflow-style: none;
     scrollbar-width: none;
@@ -1047,33 +1096,64 @@ function MiniRing({ pct, color, label }) {
    ============================================================================== */
 
 function SidebarDesktop({ screen, setScreen, sidebarCollapsed, toggleSidebar, theme, toggleTheme }) {
+  const isDark = theme === 'dark';
   return (
     <aside
-      className={`hidden md:flex flex-col flex-shrink-0 sticky top-0 self-start h-[100dvh] ${sidebarCollapsed ? 'w-20' : 'w-64'} bg-white dark:bg-[#1e1e32] border-r border-[rgba(189,189,203,0.2)] dark:border-[rgba(189,189,203,0.1)] py-6 z-20 overflow-y-auto scrollbar-hide transition-[width] duration-200`}
+      className={`hidden md:flex flex-col flex-shrink-0 sticky top-0 self-start h-[100dvh] ${sidebarCollapsed ? 'w-20' : 'w-64'} py-6 z-20 overflow-y-auto overflow-x-hidden scrollbar-hide transition-[width] duration-200 relative`}
+      style={{
+        background: isDark
+          ? 'linear-gradient(180deg, rgba(29,30,56,0.70) 0%, rgba(17,18,37,0.78) 100%)'
+          : 'linear-gradient(180deg, rgba(255,255,255,0.62) 0%, rgba(255,255,255,0.42) 100%)',
+        backdropFilter: 'blur(26px) saturate(180%)',
+        WebkitBackdropFilter: 'blur(26px) saturate(180%)',
+        borderRight: isDark ? '1px solid rgba(255,255,255,0.10)' : '1px solid rgba(255,255,255,0.55)',
+        boxShadow: isDark
+          ? 'inset -1px 0 0 rgba(255,255,255,0.05), 8px 0 32px -18px rgba(0,0,0,0.55)'
+          : 'inset -1px 0 0 rgba(255,255,255,0.5), 8px 0 32px -18px rgba(48,49,80,0.16)',
+      }}
     >
-      <div className={`flex items-center mb-8 ${sidebarCollapsed ? 'justify-center px-0' : 'gap-2 px-1'}`}>
-        <button onClick={toggleSidebar} title={sidebarCollapsed ? 'Mở rộng menu' : 'Thu gọn menu'} className="w-9 h-9 rounded-xl bg-gradient-primary flex items-center justify-center flex-shrink-0 hover:opacity-90 transition">
+      {/* ambient glass glow blobs — decorative only */}
+      <div className={`pointer-events-none absolute -top-16 -left-10 w-40 h-40 rounded-full blur-3xl ${isDark ? 'bg-turquoise/10' : 'bg-turquoise-light/35'}`} />
+      <div className={`pointer-events-none absolute bottom-24 -right-14 w-40 h-40 rounded-full blur-3xl ${isDark ? 'bg-lavender/10' : 'bg-lavender-light/35'}`} />
+      <div className={`pointer-events-none absolute inset-y-0 right-0 w-px bg-gradient-to-b from-transparent to-transparent ${isDark ? 'via-white/10' : 'via-white/70'}`} />
+
+      <div className={`relative flex items-center mb-8 ${sidebarCollapsed ? 'justify-center px-0' : 'gap-2 px-1'}`}>
+        <button onClick={toggleSidebar} title={sidebarCollapsed ? 'Mở rộng menu' : 'Thu gọn menu'} className="w-9 h-9 rounded-xl bg-gradient-primary flex items-center justify-center flex-shrink-0 hover:opacity-90 transition shadow-md shadow-turquoise/30">
           <Wallet size={17} className="text-white" />
         </button>
         {!sidebarCollapsed && <span className="font-extrabold text-blueberry dark:text-white text-lg">Fincheck</span>}
       </div>
 
-      <div className="flex flex-col gap-1">
-        {NAV_ITEMS.map(({ key, icon: Icon, label }) => (
-          <button key={key} onClick={() => setScreen(key)} title={sidebarCollapsed ? label : undefined}
-            className={`flex items-center rounded-xl text-sm font-semibold transition ${sidebarCollapsed ? 'justify-center px-0 py-2.5' : 'gap-3 px-3 py-2.5'} ${screen === key ? 'bg-turquoise/10 text-turquoise' : 'text-steel dark:text-light-grey hover:bg-ice-cream dark:hover:bg-night-sky/30'}`}>
-            <Icon size={17} />{!sidebarCollapsed && label}
-          </button>
-        ))}
+      <div className="relative flex flex-col gap-1">
+        {NAV_ITEMS.map(({ key, icon: Icon, label }) => {
+          const active = screen === key;
+          return (
+            <button
+              key={key}
+              onClick={() => setScreen(key)}
+              title={sidebarCollapsed ? label : undefined}
+              className={`flex items-center rounded-xl text-sm font-semibold transition ${sidebarCollapsed ? 'justify-center px-0 py-2.5' : 'gap-3 px-3 py-2.5'} ${active ? 'text-turquoise' : 'text-steel dark:text-light-grey hover:bg-white/40 dark:hover:bg-white/[0.06]'}`}
+              style={active ? {
+                background: isDark ? 'rgba(13,186,204,0.14)' : 'rgba(13,186,204,0.12)',
+                backdropFilter: 'blur(8px)',
+                WebkitBackdropFilter: 'blur(8px)',
+                border: isDark ? '1px solid rgba(13,186,204,0.25)' : '1px solid rgba(13,186,204,0.18)',
+                boxShadow: isDark ? 'inset 0 1px 0 rgba(255,255,255,0.08)' : 'inset 0 1px 0 rgba(255,255,255,0.7)',
+              } : undefined}
+            >
+              <Icon size={17} />{!sidebarCollapsed && label}
+            </button>
+          );
+        })}
       </div>
 
-      <div className={`mt-auto flex flex-col gap-3 ${sidebarCollapsed ? 'items-center' : ''}`}>
+      <div className={`relative mt-auto flex flex-col gap-3 ${sidebarCollapsed ? 'items-center' : ''}`}>
         {sidebarCollapsed ? (
-          <button onClick={toggleTheme} className="w-8 h-8 rounded-full flex items-center justify-center bg-ice-cream dark:bg-night-sky text-steel dark:text-light-grey">
+          <button onClick={toggleTheme} className="w-8 h-8 rounded-full flex items-center justify-center bg-white/50 dark:bg-white/[0.06] backdrop-blur text-steel dark:text-light-grey border border-white/60 dark:border-white/10">
             {theme === 'dark' ? <Sun size={15} /> : <Moon size={15} />}
           </button>
         ) : (
-          <div className="flex items-center gap-1 bg-ice-cream dark:bg-night-sky rounded-full p-1 self-start">
+          <div className="flex items-center gap-1 bg-white/50 dark:bg-white/[0.06] backdrop-blur rounded-full p-1 self-start border border-white/60 dark:border-white/10">
             <button onClick={() => theme !== 'light' && toggleTheme()} className={`w-8 h-8 rounded-full flex items-center justify-center transition ${theme === 'light' ? 'bg-white dark:bg-night-sky shadow text-blueberry dark:text-white' : 'text-steel dark:text-light-grey'}`}>
               <Sun size={15} />
             </button>
@@ -1083,7 +1163,17 @@ function SidebarDesktop({ screen, setScreen, sidebarCollapsed, toggleSidebar, th
           </div>
         )}
         {!sidebarCollapsed && (
-          <div className="bg-gradient-secondary rounded-2xl p-4 text-white">
+          <div
+            className="rounded-2xl p-4 text-white relative overflow-hidden"
+            style={{
+              background: 'linear-gradient(135deg, rgba(241,138,181,0.85), rgba(159,127,224,0.85))',
+              backdropFilter: 'blur(10px)',
+              WebkitBackdropFilter: 'blur(10px)',
+              border: '1px solid rgba(255,255,255,0.25)',
+              boxShadow: '0 10px 30px -10px rgba(159,127,224,0.5), inset 0 1px 0 rgba(255,255,255,0.3)',
+            }}
+          >
+            <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/60 to-transparent" />
             <p className="text-white text-sm font-bold mb-1">💡 Mẹo hôm nay</p>
             <p className="text-white/80 text-xs">Nạp quỹ ngay khi có thu nhập để kiểm soát chi tiêu tốt hơn.</p>
           </div>
@@ -1096,6 +1186,7 @@ function SidebarDesktop({ screen, setScreen, sidebarCollapsed, toggleSidebar, th
 function HeaderDesktop({ onAddClick, displayName, avatarUrl, theme, toggleTheme, openSettings }) {
   const [showMenu, setShowMenu] = useState(false);
   const [search, setSearch] = useState('');
+  const isDark = theme === 'dark';
   useCloseOnEscape(showMenu, () => setShowMenu(false));
 
   async function handleLogout() {
@@ -1104,8 +1195,19 @@ function HeaderDesktop({ onAddClick, displayName, avatarUrl, theme, toggleTheme,
   }
 
   return (
-    <header className="hidden md:flex sticky top-0 z-10 bg-white/80 dark:bg-[#1e1e32]/80 backdrop-blur border-b border-[rgba(189,189,203,0.2)] dark:border-[rgba(189,189,203,0.1)] px-6 md:px-8 py-4 items-center justify-between">
-      <div className="flex items-center gap-2 bg-ice-cream dark:bg-night-sky/50 rounded-full px-4 py-2.5 w-72">
+    <header
+      className="hidden md:flex sticky top-0 z-10 px-6 md:px-8 py-4 items-center justify-between relative overflow-hidden"
+      style={{
+        background: isDark ? 'rgba(20,20,45,0.55)' : 'rgba(255,255,255,0.55)',
+        backdropFilter: 'blur(24px) saturate(180%)',
+        WebkitBackdropFilter: 'blur(24px) saturate(180%)',
+        borderBottom: isDark ? '1px solid rgba(255,255,255,0.10)' : '1px solid rgba(255,255,255,0.5)',
+        boxShadow: isDark ? '0 10px 30px -18px rgba(0,0,0,0.45)' : '0 10px 30px -18px rgba(48,49,80,0.18)',
+      }}
+    >
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/70 to-transparent dark:via-white/15" />
+      <div className="pointer-events-none absolute -top-10 right-24 w-40 h-24 rounded-full bg-turquoise-light/25 dark:bg-turquoise/10 blur-2xl" />
+      <div className="flex items-center gap-2 bg-white/50 dark:bg-white/[0.06] backdrop-blur rounded-full px-4 py-2.5 w-72 border border-white/60 dark:border-white/10 relative z-10">
         <Search size={16} className="text-steel dark:text-light-grey" />
         <input
           placeholder="Tìm kiếm nhanh"
@@ -1114,11 +1216,11 @@ function HeaderDesktop({ onAddClick, displayName, avatarUrl, theme, toggleTheme,
           className="bg-transparent outline-none text-sm flex-1 text-blueberry dark:text-white placeholder:text-steel dark:placeholder:text-light-grey"
         />
       </div>
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-3 relative z-10">
         <button onClick={onAddClick} className="bg-gradient-primary text-white rounded-full px-4 py-2.5 text-sm font-bold flex items-center gap-2 shadow-md shadow-turquoise/30">
           <Plus size={16} /> Thêm giao dịch
         </button>
-        <button className="w-9 h-9 rounded-full bg-ice-cream dark:bg-night-sky flex items-center justify-center text-steel dark:text-light-grey">
+        <button className="w-9 h-9 rounded-full bg-white/50 dark:bg-white/[0.06] backdrop-blur border border-white/60 dark:border-white/10 flex items-center justify-center text-steel dark:text-light-grey">
           <Bell size={16} />
         </button>
         <div className="relative">
@@ -2723,7 +2825,7 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
           <div className="mt-6 px-5 flex gap-3 overflow-x-auto pb-2 scrollbar-hide hide-scrollbar" style={{ WebkitOverflowScrolling: 'touch', scrollSnapType: 'x mandatory', scrollPaddingLeft: 20 }}>
             {fundCategories.length === 0 ? <p className="text-white/70 text-sm">Đánh dấu danh mục là "Quỹ" trong Cài đặt để hiện ở đây.</p>
               : fundCategories.map((f) => (
-                <button key={f.id} onClick={() => onOpenFund(f.id)} style={{ scrollSnapAlign: 'start' }} className="min-w-[150px] text-left bg-white/90 dark:bg-[#2a2a44]/90 backdrop-blur rounded-3xl p-4 shadow-lg shadow-black/5 flex-shrink-0">
+                <button key={f.id} onClick={() => onOpenFund(f.id)} style={{ scrollSnapAlign: 'start' }} className="frost-card min-w-[150px] text-left rounded-3xl p-4 flex-shrink-0">
                   <EmojiCircle emoji={f.icon} size={36} active activeColor="#0DBACC" />
                   <p className="text-steel dark:text-light-grey text-xs mt-3 font-semibold">{f.name}</p>
                   <p className="text-blueberry dark:text-white font-bold text-base">{formatMoney(fundBalanceWithProfit(f, transactions))}</p>
@@ -2733,8 +2835,10 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
           <div className="mt-6 px-5">
             {spendingPoolCard}
           </div>
-          <div className="mt-6 bg-white dark:bg-[#1e1e32] rounded-[2.5rem] min-h-[60vh] px-5 pt-6 pb-6 shadow-soft">
-            <div className="flex items-center justify-between mb-4">
+          <div className="frost-card mt-6 rounded-[2.5rem] min-h-[60vh] px-5 pt-6 pb-6 overflow-hidden">
+            <div className="frost-blob z-0 w-40 h-40 bg-turquoise-light/40 dark:bg-turquoise/10 -top-10 -right-10" />
+            <div className="frost-blob z-0 w-32 h-32 bg-cotton-candy-light/40 dark:bg-cotton-candy/10 bottom-24 -left-10" />
+            <div className="relative flex items-center justify-between mb-4">
               <h2 className="text-blueberry dark:text-white font-extrabold text-lg">Ngân sách tháng này</h2>
             </div>
             {spentByCat.length === 0 ? <p className="text-steel dark:text-light-grey text-sm text-center py-6">Chưa có chi tiêu nào tháng này.</p> : (
@@ -2756,8 +2860,8 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
               </div>
             )}
 
-            <div className="grid grid-cols-2 gap-3 mt-8">
-              <div className="bg-ice-cream dark:bg-night-sky rounded-2xl p-4 flex flex-col items-center">
+            <div className="relative grid grid-cols-2 gap-3 mt-8">
+              <div className="frost-inset rounded-2xl p-4 flex flex-col items-center">
                 <p className="text-steel dark:text-light-grey text-xs font-semibold mb-2 self-start">Sức khỏe tài chính</p>
                 <svg width="72" height="72" viewBox="0 0 120 120" className="-rotate-90">
                   <circle cx="60" cy="60" r="50" fill="none" stroke="#E3D6FF" strokeWidth="14" />
@@ -2767,7 +2871,7 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
                 <p className="text-lg font-bold text-blueberry dark:text-white -mt-11">{Math.round(savingsRate)}%</p>
                 <p className="text-steel dark:text-light-grey text-[10px] mt-11">Tỷ lệ tiết kiệm</p>
               </div>
-              <div className="bg-ice-cream dark:bg-night-sky rounded-2xl p-4 flex flex-col justify-center">
+              <div className="frost-inset rounded-2xl p-4 flex flex-col justify-center">
                 <p className="text-steel dark:text-light-grey text-xs font-semibold mb-2">Hạn mức tháng</p>
                 {totalMonthlyLimit === 0 ? (
                   <p className="text-steel dark:text-light-grey text-xs">Chưa đặt hạn mức nào.</p>
@@ -2857,18 +2961,20 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
       </div>
 
       {/* Desktop version */}
-      <div className="hidden md:block">
-        <div className="flex items-center justify-between mb-6">
+      <div className="hidden md:block relative">
+        <div className="frost-blob z-0 w-72 h-72 bg-baby-blue-light/50 dark:bg-baby-blue/10 -top-10 right-0" />
+        <div className="frost-blob z-0 w-64 h-64 bg-lavender-light/50 dark:bg-lavender/10 top-64 -left-10" />
+        <div className="relative flex items-center justify-between mb-6">
           <h1 className="text-blueberry dark:text-white text-2xl font-extrabold">Dashboard</h1>
           <button onClick={() => setShowAddWidget(true)} className="bg-gradient-primary text-white rounded-full pl-3 pr-4 py-2 text-sm font-bold flex items-center gap-1.5 shadow-md shadow-turquoise/30">
             <Plus size={15} /> Thêm widget
           </button>
         </div>
-        <div className="mb-6">
+        <div className="relative mb-6">
           {spendingPoolCard}
         </div>
         <div
-          className="grid gap-6"
+          className="relative grid gap-6"
           style={{
             gridTemplateColumns: '2fr 1fr 1fr',
             gridTemplateAreas: `
@@ -2878,7 +2984,7 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
             `,
           }}
         >
-          <div style={{ gridArea: 'chart' }} className="bg-white dark:bg-[#1e1e32] rounded-3xl p-6 shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)] transition-colors">
+          <div style={{ gridArea: 'chart' }} className="frost-card rounded-3xl p-6">
             <p className="text-blueberry dark:text-white font-extrabold mb-4">Tổng quan tài sản</p>
             <div className="grid grid-cols-3 gap-4 mb-6">
               <div>
@@ -2919,7 +3025,7 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
           </div>
 
           <div style={{ gridArea: 'right' }} className="flex flex-col gap-6">
-            <div className="bg-white dark:bg-[#1e1e32] rounded-3xl p-6 shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)] transition-colors w-full">
+            <div className="frost-card rounded-3xl p-6 w-full">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-blueberry dark:text-white font-extrabold">Ví</h3>
                 <div className="flex items-center gap-1.5">
@@ -2995,7 +3101,7 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
               {showAddWallet && <EditAccountModal onClose={() => setShowAddWallet(false)} onSaved={reload} isNew={true} />}
             </div>
 
-            <div className="bg-white dark:bg-[#1e1e32] rounded-3xl p-6 shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)] transition-colors flex-1">
+            <div className="frost-card rounded-3xl p-6 flex-1">
               <div className="flex items-center justify-between mb-4 gap-2">
                 <h3 className="text-blueberry dark:text-white font-extrabold">Hoạt động gần đây</h3>
                 <div className="flex items-center gap-2 flex-shrink-0">
@@ -3049,7 +3155,7 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
           </div>
 
           <div style={{ gridArea: 'incexp' }} className="grid grid-cols-2 gap-6 items-stretch">
-            <div className="bg-white dark:bg-[#1e1e32] rounded-3xl p-6 shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)] transition-colors h-full">
+            <div className="frost-card rounded-3xl p-6 h-full">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-blueberry dark:text-white font-extrabold">Tổng thu nhập</h3>
                 <TotalsPeriodSelect month={incomeTotalsMonth} year={incomeTotalsYear} onMonthChange={setIncomeTotalsMonth} onYearChange={setIncomeTotalsYear} />
@@ -3081,7 +3187,7 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
               )}
             </div>
 
-            <div className="bg-white dark:bg-[#1e1e32] rounded-3xl p-6 shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)] transition-colors h-full">
+            <div className="frost-card rounded-3xl p-6 h-full">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-blueberry dark:text-white font-extrabold">Tổng chi tiêu</h3>
                 <TotalsPeriodSelect month={expenseTotalsMonth} year={expenseTotalsYear} onMonthChange={setExpenseTotalsMonth} onYearChange={setExpenseTotalsYear} />
@@ -3114,7 +3220,7 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
             </div>
           </div>
 
-          <div style={{ gridArea: 'cost' }} className="bg-white dark:bg-[#1e1e32] rounded-3xl p-6 shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)] transition-colors">
+          <div style={{ gridArea: 'cost' }} className="frost-card rounded-3xl p-6">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-blueberry dark:text-white font-extrabold">Phân tích chi phí</h3>
             </div>
@@ -3142,7 +3248,7 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
             )}
           </div>
 
-          <div style={{ gridArea: 'health' }} className="bg-white dark:bg-[#1e1e32] rounded-3xl p-6 shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)] transition-colors flex flex-col items-center">
+          <div style={{ gridArea: 'health' }} className="frost-card rounded-3xl p-6 flex flex-col items-center">
             <h3 className="text-blueberry dark:text-white font-extrabold self-start mb-1">Sức khỏe tài chính</h3>
             <p className="text-steel dark:text-light-grey text-xs self-start mb-4 font-semibold">Tỷ lệ tiết kiệm</p>
             <svg width="100" height="100" viewBox="0 0 120 120" className="-rotate-90">
@@ -3154,7 +3260,7 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
             <p className="text-steel dark:text-light-grey text-xs mt-14">Dựa trên tháng này</p>
           </div>
 
-          <div style={{ gridArea: 'goal' }} className="bg-white dark:bg-[#1e1e32] rounded-3xl p-6 shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)] transition-colors">
+          <div style={{ gridArea: 'goal' }} className="frost-card rounded-3xl p-6">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-blueberry dark:text-white font-extrabold">Mục tiêu</h3>
               <button onClick={() => setScreen('goals')} className="text-turquoise text-xs font-bold">Xem tất cả</button>
@@ -3179,7 +3285,7 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
         </div>
 
         <div className="grid grid-cols-2 gap-6 mt-6">
-          <div className="bg-white dark:bg-[#1e1e32] rounded-3xl p-6 shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)] transition-colors">
+          <div className="frost-card rounded-3xl p-6">
             <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
               <h3 className="text-blueberry dark:text-white font-extrabold">Thu nhập theo danh mục</h3>
               <PeriodControls />
@@ -3189,7 +3295,7 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
             )}
           </div>
 
-          <div className="bg-white dark:bg-[#1e1e32] rounded-3xl p-6 shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)] transition-colors">
+          <div className="frost-card rounded-3xl p-6">
             <h3 className="text-blueberry dark:text-white font-extrabold mb-4">Chi tiêu theo danh mục</h3>
             {expenseSeries.length === 0 ? <p className="text-steel dark:text-light-grey text-sm text-center py-6">Chưa có chi tiêu trong khoảng này.</p> : (
               <CategoryBarChart series={expenseSeries} maxVal={maxExpenseBucketVal} />
@@ -6264,7 +6370,12 @@ function MainApp({ user, theme, toggleTheme }) {
   // Layout wrapper — true flex-row App Shell (Sidebar is a real flex item,
   // no fixed positioning / margin-left offset hack).
   return (
-    <div className="flex w-full min-h-[100dvh] bg-ice-cream dark:bg-[#1a1a2e]">
+    <div
+      className="flex w-full min-h-[100dvh] dark:bg-[#1a1a2e]"
+      style={theme === 'dark' ? undefined : {
+        background: 'linear-gradient(135deg, #EEF0F4 0%, #E4ECFB 45%, #ECE6FB 100%)',
+      }}
+    >
       {/* Sidebar Desktop — flex item, flex-shrink: 0 */}
       <SidebarDesktop
         screen={screen}
@@ -6490,7 +6601,13 @@ function AuthScreen() {
 
 export default function App() {
   const [session, setSession] = useState(undefined);
-  const [theme, setTheme] = useState(() => (typeof window !== 'undefined' && localStorage.getItem('theme')) || 'light');
+  const [theme, setTheme] = useState(() => {
+    if (typeof window === 'undefined') return 'light';
+    const saved = localStorage.getItem('theme');
+    if (saved) return saved;
+    const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+    return prefersDark ? 'dark' : 'light';
+  });
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session));
