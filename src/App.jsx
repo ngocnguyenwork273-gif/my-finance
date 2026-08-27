@@ -138,40 +138,46 @@ const fincheckStyles = `
      ========================================================================== */
   .frost-card {
     position: relative;
-    background: linear-gradient(150deg, rgba(255,255,255,0.94), rgba(255,255,255,0.80));
-    backdrop-filter: blur(22px) saturate(170%);
-    -webkit-backdrop-filter: blur(22px) saturate(170%);
-    border: 1px solid rgba(255,255,255,0.85);
-    box-shadow: 10px 10px 24px rgba(48,49,80,0.12), -8px -8px 18px rgba(255,255,255,0.6), inset 0 1px 0 rgba(255,255,255,0.7);
+    background: linear-gradient(150deg, rgba(255,255,255,0.88), rgba(255,255,255,0.62));
+    backdrop-filter: blur(32px) saturate(200%);
+    -webkit-backdrop-filter: blur(32px) saturate(200%);
+    border: 1px solid rgba(255,255,255,0.9);
+    box-shadow: 16px 16px 34px rgba(48,49,80,0.16), -10px -10px 22px rgba(255,255,255,0.85), inset 0 1px 0 rgba(255,255,255,0.9), inset 0 -1px 0 rgba(48,49,80,0.04);
   }
   .dark .frost-card {
-    background: linear-gradient(150deg, rgba(38,38,64,0.92), rgba(30,30,50,0.85));
-    backdrop-filter: blur(22px) saturate(170%);
-    -webkit-backdrop-filter: blur(22px) saturate(170%);
-    border: 1px solid rgba(255,255,255,0.12);
-    box-shadow: 10px 10px 24px rgba(0,0,0,0.4), -6px -6px 16px rgba(255,255,255,0.02), inset 0 1px 0 rgba(255,255,255,0.08);
+    background: linear-gradient(150deg, rgba(48,48,78,0.80), rgba(28,28,48,0.72));
+    backdrop-filter: blur(32px) saturate(200%);
+    -webkit-backdrop-filter: blur(32px) saturate(200%);
+    border: 1px solid rgba(255,255,255,0.16);
+    box-shadow: 16px 16px 34px rgba(0,0,0,0.5), -8px -8px 20px rgba(255,255,255,0.03), inset 0 1px 0 rgba(255,255,255,0.12);
   }
   .frost-inset {
-    background: rgba(255,255,255,0.78);
-    border: 1px solid rgba(255,255,255,0.7);
-    box-shadow: inset 4px 4px 10px rgba(48,49,80,0.09), inset -4px -4px 10px rgba(255,255,255,0.85);
+    background: rgba(255,255,255,0.55);
+    backdrop-filter: blur(10px) saturate(160%);
+    -webkit-backdrop-filter: blur(10px) saturate(160%);
+    border: 1px solid rgba(255,255,255,0.65);
+    box-shadow: inset 6px 6px 14px rgba(48,49,80,0.13), inset -6px -6px 14px rgba(255,255,255,0.9);
   }
   .dark .frost-inset {
     background: rgba(255,255,255,0.05);
-    border: 1px solid rgba(255,255,255,0.09);
-    box-shadow: inset 4px 4px 10px rgba(0,0,0,0.32), inset -4px -4px 10px rgba(255,255,255,0.03);
+    backdrop-filter: blur(10px) saturate(160%);
+    -webkit-backdrop-filter: blur(10px) saturate(160%);
+    border: 1px solid rgba(255,255,255,0.10);
+    box-shadow: inset 6px 6px 14px rgba(0,0,0,0.4), inset -6px -6px 14px rgba(255,255,255,0.04);
   }
   .frost-pill {
-    background: rgba(255,255,255,0.78);
-    backdrop-filter: blur(16px) saturate(160%);
-    -webkit-backdrop-filter: blur(16px) saturate(160%);
-    border: 1px solid rgba(255,255,255,0.75);
-    box-shadow: 4px 4px 10px rgba(48,49,80,0.08), -3px -3px 8px rgba(255,255,255,0.6);
+    background: rgba(255,255,255,0.65);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    border: 1px solid rgba(255,255,255,0.8);
+    box-shadow: 6px 6px 14px rgba(48,49,80,0.10), -4px -4px 10px rgba(255,255,255,0.8);
   }
   .dark .frost-pill {
-    background: rgba(255,255,255,0.08);
-    border: 1px solid rgba(255,255,255,0.12);
-    box-shadow: 4px 4px 10px rgba(0,0,0,0.3), -3px -3px 8px rgba(255,255,255,0.02);
+    background: rgba(255,255,255,0.07);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    border: 1px solid rgba(255,255,255,0.14);
+    box-shadow: 6px 6px 14px rgba(0,0,0,0.35), -4px -4px 10px rgba(255,255,255,0.03);
   }
   /* Soft ambient pastel blobs for layered depth behind frosted panels */
   .frost-blob {
@@ -1061,7 +1067,7 @@ function EmojiCircle({ emoji, size = 36, active = false, activeColor = '#0DBACC'
 
 function SummaryCard({ icon: Icon, iconBg, label, value, sub }) {
   return (
-    <div className="bg-white dark:bg-[#1e1e32] rounded-2xl shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)] p-4">
+    <div className="frost-card rounded-2xl p-4">
       <div className="flex items-center justify-between mb-3">
         <div className={`w-9 h-9 rounded-xl flex items-center justify-center ${iconBg}`}>
           <Icon size={16} className="text-white" />
@@ -3033,7 +3039,7 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
                     <Plus size={13} /> Thêm ví
                   </button>
                   <div className="relative">
-                    <button onClick={() => setShowWalletPopover((v) => !v)} className="w-7 h-7 rounded-full bg-ice-cream dark:bg-night-sky flex items-center justify-center text-steel dark:text-light-grey">
+                    <button onClick={() => setShowWalletPopover((v) => !v)} className="frost-inset w-7 h-7 rounded-full flex items-center justify-center text-steel dark:text-light-grey">
                       <ChevronDown size={14} className={`transition-transform ${showWalletPopover ? 'rotate-180' : ''}`} />
                     </button>
                     {showWalletPopover && (
@@ -3105,7 +3111,7 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
               <div className="flex items-center justify-between mb-4 gap-2">
                 <h3 className="text-blueberry dark:text-white font-extrabold">Hoạt động gần đây</h3>
                 <div className="flex items-center gap-2 flex-shrink-0">
-                  <select value={recentTxFilter} onChange={(e) => setRecentTxFilter(e.target.value)} className="bg-ice-cream dark:bg-night-sky rounded-full text-xs font-bold px-3 py-1.5 outline-none text-blueberry dark:text-white">
+                  <select value={recentTxFilter} onChange={(e) => setRecentTxFilter(e.target.value)} className="frost-inset rounded-full text-xs font-bold px-3 py-1.5 outline-none text-blueberry dark:text-white">
                     <option value="7d">7d</option>
                     <option value="month">Tháng</option>
                     <option value="year">Năm</option>
@@ -3453,17 +3459,19 @@ function Funds({ setScreen, categories, transactions, onOpenFund, reload, onAddC
       </div>
 
       {/* Desktop version */}
-      <div className="hidden md:block">
-        <h1 className="text-blueberry dark:text-white text-2xl font-extrabold mb-6">Quản lý quỹ</h1>
+      <div className="hidden md:block relative">
+        <div className="frost-blob z-0 w-72 h-72 bg-turquoise-light/45 dark:bg-turquoise/10 -top-10 right-10" />
+        <div className="frost-blob z-0 w-64 h-64 bg-lavender-light/45 dark:bg-lavender/10 top-96 -left-10" />
+        <h1 className="relative text-blueberry dark:text-white text-2xl font-extrabold mb-6">Quản lý quỹ</h1>
 
-        <div className="grid grid-cols-4 gap-4 mb-6">
+        <div className="relative grid grid-cols-4 gap-4 mb-6">
           <SummaryCard icon={PiggyBank} iconBg="bg-turquoise" label="Tổng số dư mọi quỹ" value={formatMoney(totalFunds)} />
           <SummaryCard icon={TrendingUp} iconBg="bg-baby-blue" label="Tổng đã nạp" value={formatMoney(totalIn)} />
           <SummaryCard icon={TrendingDown} iconBg="bg-cotton-candy" label="Tổng đã rút" value={formatMoney(totalOut)} />
           <SummaryCard icon={Sparkles} iconBg="bg-lavender" label="Tổng số lượng quỹ" value={funds.length} sub={`${doneCount} đã đạt mục tiêu`} />
         </div>
 
-        <div className="bg-white dark:bg-[#1e1e32] rounded-3xl shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)] overflow-hidden" onClick={() => { setOpenMenuId(null); setShowFilterMenu(false); setShowSortMenu(false); }}>
+ <div className="relative frost-card rounded-3xl overflow-hidden" onClick={() => { setOpenMenuId(null); setShowFilterMenu(false); setShowSortMenu(false); }}>
           <div className="flex items-center justify-between p-5 pb-3 flex-wrap gap-3">
             <div className="flex items-center gap-2 flex-wrap">
               {filterTarget !== 'all' && (
@@ -3486,18 +3494,18 @@ function Funds({ setScreen, categories, transactions, onOpenFund, reload, onAddC
                   <Filter size={13} /> Thêm bộ lọc
                 </button>
                 {showFilterMenu && (
-                  <div onClick={(e) => e.stopPropagation()} className="absolute left-0 top-9 z-20 bg-white dark:bg-[#1e1e32] border-0 dark:border dark:border-[rgba(189,189,203,0.1)] rounded-2xl shadow-card p-4 w-64">
+ <div onClick={(e) => e.stopPropagation()} className="absolute left-0 top-9 z-20 frost-card rounded-2xl shadow-card p-4 w-64">
                     <p className="text-xs font-bold text-steel dark:text-light-grey mb-2">Mục tiêu quỹ</p>
                     <div className="flex flex-wrap gap-2 mb-4">
                       {[['all', 'Tất cả'], ['none', 'Chưa đặt'], ['set', 'Đang tích lũy'], ['done', 'Đã đạt']].map(([k, l]) => (
-                        <button key={k} onClick={() => { setFilterTarget(k); setPage(1); }} className={`px-3 py-1.5 rounded-full text-xs font-bold ${filterTarget === k ? 'bg-gradient-primary text-white shadow-md shadow-turquoise/30' : 'bg-ice-cream dark:bg-night-sky text-steel dark:text-light-grey'}`}>{l}</button>
+                        <button key={k} onClick={() => { setFilterTarget(k); setPage(1); }} className={`px-3 py-1.5 rounded-full text-xs font-bold ${filterTarget === k ? 'bg-gradient-primary text-white shadow-md shadow-turquoise/30' : 'frost-inset text-steel dark:text-light-grey'}`}>{l}</button>
                       ))}
                     </div>
                     <p className="text-xs font-bold text-steel dark:text-light-grey mb-2">Lãi suất</p>
                     <div className="flex flex-col gap-1">
-                      <button onClick={() => { setFilterRate('all'); setPage(1); }} className={`text-left px-3 py-1.5 rounded-lg text-xs font-bold ${filterRate === 'all' ? 'bg-ice-cream dark:bg-night-sky text-blueberry dark:text-white' : 'text-steel dark:text-light-grey hover:bg-ice-cream dark:hover:bg-night-sky/30'}`}>Tất cả</button>
+                      <button onClick={() => { setFilterRate('all'); setPage(1); }} className={`text-left px-3 py-1.5 rounded-lg text-xs font-bold ${filterRate === 'all' ? 'frost-inset text-blueberry dark:text-white' : 'text-steel dark:text-light-grey hover:bg-ice-cream dark:hover:bg-night-sky/30'}`}>Tất cả</button>
                       {FUND_RATE_TIERS.map((t) => (
-                        <button key={t.value} onClick={() => { setFilterRate(t.value); setPage(1); }} className={`text-left px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-2 ${filterRate === t.value ? 'bg-ice-cream dark:bg-night-sky' : 'hover:bg-ice-cream dark:hover:bg-night-sky/30'}`}>
+                        <button key={t.value} onClick={() => { setFilterRate(t.value); setPage(1); }} className={`text-left px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-2 ${filterRate === t.value ? 'frost-inset' : 'hover:bg-ice-cream dark:hover:bg-night-sky/30'}`}>
                           <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: t.color }} /> <span className="text-blueberry dark:text-white truncate">{t.value}</span>
                         </button>
                       ))}
@@ -3513,11 +3521,11 @@ function Funds({ setScreen, categories, transactions, onOpenFund, reload, onAddC
                   <ArrowUpDown size={14} /> {activeSortField.label}
                 </button>
                 {showSortMenu && (
-                  <div onClick={(e) => e.stopPropagation()} className="absolute right-0 top-10 z-20 bg-white dark:bg-[#1e1e32] border-0 dark:border dark:border-[rgba(189,189,203,0.1)] rounded-2xl shadow-card p-2 w-56">
+ <div onClick={(e) => e.stopPropagation()} className="absolute right-0 top-10 z-20 frost-card rounded-2xl shadow-card p-2 w-56">
                     <p className="text-xs font-bold text-steel dark:text-light-grey px-2 py-1.5">Sắp xếp theo</p>
                     {FUND_SORT_FIELDS.map((f) => (
                       <button key={f.key} onClick={() => { setSortField((cur) => { if (cur === f.key) { setSortDir((d) => (d === 'asc' ? 'desc' : 'asc')); return cur; } setSortDir(f.key === 'created' ? 'desc' : 'asc'); return f.key; }); }}
-                        className={`w-full flex items-center justify-between px-2 py-2 rounded-lg text-sm ${sortField === f.key ? 'bg-ice-cream dark:bg-night-sky text-blueberry dark:text-white font-bold' : 'text-steel dark:text-light-grey hover:bg-ice-cream dark:hover:bg-night-sky/30'}`}>
+                        className={`w-full flex items-center justify-between px-2 py-2 rounded-lg text-sm ${sortField === f.key ? 'frost-inset text-blueberry dark:text-white font-bold' : 'text-steel dark:text-light-grey hover:bg-ice-cream dark:hover:bg-night-sky/30'}`}>
                         {f.label}
                         {sortField === f.key && <span className="text-xs">{sortDir === 'asc' ? '↑' : '↓'}</span>}
                       </button>
@@ -3525,7 +3533,7 @@ function Funds({ setScreen, categories, transactions, onOpenFund, reload, onAddC
                   </div>
                 )}
               </div>
-              <div className="flex items-center gap-1 bg-ice-cream dark:bg-night-sky rounded-full p-1">
+              <div className="flex items-center gap-1 frost-inset rounded-full p-1">
                 <button onClick={() => { setViewMode('card'); setPage(1); }} className={`w-8 h-8 rounded-full flex items-center justify-center ${viewMode === 'card' ? 'bg-gradient-primary text-white shadow-md shadow-turquoise/30' : 'text-steel dark:text-light-grey'}`}><LayoutGrid size={15} /></button>
                 <button onClick={() => { setViewMode('list'); setPage(1); }} className={`w-8 h-8 rounded-full flex items-center justify-center ${viewMode === 'list' ? 'bg-gradient-primary text-white shadow-md shadow-turquoise/30' : 'text-steel dark:text-light-grey'}`}><List size={15} /></button>
               </div>
@@ -3535,7 +3543,7 @@ function Funds({ setScreen, categories, transactions, onOpenFund, reload, onAddC
           <div className="flex items-center justify-between px-5 pb-4 flex-wrap gap-3">
             <p className="text-steel dark:text-light-grey text-sm font-semibold">{displayFunds.length} quỹ</p>
             <div className="flex items-center gap-2">
-              <div className="flex items-center gap-2 bg-ice-cream dark:bg-night-sky rounded-full px-4 py-2.5 w-56">
+              <div className="flex items-center gap-2 frost-inset rounded-full px-4 py-2.5 w-56">
                 <Search size={15} className="text-steel dark:text-light-grey" />
                 <input value={searchTerm} onChange={(e) => { setSearchTerm(e.target.value); setPage(1); }} placeholder="Tìm quỹ..." className="bg-transparent outline-none text-sm flex-1 text-blueberry dark:text-white" />
               </div>
@@ -3559,7 +3567,7 @@ function Funds({ setScreen, categories, transactions, onOpenFund, reload, onAddC
                   const isDone = target > 0 && balance >= target;
                   const rStyle = fundRateStyle(f);
                   return (
-                    <div key={f.id} onClick={() => onOpenFund(f.id, 'funds')} className="bg-white dark:bg-[#1e1e32] rounded-2xl border-0 dark:border dark:border-[rgba(189,189,203,0.1)] overflow-hidden shadow-soft hover:shadow-card transition cursor-pointer">
+ <div key={f.id} onClick={() => onOpenFund(f.id, 'funds')} className="frost-card rounded-2xl overflow-hidden hover:shadow-card transition cursor-pointer">
                       <div
                         className="relative h-24 flex items-end p-4"
                         style={f.background_url
@@ -3576,7 +3584,7 @@ function Funds({ setScreen, categories, transactions, onOpenFund, reload, onAddC
                           <MoreHorizontal size={14} />
                         </button>
                         {openMenuId === f.id && (
-                          <div onClick={(e) => e.stopPropagation()} className="absolute top-10 right-2.5 z-20 bg-white dark:bg-[#1e1e32] border-0 dark:border dark:border-[rgba(189,189,203,0.1)] rounded-xl shadow-card py-1 w-40 text-left">
+ <div onClick={(e) => e.stopPropagation()} className="absolute top-10 right-2.5 z-20 frost-card rounded-xl shadow-card py-1 w-40 text-left">
                             <button onClick={() => { onOpenFund(f.id, 'funds'); setOpenMenuId(null); }} className="w-full flex items-center gap-2 px-3 py-2 text-sm text-blueberry dark:text-white hover:bg-ice-cream dark:hover:bg-night-sky/30">
                               <Eye size={14} /> Xem chi tiết
                             </button>
@@ -3657,7 +3665,7 @@ function Funds({ setScreen, categories, transactions, onOpenFund, reload, onAddC
                               <MoreHorizontal size={18} />
                             </button>
                             {openMenuId === f.id && (
-                              <div onClick={(e) => e.stopPropagation()} className="absolute right-4 top-12 z-20 bg-white dark:bg-[#1e1e32] border-0 dark:border dark:border-[rgba(189,189,203,0.1)] rounded-xl shadow-card py-1 w-40 text-left">
+ <div onClick={(e) => e.stopPropagation()} className="absolute right-4 top-12 z-20 frost-card rounded-xl shadow-card py-1 w-40 text-left">
                                 <button onClick={() => { onOpenFund(f.id, 'funds'); setOpenMenuId(null); }} className="w-full flex items-center gap-2 px-3 py-2 text-sm text-blueberry dark:text-white hover:bg-ice-cream dark:hover:bg-night-sky/30">
                                   <Eye size={14} /> Xem chi tiết
                                 </button>
@@ -3976,7 +3984,7 @@ function FundDetail({ category, transactions, onBack, reload, softDelete, setScr
 
         <div className="grid grid-cols-3 gap-6">
           <div className="col-span-2 flex flex-col gap-6">
-            <div className="bg-white dark:bg-[#1e1e32] rounded-3xl p-6 shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)]">
+ <div className="frost-card rounded-3xl p-6 ">
               <p className="text-steel dark:text-light-grey text-sm font-semibold">Số dư hiện tại</p>
               <p className="text-blueberry dark:text-white text-4xl font-bold mt-1">{formatMoney(balance)}</p>
               {accruedProfit > 1 && <p className="text-turquoise text-sm mt-1 font-semibold">Trong đó lãi cộng dồn: {formatMoney(accruedProfit)}</p>}
@@ -3999,18 +4007,18 @@ function FundDetail({ category, transactions, onBack, reload, softDelete, setScr
               </div>
             </div>
 
-            <div className="bg-white dark:bg-[#1e1e32] rounded-3xl p-6 shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)]">
+ <div className="frost-card rounded-3xl p-6 ">
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-blueberry dark:text-white font-extrabold text-lg">Lịch sử</h2>
                 <div className="flex gap-2">
                   {[{ key: 'all', label: 'Tất cả' }, { key: 'allocation', label: 'Nạp (Thu)' }, { key: 'expense', label: 'Chi' }, { key: 'profit', label: 'Lợi nhuận' }].map((f) => (
-                    <button key={f.key} onClick={() => setFilter(f.key)} className={`px-3 py-1.5 rounded-full text-xs flex-shrink-0 font-bold ${filter === f.key ? 'bg-gradient-primary text-white shadow-md shadow-turquoise/30' : 'bg-ice-cream dark:bg-night-sky text-steel dark:text-light-grey'}`}>{f.label}</button>
+                    <button key={f.key} onClick={() => setFilter(f.key)} className={`px-3 py-1.5 rounded-full text-xs flex-shrink-0 font-bold ${filter === f.key ? 'bg-gradient-primary text-white shadow-md shadow-turquoise/30' : 'frost-inset text-steel dark:text-light-grey'}`}>{f.label}</button>
                   ))}
                 </div>
               </div>
               {filter === 'profit' ? (
                 rate === 0 ? <p className="text-steel dark:text-light-grey text-sm text-center py-8">Chưa đặt tỷ suất lợi nhuận cho quỹ này.</p> : (
-                  <div className="bg-ice-cream dark:bg-night-sky rounded-2xl p-5 text-center">
+                  <div className="frost-inset rounded-2xl p-5 text-center">
                     <p className="text-steel dark:text-light-grey text-sm font-semibold mb-1">Lợi nhuận cộng dồn đến hôm nay</p>
                     <p className="text-blueberry dark:text-white text-2xl font-bold">{formatMoney(accruedProfit)}</p>
                     <p className="text-steel dark:text-light-grey text-sm mt-2">Dự kiến ngày mai: +{formatMoney(dailyProfit)}</p>
@@ -4073,7 +4081,7 @@ function FundDetail({ category, transactions, onBack, reload, softDelete, setScr
             </div>
           </div>
 
-          <div className="bg-white dark:bg-[#1e1e32] rounded-3xl p-6 shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)] h-fit">
+ <div className="frost-card rounded-3xl p-6 h-fit">
             <h3 className="text-blueberry dark:text-white font-extrabold mb-4">Thông tin quỹ</h3>
             <div className="flex flex-col gap-3 text-sm">
               <div className="flex justify-between"><span className="text-steel dark:text-light-grey font-semibold">Số tiền ban đầu</span><span className="text-blueberry dark:text-white font-bold">{initialAmount > 0 ? formatMoney(initialAmount) : '—'}</span></div>
@@ -4144,8 +4152,10 @@ function Accounts({ setScreen, accounts, transactions, onOpenAccount, reload, on
         </div>
       </div>
 
-      <div className="hidden md:block">
-        <div className="flex items-center justify-between mb-2">
+      <div className="hidden md:block relative">
+        <div className="frost-blob z-0 w-72 h-72 bg-baby-blue-light/45 dark:bg-baby-blue/10 -top-10 right-10" />
+        <div className="frost-blob z-0 w-64 h-64 bg-cotton-candy-light/40 dark:bg-cotton-candy/10 top-96 -left-10" />
+        <div className="relative flex items-center justify-between mb-2">
           <div>
             <h1 className="text-blueberry dark:text-white text-2xl font-extrabold">Quản lý ví</h1>
             <p className="text-steel dark:text-light-grey text-sm mt-1">Tổng tất cả tài khoản: <span className="text-blueberry dark:text-white font-bold">{formatMoney(totalBalance)}</span></p>
@@ -4159,9 +4169,9 @@ function Accounts({ setScreen, accounts, transactions, onOpenAccount, reload, on
         {accounts.length === 0 ? (
           <p className="text-steel dark:text-light-grey text-sm text-center py-16">Chưa có ví nào. Bấm "Thêm ví mới" để bắt đầu.</p>
         ) : (
-          <div className="grid grid-cols-3 gap-5 mt-6">
+          <div className="relative grid grid-cols-3 gap-5 mt-6">
             {accounts.map((acc) => (
-              <button key={acc.id} onClick={() => onOpenAccount(acc.id, 'accounts')} className="text-left bg-white dark:bg-[#1e1e32] rounded-3xl p-5 shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)] hover:shadow-card transition">
+ <button key={acc.id} onClick={() => onOpenAccount(acc.id, 'accounts')} className="text-left frost-card rounded-3xl p-5 hover:shadow-card transition">
                 <div className="flex items-center gap-3 mb-4">
                   <EmojiCircle emoji={acc.icon} size={44} active activeColor="#0DBACC" />
                   <div className="min-w-0">
@@ -4290,11 +4300,11 @@ function AccountDetail({ account, transactions, categories, onBack, reload, soft
 
         <div className="grid grid-cols-3 gap-6">
           <div className="col-span-2">
-            <div className="bg-white dark:bg-[#1e1e32] rounded-3xl p-6 shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)] mb-6">
+ <div className="frost-card rounded-3xl p-6 mb-6">
               <p className="text-steel dark:text-light-grey text-sm font-semibold">Số dư hiện tại</p>
               <p className="text-blueberry dark:text-white text-4xl font-bold mt-1">{formatMoney(balance)}</p>
             </div>
-            <div className="bg-white dark:bg-[#1e1e32] rounded-3xl p-6 shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)]">
+ <div className="frost-card rounded-3xl p-6 ">
               <h2 className="text-blueberry dark:text-white font-extrabold text-lg mb-4">Lịch sử</h2>
               {history.length === 0 ? <p className="text-steel dark:text-light-grey text-sm text-center py-8">Chưa có giao dịch nào.</p> : (
                 <div className="flex flex-col divide-y divide-[rgba(189,189,203,0.2)] dark:divide-[rgba(189,189,203,0.1)] scrollbar-hide">
@@ -4307,7 +4317,7 @@ function AccountDetail({ account, transactions, categories, onBack, reload, soft
                     const isOverLimit = (tx.note || '').startsWith('[Vượt hạn mức]');
                     return (
                       <div key={tx.id} className="flex items-center gap-3 py-3">
-                        <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${isDirectSet ? 'bg-ice-cream dark:bg-night-sky' : isPositive ? 'bg-turquoise/10' : 'bg-cotton-candy/10'}`}>
+                        <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${isDirectSet ? 'frost-inset' : isPositive ? 'bg-turquoise/10' : 'bg-cotton-candy/10'}`}>
                           {isDirectSet ? <Pencil size={15} className="text-steel dark:text-light-grey" /> : isPositive ? <TrendingUp size={16} className="text-turquoise" /> : <TrendingDown size={16} className="text-cotton-candy" />}
                         </div>
                         <div className="flex-1 min-w-0">
@@ -4330,7 +4340,7 @@ function AccountDetail({ account, transactions, categories, onBack, reload, soft
               )}
             </div>
           </div>
-          <div className="bg-white dark:bg-[#1e1e32] rounded-3xl p-6 shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)] h-fit">
+ <div className="frost-card rounded-3xl p-6 h-fit">
             <h3 className="text-blueberry dark:text-white font-extrabold mb-4">Thông tin tài khoản</h3>
             <div className="flex flex-col gap-3 text-sm">
               <div className="flex justify-between"><span className="text-steel dark:text-light-grey font-semibold">Loại</span><span className="text-blueberry dark:text-white font-bold">{typeLabel}</span></div>
@@ -4449,17 +4459,19 @@ function Goals({ setScreen, goals, loadingGoals, reload, softDelete, onAddClick,
         </div>
       </div>
 
-      <div className="hidden md:block" onClick={() => { setOpenMenuId(null); setShowFilterMenu(false); setShowSortMenu(false); }}>
-        <h1 className="text-blueberry dark:text-white text-2xl font-extrabold mb-6">Mục tiêu</h1>
+      <div className="hidden md:block relative" onClick={() => { setOpenMenuId(null); setShowFilterMenu(false); setShowSortMenu(false); }}>
+        <div className="frost-blob z-0 w-72 h-72 bg-lavender-light/45 dark:bg-lavender/10 -top-10 right-10" />
+        <div className="frost-blob z-0 w-64 h-64 bg-turquoise-light/40 dark:bg-turquoise/10 top-96 -left-10" />
+        <h1 className="relative text-blueberry dark:text-white text-2xl font-extrabold mb-6">Mục tiêu</h1>
 
-        <div className="grid grid-cols-4 gap-4 mb-6">
+        <div className="relative grid grid-cols-4 gap-4 mb-6">
           <SummaryCard icon={Target} iconBg="bg-turquoise" label="Tổng tiền mục tiêu" value={formatMoney(totalTarget)} />
           <SummaryCard icon={PiggyBank} iconBg="bg-baby-blue" label="Tổng số tiền hiện có" value={formatMoney(totalCurrent)} />
           <SummaryCard icon={Wallet} iconBg="bg-cotton-candy" label="Tổng số tiền còn thiếu" value={formatMoney(totalRemaining)} />
           <SummaryCard icon={Sparkles} iconBg="bg-lavender" label="Tổng số lượng mục tiêu" value={goals.length} sub={`${doneCount} đã hoàn thành`} />
         </div>
 
-        <div className="bg-white dark:bg-[#1e1e32] rounded-3xl shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)] overflow-hidden">
+ <div className="relative frost-card rounded-3xl overflow-hidden">
           <div className="flex items-center justify-between p-5 pb-3 flex-wrap gap-3">
             <div className="flex items-center gap-2 flex-wrap">
               {filterStatus !== 'all' && (
@@ -4482,18 +4494,18 @@ function Goals({ setScreen, goals, loadingGoals, reload, softDelete, onAddClick,
                   <Filter size={13} /> Thêm bộ lọc
                 </button>
                 {showFilterMenu && (
-                  <div onClick={(e) => e.stopPropagation()} className="absolute left-0 top-9 z-20 bg-white dark:bg-[#1e1e32] border-0 dark:border dark:border-[rgba(189,189,203,0.1)] rounded-2xl shadow-card p-4 w-64">
+ <div onClick={(e) => e.stopPropagation()} className="absolute left-0 top-9 z-20 frost-card rounded-2xl shadow-card p-4 w-64">
                     <p className="text-xs font-bold text-steel dark:text-light-grey mb-2">Trạng thái</p>
                     <div className="flex flex-wrap gap-2 mb-4">
                       {[['all', 'Tất cả'], ['active', 'Đang làm'], ['done', 'Hoàn thành']].map(([k, l]) => (
-                        <button key={k} onClick={() => { setFilterStatus(k); setPage(1); }} className={`px-3 py-1.5 rounded-full text-xs font-bold ${filterStatus === k ? 'bg-gradient-primary text-white shadow-md shadow-turquoise/30' : 'bg-ice-cream dark:bg-night-sky text-steel dark:text-light-grey'}`}>{l}</button>
+                        <button key={k} onClick={() => { setFilterStatus(k); setPage(1); }} className={`px-3 py-1.5 rounded-full text-xs font-bold ${filterStatus === k ? 'bg-gradient-primary text-white shadow-md shadow-turquoise/30' : 'frost-inset text-steel dark:text-light-grey'}`}>{l}</button>
                       ))}
                     </div>
                     <p className="text-xs font-bold text-steel dark:text-light-grey mb-2">Mức độ ưu tiên</p>
                     <div className="flex flex-col gap-1">
-                      <button onClick={() => { setFilterPriority('all'); setPage(1); }} className={`text-left px-3 py-1.5 rounded-lg text-xs font-bold ${filterPriority === 'all' ? 'bg-ice-cream dark:bg-night-sky text-blueberry dark:text-white' : 'text-steel dark:text-light-grey hover:bg-ice-cream dark:hover:bg-night-sky/30'}`}>Tất cả</button>
+                      <button onClick={() => { setFilterPriority('all'); setPage(1); }} className={`text-left px-3 py-1.5 rounded-lg text-xs font-bold ${filterPriority === 'all' ? 'frost-inset text-blueberry dark:text-white' : 'text-steel dark:text-light-grey hover:bg-ice-cream dark:hover:bg-night-sky/30'}`}>Tất cả</button>
                       {PRIORITY_TERMS.map((p) => (
-                        <button key={p.value} onClick={() => { setFilterPriority(p.value); setPage(1); }} className={`text-left px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-2 ${filterPriority === p.value ? 'bg-ice-cream dark:bg-night-sky' : 'hover:bg-ice-cream dark:hover:bg-night-sky/30'}`}>
+                        <button key={p.value} onClick={() => { setFilterPriority(p.value); setPage(1); }} className={`text-left px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-2 ${filterPriority === p.value ? 'frost-inset' : 'hover:bg-ice-cream dark:hover:bg-night-sky/30'}`}>
                           <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: p.color }} /> <span className="text-blueberry dark:text-white truncate">{p.value}</span>
                         </button>
                       ))}
@@ -4509,11 +4521,11 @@ function Goals({ setScreen, goals, loadingGoals, reload, softDelete, onAddClick,
                   <ArrowUpDown size={14} /> Ngày tạo
                 </button>
                 {showSortMenu && (
-                  <div onClick={(e) => e.stopPropagation()} className="absolute right-0 top-10 z-20 bg-white dark:bg-[#1e1e32] border-0 dark:border dark:border-[rgba(189,189,203,0.1)] rounded-2xl shadow-card p-2 w-56">
+ <div onClick={(e) => e.stopPropagation()} className="absolute right-0 top-10 z-20 frost-card rounded-2xl shadow-card p-2 w-56">
                     <p className="text-xs font-bold text-steel dark:text-light-grey px-2 py-1.5">Sắp xếp theo</p>
                     {GOAL_SORT_FIELDS.map((f) => (
                       <button key={f.key} onClick={() => { setSortField((cur) => { if (cur === f.key) { setSortDir((d) => (d === 'asc' ? 'desc' : 'asc')); return cur; } setSortDir(f.key === 'created' ? 'desc' : 'asc'); return f.key; }); }}
-                        className={`w-full flex items-center justify-between px-2 py-2 rounded-lg text-sm ${sortField === f.key ? 'bg-ice-cream dark:bg-night-sky text-blueberry dark:text-white font-bold' : 'text-steel dark:text-light-grey hover:bg-ice-cream dark:hover:bg-night-sky/30'}`}>
+                        className={`w-full flex items-center justify-between px-2 py-2 rounded-lg text-sm ${sortField === f.key ? 'frost-inset text-blueberry dark:text-white font-bold' : 'text-steel dark:text-light-grey hover:bg-ice-cream dark:hover:bg-night-sky/30'}`}>
                         {f.label}
                         {sortField === f.key && <span className="text-xs">{sortDir === 'asc' ? '↑' : '↓'}</span>}
                       </button>
@@ -4521,7 +4533,7 @@ function Goals({ setScreen, goals, loadingGoals, reload, softDelete, onAddClick,
                   </div>
                 )}
               </div>
-              <div className="flex items-center gap-1 bg-ice-cream dark:bg-night-sky rounded-full p-1">
+              <div className="flex items-center gap-1 frost-inset rounded-full p-1">
                 <button onClick={() => { setViewMode('card'); setPage(1); }} className={`w-8 h-8 rounded-full flex items-center justify-center ${viewMode === 'card' ? 'bg-gradient-primary text-white shadow-md shadow-turquoise/30' : 'text-steel dark:text-light-grey'}`}><LayoutGrid size={15} /></button>
                 <button onClick={() => { setViewMode('list'); setPage(1); }} className={`w-8 h-8 rounded-full flex items-center justify-center ${viewMode === 'list' ? 'bg-gradient-primary text-white shadow-md shadow-turquoise/30' : 'text-steel dark:text-light-grey'}`}><List size={15} /></button>
               </div>
@@ -4531,7 +4543,7 @@ function Goals({ setScreen, goals, loadingGoals, reload, softDelete, onAddClick,
           <div className="flex items-center justify-between px-5 pb-4 flex-wrap gap-3">
             <p className="text-steel dark:text-light-grey text-sm font-semibold">{displayGoals.length} mục tiêu</p>
             <div className="flex items-center gap-2">
-              <div className="flex items-center gap-2 bg-ice-cream dark:bg-night-sky rounded-full px-4 py-2.5 w-56">
+              <div className="flex items-center gap-2 frost-inset rounded-full px-4 py-2.5 w-56">
                 <Search size={15} className="text-steel dark:text-light-grey" />
                 <input value={searchTerm} onChange={(e) => { setSearchTerm(e.target.value); setPage(1); }} placeholder="Tìm mục tiêu..." className="bg-transparent outline-none text-sm flex-1 text-blueberry dark:text-white" />
               </div>
@@ -4551,7 +4563,7 @@ function Goals({ setScreen, goals, loadingGoals, reload, softDelete, onAddClick,
                     const pct = isDone ? 100 : (goal.target_amount ? Math.min(100, (goal.current_amount / goal.target_amount) * 100) : 0);
                     const pStyle = priorityStyle(goal.priority_term);
                     return (
-                      <div key={goal.id} onClick={() => setEditingGoal(goal)} className="bg-white dark:bg-[#1e1e32] rounded-2xl border-0 dark:border dark:border-[rgba(189,189,203,0.1)] overflow-hidden shadow-soft hover:shadow-card transition cursor-pointer">
+ <div key={goal.id} onClick={() => setEditingGoal(goal)} className="frost-card rounded-2xl overflow-hidden hover:shadow-card transition cursor-pointer">
                         <div className="relative h-28 flex items-center justify-center" style={{ background: `linear-gradient(135deg, ${pStyle.bg}, ${pStyle.color}33)` }}>
                           {isDone ? <Check size={40} className="opacity-30" style={{ color: pStyle.color }} /> : <Target size={40} className="opacity-30" style={{ color: pStyle.color }} />}
                           <span className="absolute top-2.5 left-2.5 flex items-center gap-1 bg-white/80 dark:bg-[#2a2a44]/80 backdrop-blur text-[11px] font-bold px-2 py-1 rounded-full text-blueberry dark:text-white">
@@ -4562,7 +4574,7 @@ function Goals({ setScreen, goals, loadingGoals, reload, softDelete, onAddClick,
                             <MoreHorizontal size={14} />
                           </button>
                           {openMenuId === goal.id && (
-                            <div onClick={(e) => e.stopPropagation()} className="absolute top-10 right-2.5 z-20 bg-white dark:bg-[#1e1e32] border-0 dark:border dark:border-[rgba(189,189,203,0.1)] rounded-xl shadow-card py-1 w-40 text-left">
+ <div onClick={(e) => e.stopPropagation()} className="absolute top-10 right-2.5 z-20 frost-card rounded-xl shadow-card py-1 w-40 text-left">
                               <button onClick={() => { setEditingGoal(goal); setOpenMenuId(null); }} className="w-full flex items-center gap-2 px-3 py-2 text-sm text-blueberry dark:text-white hover:bg-ice-cream dark:hover:bg-night-sky/30">
                                 <Eye size={14} /> Xem chi tiết
                               </button>
@@ -4654,7 +4666,7 @@ function Goals({ setScreen, goals, loadingGoals, reload, softDelete, onAddClick,
                                 <MoreHorizontal size={18} />
                               </button>
                               {openMenuId === goal.id && (
-                                <div onClick={(e) => e.stopPropagation()} className="absolute right-4 top-12 z-20 bg-white dark:bg-[#1e1e32] border-0 dark:border dark:border-[rgba(189,189,203,0.1)] rounded-xl shadow-card py-1 w-40 text-left">
+ <div onClick={(e) => e.stopPropagation()} className="absolute right-4 top-12 z-20 frost-card rounded-xl shadow-card py-1 w-40 text-left">
                                   <button onClick={() => { setEditingGoal(goal); setOpenMenuId(null); }} className="w-full flex items-center gap-2 px-3 py-2 text-sm text-blueberry dark:text-white hover:bg-ice-cream dark:hover:bg-night-sky/30">
                                     <Eye size={14} /> Xem chi tiết
                                   </button>
@@ -4909,7 +4921,7 @@ function Settings({ setScreen, categories, accounts, reload, softDelete, user, o
           <button onClick={() => setSection('history')} className={`px-5 py-2 rounded-full text-sm font-bold ${section === 'history' ? 'bg-gradient-primary text-white shadow-md shadow-turquoise/30' : 'bg-white dark:bg-[#2a2a44] text-steel dark:text-light-grey border-0 dark:border dark:border-[rgba(189,189,203,0.1)]'}`}>Lịch sử</button>
         </div>
 
-        <div className="bg-white dark:bg-[#1e1e32] rounded-3xl shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)] p-6">
+ <div className="frost-card rounded-3xl p-6">
           {section === 'profile' && <ProfileSection user={user} onUpdated={onProfileUpdated} logActivity={logActivity} />}
           {section === 'categories' && <CategorySection categories={categories} reload={reload} softDelete={softDelete} />}
           {section === 'data' && ResetDataPanel}
@@ -5780,11 +5792,13 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
         </div>
       </div>
 
-      <div className="hidden md:block">
-        <div className="flex items-center justify-between mb-6 flex-wrap gap-4">
+      <div className="hidden md:block relative">
+        <div className="frost-blob z-0 w-72 h-72 bg-baby-blue-light/40 dark:bg-baby-blue/10 -top-10 right-10" />
+        <div className="frost-blob z-0 w-64 h-64 bg-lavender-light/40 dark:bg-lavender/10 top-[600px] -left-10" />
+        <div className="relative flex items-center justify-between mb-6 flex-wrap gap-4">
           <h1 className="text-blueberry dark:text-white text-2xl font-extrabold">Báo cáo &amp; Phân tích</h1>
           <div className="flex items-center gap-2 flex-wrap">
-            <select value={timeType} onChange={(e) => setTimeType(e.target.value)} className="bg-ice-cream dark:bg-night-sky rounded-full text-sm font-bold px-4 py-2 outline-none text-blueberry dark:text-white">
+            <select value={timeType} onChange={(e) => setTimeType(e.target.value)} className="frost-inset rounded-full text-sm font-bold px-4 py-2 outline-none text-blueberry dark:text-white">
               <option value="day">Ngày</option>
               <option value="week">Tuần</option>
               <option value="month">Tháng</option>
@@ -5793,45 +5807,45 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
               <option value="year">Năm</option>
               <option value="custom">Tùy chỉnh</option>
             </select>
-            {timeType === 'day' && <input type="date" value={selectedDay} onChange={(e) => setSelectedDay(e.target.value)} className="bg-ice-cream dark:bg-night-sky rounded-full text-sm font-bold px-4 py-2 outline-none text-blueberry dark:text-white" />}
-            {timeType === 'week' && <input type="date" value={selectedWeek} onChange={(e) => setSelectedWeek(e.target.value)} className="bg-ice-cream dark:bg-night-sky rounded-full text-sm font-bold px-4 py-2 outline-none text-blueberry dark:text-white" />}
+            {timeType === 'day' && <input type="date" value={selectedDay} onChange={(e) => setSelectedDay(e.target.value)} className="frost-inset rounded-full text-sm font-bold px-4 py-2 outline-none text-blueberry dark:text-white" />}
+            {timeType === 'week' && <input type="date" value={selectedWeek} onChange={(e) => setSelectedWeek(e.target.value)} className="frost-inset rounded-full text-sm font-bold px-4 py-2 outline-none text-blueberry dark:text-white" />}
             {timeType === 'month' && (
               <>
-                <select value={selectedMonth} onChange={(e) => setSelectedMonth(Number(e.target.value))} className="bg-ice-cream dark:bg-night-sky rounded-full text-sm font-bold px-4 py-2 outline-none text-blueberry dark:text-white">
+                <select value={selectedMonth} onChange={(e) => setSelectedMonth(Number(e.target.value))} className="frost-inset rounded-full text-sm font-bold px-4 py-2 outline-none text-blueberry dark:text-white">
                   {Array.from({length:12}, (_,i) => i+1).map(m => <option key={m} value={m}>{m}</option>)}
                 </select>
-                <input type="number" value={selectedYear} onChange={(e) => setSelectedYear(Number(e.target.value))} className="bg-ice-cream dark:bg-night-sky rounded-full text-sm font-bold px-4 py-2 outline-none text-blueberry dark:text-white w-24" />
+                <input type="number" value={selectedYear} onChange={(e) => setSelectedYear(Number(e.target.value))} className="frost-inset rounded-full text-sm font-bold px-4 py-2 outline-none text-blueberry dark:text-white w-24" />
               </>
             )}
             {timeType === 'quarter' && (
               <>
-                <select value={selectedQuarter} onChange={(e) => setSelectedQuarter(Number(e.target.value))} className="bg-ice-cream dark:bg-night-sky rounded-full text-sm font-bold px-4 py-2 outline-none text-blueberry dark:text-white">
+                <select value={selectedQuarter} onChange={(e) => setSelectedQuarter(Number(e.target.value))} className="frost-inset rounded-full text-sm font-bold px-4 py-2 outline-none text-blueberry dark:text-white">
                   <option value={1}>Q1</option><option value={2}>Q2</option><option value={3}>Q3</option><option value={4}>Q4</option>
                 </select>
-                <input type="number" value={selectedYear} onChange={(e) => setSelectedYear(Number(e.target.value))} className="bg-ice-cream dark:bg-night-sky rounded-full text-sm font-bold px-4 py-2 outline-none text-blueberry dark:text-white w-24" />
+                <input type="number" value={selectedYear} onChange={(e) => setSelectedYear(Number(e.target.value))} className="frost-inset rounded-full text-sm font-bold px-4 py-2 outline-none text-blueberry dark:text-white w-24" />
               </>
             )}
             {timeType === '6month' && (
               <>
-                <select value={selectedHalf} onChange={(e) => setSelectedHalf(Number(e.target.value))} className="bg-ice-cream dark:bg-night-sky rounded-full text-sm font-bold px-4 py-2 outline-none text-blueberry dark:text-white">
+                <select value={selectedHalf} onChange={(e) => setSelectedHalf(Number(e.target.value))} className="frost-inset rounded-full text-sm font-bold px-4 py-2 outline-none text-blueberry dark:text-white">
                   <option value={1}>H1</option><option value={2}>H2</option>
                 </select>
-                <input type="number" value={selectedYear} onChange={(e) => setSelectedYear(Number(e.target.value))} className="bg-ice-cream dark:bg-night-sky rounded-full text-sm font-bold px-4 py-2 outline-none text-blueberry dark:text-white w-24" />
+                <input type="number" value={selectedYear} onChange={(e) => setSelectedYear(Number(e.target.value))} className="frost-inset rounded-full text-sm font-bold px-4 py-2 outline-none text-blueberry dark:text-white w-24" />
               </>
             )}
             {timeType === 'year' && (
-              <input type="number" value={selectedYear} onChange={(e) => setSelectedYear(Number(e.target.value))} className="bg-ice-cream dark:bg-night-sky rounded-full text-sm font-bold px-4 py-2 outline-none text-blueberry dark:text-white w-24" />
+              <input type="number" value={selectedYear} onChange={(e) => setSelectedYear(Number(e.target.value))} className="frost-inset rounded-full text-sm font-bold px-4 py-2 outline-none text-blueberry dark:text-white w-24" />
             )}
             {timeType === 'custom' && (
               <>
-                <input type="date" value={customStart} onChange={(e) => setCustomStart(e.target.value)} className="bg-ice-cream dark:bg-night-sky rounded-full text-sm font-bold px-4 py-2 outline-none text-blueberry dark:text-white" />
-                <input type="date" value={customEnd} onChange={(e) => setCustomEnd(e.target.value)} className="bg-ice-cream dark:bg-night-sky rounded-full text-sm font-bold px-4 py-2 outline-none text-blueberry dark:text-white" />
+                <input type="date" value={customStart} onChange={(e) => setCustomStart(e.target.value)} className="frost-inset rounded-full text-sm font-bold px-4 py-2 outline-none text-blueberry dark:text-white" />
+                <input type="date" value={customEnd} onChange={(e) => setCustomEnd(e.target.value)} className="frost-inset rounded-full text-sm font-bold px-4 py-2 outline-none text-blueberry dark:text-white" />
               </>
             )}
           </div>
         </div>
 
-        <div className="bg-white dark:bg-[#1e1e32] rounded-3xl p-6 shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)] mb-6">
+ <div className="frost-card rounded-3xl p-6 mb-6">
           <h2 className="text-blueberry dark:text-white font-extrabold text-lg mb-2">Tổng kết {periodLabel}</h2>
           <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
             <div><p className="text-steel dark:text-light-grey text-sm">Thu nhập</p><p className="text-xl font-bold text-turquoise">{formatMoney(income)}</p></div>
@@ -5849,35 +5863,35 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
 
         <div className="grid grid-cols-3 md:grid-cols-5 gap-6 mb-6">
           <HoverDetailCard
-            className="bg-white dark:bg-[#1e1e32] rounded-3xl p-6 shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)] cursor-pointer hover:shadow-card transition"
+ className="frost-card rounded-3xl p-6 cursor-pointer hover:shadow-card transition"
             detail={<AssetBreakdownDetail wallets={assetWalletItems} funds={assetFundItems} gold={assetGoldItems} total={totalAssetsEnd} />}
           >
             <p className="text-steel dark:text-light-grey text-sm font-semibold">Tổng tài sản</p>
             <p className="text-blueberry dark:text-white text-2xl font-bold">{formatMoney(totalAssetsEnd)}</p>
           </HoverDetailCard>
           <HoverDetailCard
-            className="bg-white dark:bg-[#1e1e32] rounded-3xl p-6 shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)] cursor-pointer hover:shadow-card transition"
+ className="frost-card rounded-3xl p-6 cursor-pointer hover:shadow-card transition"
             detail={<BreakdownDetailList title="Tổng thu nhập" items={incomeDetailItems} total={income} colorClass="text-turquoise" />}
           >
             <p className="text-steel dark:text-light-grey text-sm font-semibold">Thu nhập</p>
             <p className="text-turquoise text-2xl font-bold">{formatMoney(income)}</p>
           </HoverDetailCard>
           <HoverDetailCard
-            className="bg-white dark:bg-[#1e1e32] rounded-3xl p-6 shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)] cursor-pointer hover:shadow-card transition"
+ className="frost-card rounded-3xl p-6 cursor-pointer hover:shadow-card transition"
             detail={<BreakdownDetailList title="Thu nhập được chi" items={poolIncomeDetailItems} total={spendingPool} colorClass="text-baby-blue" />}
           >
             <p className="text-steel dark:text-light-grey text-sm font-semibold">Thu nhập được chi</p>
             <p className="text-baby-blue text-2xl font-bold">{formatMoney(spendingPool)}</p>
           </HoverDetailCard>
           <HoverDetailCard
-            className="bg-white dark:bg-[#1e1e32] rounded-3xl p-6 shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)] cursor-pointer hover:shadow-card transition"
+ className="frost-card rounded-3xl p-6 cursor-pointer hover:shadow-card transition"
             detail={<BreakdownDetailList title="Thu nhập đặc biệt" items={specialIncomeDetailItems} total={specialIncome} colorClass="text-lavender" />}
           >
             <p className="text-steel dark:text-light-grey text-sm font-semibold">Thu nhập đặc biệt</p>
             <p className="text-lavender text-2xl font-bold">{formatMoney(specialIncome)}</p>
           </HoverDetailCard>
           <HoverDetailCard
-            className="bg-white dark:bg-[#1e1e32] rounded-3xl p-6 shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)] cursor-pointer hover:shadow-card transition"
+ className="frost-card rounded-3xl p-6 cursor-pointer hover:shadow-card transition"
             align="right"
             detail={<BreakdownDetailList title="Chi tiêu" items={expenseDetailItems} total={totalActualExpense} colorClass="text-cotton-candy" />}
           >
@@ -5886,7 +5900,7 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
           </HoverDetailCard>
         </div>
 
-        <div className="bg-white dark:bg-[#1e1e32] rounded-3xl p-6 shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)] mb-6">
+ <div className="frost-card rounded-3xl p-6 mb-6">
           <h2 className="text-blueberry dark:text-white font-extrabold text-lg">Thu nhập đã đi đâu?</h2>
           <p className="text-steel dark:text-light-grey text-xs font-semibold mb-4">Tổng thu nhập → Thu nhập được chi + Thu nhập đặc biệt (không tự động tăng Thu nhập được chi)</p>
           <div className="flex flex-col md:flex-row gap-6">
@@ -5942,12 +5956,12 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
           </div>
         </div>
 
-        <div className="bg-white dark:bg-[#1e1e32] rounded-3xl p-6 shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)] mb-6">
+ <div className="frost-card rounded-3xl p-6 mb-6">
           <h2 className="text-blueberry dark:text-white font-extrabold text-lg mb-4">Thu nhập theo danh mục</h2>
           {incomeBreakdown.length === 0 ? <p className="text-steel dark:text-light-grey">Không có thu nhập.</p> : (
             <div className="grid grid-cols-2 gap-2">
               {incomeBreakdown.map(c => (
-                <button key={c.id} onClick={() => openDrilldown(c.id, 'income')} className="flex justify-between bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-2 text-left hover:bg-turquoise/10 transition">
+                <button key={c.id} onClick={() => openDrilldown(c.id, 'income')} className="flex justify-between frost-inset rounded-xl px-4 py-2 text-left hover:bg-turquoise/10 transition">
                   <span>{c.icon} {c.name}</span>
                   <span className="font-bold text-turquoise">{formatMoney(c.amount)}</span>
                 </button>
@@ -5956,7 +5970,7 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
           )}
         </div>
 
-        <div className="bg-white dark:bg-[#1e1e32] rounded-3xl p-6 shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)] mb-6">
+ <div className="frost-card rounded-3xl p-6 mb-6">
           <h2 className="text-blueberry dark:text-white font-extrabold text-lg mb-4">Chi tiết đã nạp quỹ</h2>
           {fundData.filter(f => f.contributed > 0).length === 0 ? <p className="text-steel dark:text-light-grey">Không có khoản nạp quỹ nào trong kỳ.</p> : (
             <div className="space-y-3">
@@ -5974,7 +5988,7 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
           )}
         </div>
 
-        <div className="bg-white dark:bg-[#1e1e32] rounded-3xl p-6 shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)] mb-6">
+ <div className="frost-card rounded-3xl p-6 mb-6">
           <h2 className="text-blueberry dark:text-white font-extrabold text-lg mb-4">Hoạt động quỹ</h2>
           {fundData.length === 0 ? <p className="text-steel dark:text-light-grey">Không có hoạt động quỹ.</p> : (
             <div className="space-y-3">
@@ -5993,7 +6007,7 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
           )}
         </div>
 
-        <div className="bg-white dark:bg-[#1e1e32] rounded-3xl p-6 shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)] mb-6">
+ <div className="frost-card rounded-3xl p-6 mb-6">
           <h2 className="text-blueberry dark:text-white font-extrabold text-lg mb-4">Chi tiêu theo danh mục</h2>
           {expenseBreakdown.length === 0 ? <p className="text-steel dark:text-light-grey">Không có chi tiêu.</p> : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -6002,7 +6016,7 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
                 const nonFundTotal = expenseFromIncome + agg.expenseFromWallet;
                 const pct = nonFundTotal > 0 ? Math.round((total / nonFundTotal) * 100) : 0;
                 return (
-                  <button key={c.id} onClick={() => openDrilldown(c.id)} className="bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-left hover:bg-turquoise/10 transition">
+                  <button key={c.id} onClick={() => openDrilldown(c.id)} className="frost-inset rounded-xl px-4 py-3 text-left hover:bg-turquoise/10 transition">
                     <div className="flex justify-between items-center">
                       <span className="font-bold text-blueberry dark:text-white">{c.icon} {c.name}</span>
                       <span className="font-bold text-cotton-candy">{formatMoney(total)}</span>
@@ -6022,7 +6036,7 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
           )}
         </div>
 
-        <div className="bg-white dark:bg-[#1e1e32] rounded-3xl p-6 shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)] mb-6">
+ <div className="frost-card rounded-3xl p-6 mb-6">
           <h2 className="text-blueberry dark:text-white font-extrabold text-lg">Chi tiêu từ tiền đã tích lũy</h2>
           <p className="text-steel dark:text-light-grey text-xs font-semibold mb-4">Đây là các khoản chi sử dụng tiền đã tích lũy trong quỹ — không tính vào "Còn lại từ thu nhập"</p>
           {fundData.filter(f => f.withdrawn > 0).length === 0 ? (
@@ -6032,7 +6046,7 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
               {fundData.filter(f => f.withdrawn > 0).map(f => {
                 const pct = expenseFromFund > 0 ? Math.round((f.withdrawn / expenseFromFund) * 100) : 0;
                 return (
-                  <button key={f.id} onClick={() => openDrilldown(f.id, 'expense')} className="bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-left hover:bg-cotton-candy/10 transition">
+                  <button key={f.id} onClick={() => openDrilldown(f.id, 'expense')} className="frost-inset rounded-xl px-4 py-3 text-left hover:bg-cotton-candy/10 transition">
                     <div className="flex justify-between items-center">
                       <span className="font-bold text-blueberry dark:text-white">{f.icon} Quỹ {f.name}</span>
                       <span className="font-bold text-cotton-candy">{formatMoney(f.withdrawn)}</span>
@@ -6053,7 +6067,7 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
         </div>
 
         {yearSummary && (
-          <div className="bg-white dark:bg-[#1e1e32] rounded-3xl p-6 shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)] mb-6">
+ <div className="frost-card rounded-3xl p-6 mb-6">
             <h2 className="text-blueberry dark:text-white font-extrabold text-lg mb-4">Tổng kết năm {selectedYear}</h2>
             <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-4">
               <div><p className="text-steel dark:text-light-grey text-sm">Tổng thu nhập năm</p><p className="text-lg font-bold text-turquoise">{formatMoney(income)}</p></div>
@@ -6063,15 +6077,15 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
               <div><p className="text-steel dark:text-light-grey text-sm">Tổng chi từ quỹ</p><p className="text-lg font-bold text-cotton-candy">{formatMoney(expenseFromFund)}</p></div>
             </div>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-              {yearSummary.topIncomeMonth && <div className="bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3"><p className="text-xs text-steel dark:text-light-grey">Tháng thu nhập cao nhất</p><p className="font-bold text-blueberry dark:text-white">{yearSummary.topIncomeMonth.label} — {formatMoney(yearSummary.topIncomeMonth.income)}</p></div>}
-              {yearSummary.topAllocationMonth && <div className="bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3"><p className="text-xs text-steel dark:text-light-grey">Tháng nạp quỹ nhiều nhất</p><p className="font-bold text-blueberry dark:text-white">{yearSummary.topAllocationMonth.label} — {formatMoney(yearSummary.topAllocationMonth.allocation)}</p></div>}
-              {yearSummary.topExpenseMonth && <div className="bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3"><p className="text-xs text-steel dark:text-light-grey">Tháng chi tiêu cao nhất</p><p className="font-bold text-blueberry dark:text-white">{yearSummary.topExpenseMonth.label} — {formatMoney(yearSummary.topExpenseMonth.totalActualExpense)}</p></div>}
-              {yearSummary.topRemainingMonth && <div className="bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3"><p className="text-xs text-steel dark:text-light-grey">Tháng còn lại nhiều nhất</p><p className="font-bold text-blueberry dark:text-white">{yearSummary.topRemainingMonth.label} — {formatMoney(yearSummary.topRemainingMonth.remaining)}</p></div>}
+              {yearSummary.topIncomeMonth && <div className="frost-inset rounded-xl px-4 py-3"><p className="text-xs text-steel dark:text-light-grey">Tháng thu nhập cao nhất</p><p className="font-bold text-blueberry dark:text-white">{yearSummary.topIncomeMonth.label} — {formatMoney(yearSummary.topIncomeMonth.income)}</p></div>}
+              {yearSummary.topAllocationMonth && <div className="frost-inset rounded-xl px-4 py-3"><p className="text-xs text-steel dark:text-light-grey">Tháng nạp quỹ nhiều nhất</p><p className="font-bold text-blueberry dark:text-white">{yearSummary.topAllocationMonth.label} — {formatMoney(yearSummary.topAllocationMonth.allocation)}</p></div>}
+              {yearSummary.topExpenseMonth && <div className="frost-inset rounded-xl px-4 py-3"><p className="text-xs text-steel dark:text-light-grey">Tháng chi tiêu cao nhất</p><p className="font-bold text-blueberry dark:text-white">{yearSummary.topExpenseMonth.label} — {formatMoney(yearSummary.topExpenseMonth.totalActualExpense)}</p></div>}
+              {yearSummary.topRemainingMonth && <div className="frost-inset rounded-xl px-4 py-3"><p className="text-xs text-steel dark:text-light-grey">Tháng còn lại nhiều nhất</p><p className="font-bold text-blueberry dark:text-white">{yearSummary.topRemainingMonth.label} — {formatMoney(yearSummary.topRemainingMonth.remaining)}</p></div>}
             </div>
           </div>
         )}
 
-        <div className="bg-white dark:bg-[#1e1e32] rounded-3xl p-6 shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)] mb-6">
+ <div className="frost-card rounded-3xl p-6 mb-6">
           <h2 className="text-blueberry dark:text-white font-extrabold text-lg mb-4">So với kỳ trước</h2>
           <div className="grid grid-cols-4 gap-4">
             <div><p className="text-steel dark:text-light-grey text-sm">Thu nhập</p><p className="text-xl font-bold">{formatMoney(income)}</p>
@@ -6090,7 +6104,7 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
         </div>
 
         {(timeType === 'year' || timeType === 'quarter' || timeType === '6month') && trendData.length > 0 && (
-          <div className="bg-white dark:bg-[#1e1e32] rounded-3xl p-6 shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)] mb-6">
+ <div className="frost-card rounded-3xl p-6 mb-6">
             <h2 className="text-blueberry dark:text-white font-extrabold text-lg mb-4">Xu hướng theo tháng</h2>
             <div className="h-48 flex items-end gap-2">
               {trendData.map((d, i) => {
@@ -6120,7 +6134,7 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
           </div>
         )}
 
-        <div className="bg-white dark:bg-[#1e1e32] rounded-3xl p-6 shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)] mb-6">
+ <div className="frost-card rounded-3xl p-6 mb-6">
           <h2 className="text-blueberry dark:text-white font-extrabold text-lg mb-4">Mục tiêu tài chính</h2>
           {goals.length === 0 ? <p className="text-steel dark:text-light-grey">Chưa có mục tiêu.</p> : (
             <div className="space-y-3">
@@ -6141,12 +6155,12 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
           )}
         </div>
 
-        <div className="bg-white dark:bg-[#1e1e32] rounded-3xl p-6 shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)] mb-6">
+ <div className="frost-card rounded-3xl p-6 mb-6">
           <h2 className="text-blueberry dark:text-white font-extrabold text-lg mb-4">Nhận xét {periodLabel}</h2>
           {insights.length === 0 ? <p className="text-steel dark:text-light-grey">Chưa có nhận xét.</p> : (
             <div className="grid grid-cols-2 gap-4">
               {insights.map((ins, i) => (
-                <div key={i} className="flex items-start gap-3 bg-ice-cream dark:bg-night-sky rounded-xl p-4">
+                <div key={i} className="flex items-start gap-3 frost-inset rounded-xl p-4">
                   <ins.icon size={20} className={`${ins.color} flex-shrink-0`} />
                   <div><p className="font-bold text-blueberry dark:text-white">{ins.title}</p><p className="text-steel dark:text-light-grey text-sm">{ins.desc}</p></div>
                 </div>
@@ -6155,7 +6169,7 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
           )}
         </div>
 
-        <div className="bg-white dark:bg-[#1e1e32] rounded-3xl p-6 shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)] mb-6">
+ <div className="frost-card rounded-3xl p-6 mb-6">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-blueberry dark:text-white font-extrabold text-lg">Hoạt động gần đây</h2>
             <span className="text-steel dark:text-light-grey text-xs font-semibold">{periodLabel} · {allPeriodTxsSorted.length} giao dịch</span>
@@ -6178,7 +6192,7 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
 
         {showDrilldown && drilldownCategory && (
           <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={() => setShowDrilldown(false)}>
-            <div className="bg-white dark:bg-[#1e1e32] w-full max-w-md rounded-3xl p-6 max-h-[80vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+ <div className="frost-card w-full max-w-md rounded-3xl p-6 max-h-[80vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
               <div className="flex justify-between items-center mb-4">
                 <h3 className="font-bold text-blueberry dark:text-white">Chi tiết "{drilldownCategory.name}"</h3>
                 <button onClick={() => setShowDrilldown(false)}><X size={18} className="text-steel dark:text-light-grey" /></button>
