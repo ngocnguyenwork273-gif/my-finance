@@ -157,16 +157,17 @@ const fincheckStyles = `
     z-index: -1;
   }
   .dark .frost-card {
-    background: linear-gradient(150deg, rgba(52,52,86,0.72), rgba(24,24,42,0.60));
+    background: linear-gradient(150deg, rgba(70,72,120,0.42), rgba(32,32,58,0.34));
     backdrop-filter: blur(40px) saturate(220%);
     -webkit-backdrop-filter: blur(40px) saturate(220%);
-    border: 1px solid rgba(255,255,255,0.18);
-    box-shadow: 20px 20px 40px rgba(0,0,0,0.55), -8px -8px 22px rgba(255,255,255,0.03),
-      0 0 0 1px rgba(13,186,204,0.08), 0 12px 28px -14px rgba(159,127,224,0.25),
-      inset 0 1px 0 rgba(255,255,255,0.14);
+    border: 1px solid rgba(255,255,255,0.24);
+    box-shadow: 0 24px 48px rgba(0,0,0,0.6),
+      0 0 0 1px rgba(13,186,204,0.20), 0 0 40px -8px rgba(13,186,204,0.18),
+      0 16px 36px -14px rgba(159,127,224,0.5),
+      inset 0 1px 0 rgba(255,255,255,0.22), inset 0 -1px 0 rgba(0,0,0,0.3);
   }
   .dark .frost-card::before {
-    background: linear-gradient(115deg, rgba(255,255,255,0.10) 0%, rgba(255,255,255,0.03) 22%, rgba(255,255,255,0) 45%);
+    background: linear-gradient(115deg, rgba(255,255,255,0.20) 0%, rgba(255,255,255,0.05) 22%, rgba(255,255,255,0) 45%);
   }
   .frost-inset {
     position: relative;
@@ -177,11 +178,11 @@ const fincheckStyles = `
     box-shadow: inset 7px 7px 16px rgba(48,49,80,0.16), inset -7px -7px 16px rgba(255,255,255,0.95);
   }
   .dark .frost-inset {
-    background: rgba(255,255,255,0.045);
+    background: rgba(255,255,255,0.06);
     backdrop-filter: blur(14px) saturate(180%);
     -webkit-backdrop-filter: blur(14px) saturate(180%);
-    border: 1px solid rgba(255,255,255,0.12);
-    box-shadow: inset 7px 7px 16px rgba(0,0,0,0.45), inset -7px -7px 16px rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.20);
+    box-shadow: inset 7px 7px 16px rgba(0,0,0,0.5), inset -7px -7px 16px rgba(255,255,255,0.08);
   }
   .frost-pill {
     background: rgba(255,255,255,0.55);
@@ -201,11 +202,12 @@ const fincheckStyles = `
      so the backdrop-blur on cards has real color/contrast to blur (this is what makes the glass
      effect actually read as "glass" instead of a flat translucent panel). */
   .frost-blob {
-    position: absolute;
+    position: fixed;
     border-radius: 9999px;
-    filter: blur(50px);
+    filter: blur(60px);
     pointer-events: none;
     opacity: 0.9;
+    z-index: 0;
   }
 
 
@@ -1140,8 +1142,8 @@ function SidebarDesktop({ screen, setScreen, sidebarCollapsed, toggleSidebar, th
       }}
     >
       {/* ambient glass glow blobs — decorative only */}
-      <div className={`pointer-events-none absolute -top-16 -left-10 w-56 h-56 rounded-full blur-3xl ${isDark ? 'bg-turquoise/25' : 'bg-turquoise-light/60'}`} />
-      <div className={`pointer-events-none absolute bottom-24 -right-14 w-56 h-56 rounded-full blur-3xl ${isDark ? 'bg-lavender/25' : 'bg-lavender-light/60'}`} />
+      <div className={`pointer-events-none absolute -top-16 -left-10 w-56 h-56 rounded-full blur-3xl ${isDark ? 'bg-turquoise/25' : 'bg-turquoise/45'}`} />
+      <div className={`pointer-events-none absolute bottom-24 -right-14 w-56 h-56 rounded-full blur-3xl ${isDark ? 'bg-lavender/25' : 'bg-lavender/45'}`} />
       <div className={`pointer-events-none absolute inset-y-0 right-0 w-px bg-gradient-to-b from-transparent to-transparent ${isDark ? 'via-white/10' : 'via-white/70'}`} />
 
       <div className={`relative flex items-center mb-8 ${sidebarCollapsed ? 'justify-center px-0' : 'gap-2 px-1'}`}>
@@ -1233,7 +1235,7 @@ function HeaderDesktop({ onAddClick, displayName, avatarUrl, theme, toggleTheme,
       }}
     >
       <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/70 to-transparent dark:via-white/15" />
-      <div className="pointer-events-none absolute -top-10 right-24 w-56 h-32 rounded-full bg-turquoise-light/45 dark:bg-turquoise/20 blur-2xl" />
+      <div className="pointer-events-none absolute -top-10 right-24 w-56 h-32 rounded-full bg-turquoise/35 dark:bg-turquoise/20 blur-2xl" />
       <div className="flex items-center gap-2 bg-white/50 dark:bg-white/[0.06] backdrop-blur rounded-full px-4 py-2.5 w-72 border border-white/60 dark:border-white/10 relative z-10">
         <Search size={16} className="text-steel dark:text-light-grey" />
         <input
@@ -2863,8 +2865,8 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
             {spendingPoolCard}
           </div>
           <div className="frost-card mt-6 rounded-[2.5rem] min-h-[60vh] px-5 pt-6 pb-6 overflow-hidden">
-            <div className="frost-blob z-0 w-56 h-56 bg-turquoise-light/70 dark:bg-turquoise/22 -top-10 -right-10" />
-            <div className="frost-blob z-0 w-48 h-48 bg-cotton-candy-light/70 dark:bg-cotton-candy/22 bottom-24 -left-10" />
+            <div className="pointer-events-none absolute rounded-full blur-3xl opacity-90 w-56 h-56 bg-turquoise/35 dark:bg-turquoise/50 -top-10 -right-10" />
+            <div className="pointer-events-none absolute rounded-full blur-3xl opacity-90 w-48 h-48 bg-cotton-candy/35 dark:bg-cotton-candy/50 bottom-24 -left-10" />
             <div className="relative flex items-center justify-between mb-4">
               <h2 className="text-blueberry dark:text-white font-extrabold text-lg">Ngân sách tháng này</h2>
             </div>
@@ -2989,8 +2991,8 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
 
       {/* Desktop version */}
       <div className="hidden md:block relative">
-        <div className="frost-blob z-0 w-96 h-96 bg-baby-blue-light/70 dark:bg-baby-blue/22 -top-10 right-0" />
-        <div className="frost-blob z-0 w-80 h-80 bg-lavender-light/70 dark:bg-lavender/22 top-64 -left-10" />
+        <div className="frost-blob w-[30rem] h-[30rem] bg-baby-blue/35 dark:bg-baby-blue/50 top-24 right-12" />
+        <div className="frost-blob w-[26rem] h-[26rem] bg-lavender/35 dark:bg-lavender/50 bottom-16 left-56" />
         <div className="relative flex items-center justify-between mb-6">
           <h1 className="text-blueberry dark:text-white text-2xl font-extrabold">Dashboard</h1>
           <button onClick={() => setShowAddWidget(true)} className="bg-gradient-primary text-white rounded-full pl-3 pr-4 py-2 text-sm font-bold flex items-center gap-1.5 shadow-md shadow-turquoise/30">
@@ -3481,8 +3483,8 @@ function Funds({ setScreen, categories, transactions, onOpenFund, reload, onAddC
 
       {/* Desktop version */}
       <div className="hidden md:block relative">
-        <div className="frost-blob z-0 w-96 h-96 bg-turquoise-light/70 dark:bg-turquoise/22 -top-10 right-10" />
-        <div className="frost-blob z-0 w-80 h-80 bg-lavender-light/70 dark:bg-lavender/22 top-96 -left-10" />
+        <div className="frost-blob w-[30rem] h-[30rem] bg-turquoise/35 dark:bg-turquoise/50 top-24 right-12" />
+        <div className="frost-blob w-[26rem] h-[26rem] bg-lavender/35 dark:bg-lavender/50 bottom-16 left-56" />
         <h1 className="relative text-blueberry dark:text-white text-2xl font-extrabold mb-6">Quản lý quỹ</h1>
 
         <div className="relative grid grid-cols-4 gap-4 mb-6">
@@ -4174,8 +4176,8 @@ function Accounts({ setScreen, accounts, transactions, onOpenAccount, reload, on
       </div>
 
       <div className="hidden md:block relative">
-        <div className="frost-blob z-0 w-96 h-96 bg-baby-blue-light/70 dark:bg-baby-blue/22 -top-10 right-10" />
-        <div className="frost-blob z-0 w-80 h-80 bg-cotton-candy-light/70 dark:bg-cotton-candy/22 top-96 -left-10" />
+        <div className="frost-blob w-[30rem] h-[30rem] bg-baby-blue/35 dark:bg-baby-blue/50 top-24 right-12" />
+        <div className="frost-blob w-[26rem] h-[26rem] bg-cotton-candy/35 dark:bg-cotton-candy/50 bottom-16 left-56" />
         <div className="relative flex items-center justify-between mb-2">
           <div>
             <h1 className="text-blueberry dark:text-white text-2xl font-extrabold">Quản lý ví</h1>
@@ -4481,8 +4483,8 @@ function Goals({ setScreen, goals, loadingGoals, reload, softDelete, onAddClick,
       </div>
 
       <div className="hidden md:block relative" onClick={() => { setOpenMenuId(null); setShowFilterMenu(false); setShowSortMenu(false); }}>
-        <div className="frost-blob z-0 w-96 h-96 bg-lavender-light/70 dark:bg-lavender/22 -top-10 right-10" />
-        <div className="frost-blob z-0 w-80 h-80 bg-turquoise-light/70 dark:bg-turquoise/22 top-96 -left-10" />
+        <div className="frost-blob w-[30rem] h-[30rem] bg-lavender/35 dark:bg-lavender/50 top-24 right-12" />
+        <div className="frost-blob w-[26rem] h-[26rem] bg-turquoise/35 dark:bg-turquoise/50 bottom-16 left-56" />
         <h1 className="relative text-blueberry dark:text-white text-2xl font-extrabold mb-6">Mục tiêu</h1>
 
         <div className="relative grid grid-cols-4 gap-4 mb-6">
@@ -5814,8 +5816,8 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
       </div>
 
       <div className="hidden md:block relative">
-        <div className="frost-blob z-0 w-96 h-96 bg-baby-blue-light/70 dark:bg-baby-blue/22 -top-10 right-10" />
-        <div className="frost-blob z-0 w-80 h-80 bg-lavender-light/70 dark:bg-lavender/22 top-[600px] -left-10" />
+        <div className="frost-blob w-[30rem] h-[30rem] bg-baby-blue/35 dark:bg-baby-blue/50 top-24 right-12" />
+        <div className="frost-blob w-[26rem] h-[26rem] bg-lavender/35 dark:bg-lavender/50 bottom-16 left-56" />
         <div className="relative flex items-center justify-between mb-6 flex-wrap gap-4">
           <h1 className="text-blueberry dark:text-white text-2xl font-extrabold">Báo cáo &amp; Phân tích</h1>
           <div className="flex items-center gap-2 flex-wrap">
