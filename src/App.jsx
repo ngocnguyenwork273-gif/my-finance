@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import ReactCrop from 'react-image-crop';
 import 'react-image-crop/dist/ReactCrop.css';
+import DateField from './DateField';
 
 /* ==============================================================================
    02. CUSTOM STYLES (Fincheck palette + ẩn scrollbar)
@@ -228,6 +229,112 @@ const fincheckStyles = `
       display: none;
     }
   }
+
+  /* ==========================================================================
+     vanilla-calendar-pro — skin theo bộ mã màu Fincheck + liquid glass
+     Chỉ import layout.css + themes/light.css (xem DateField.jsx) để có sẵn
+     các khai báo var(--vc-*), sau đó override toàn bộ giá trị màu tại đây.
+     Nền calendar để trong suốt vì panel bọc ngoài (.glass-surface /
+     .glass-surface-dark) đã lo phần kính mờ + blur + border + shadow.
+     ========================================================================== */
+  .vc-glass .vc {
+    --vc-bg: transparent;
+    --vc-color: var(--blueberry);
+    --vc-focus-outline-color: var(--turquoise);
+
+    --vc-header-color: var(--blueberry);
+    --vc-title-color: var(--blueberry);
+    --vc-title-color-hover: var(--turquoise);
+    --vc-title-color-disabled: var(--light-grey);
+
+    --vc-months-years-bg: transparent;
+    --vc-months-years-color: var(--steel);
+    --vc-months-years-bg-hover: rgba(13, 186, 204, 0.12);
+    --vc-months-years-color-disabled: var(--light-grey);
+    --vc-months-years-bg-selected: var(--turquoise);
+    --vc-months-years-color-selected: var(--white);
+
+    --vc-week-numbers-title-color: var(--steel);
+    --vc-week-number-color: var(--steel);
+    --vc-week-number-color-hover: var(--blueberry);
+    --vc-week-day-color: var(--steel);
+    --vc-week-day-color-hover: var(--blueberry);
+    --vc-week-day-off-color: var(--cotton-candy);
+    --vc-week-day-off-color-hover: var(--cotton-candy);
+
+    --vc-date-bg: transparent;
+    --vc-date-color: var(--blueberry);
+    --vc-date-bg-hover: rgba(13, 186, 204, 0.12);
+    --vc-date-hover-bg: rgba(13, 186, 204, 0.12);
+    --vc-date-hover-edge-bg: rgba(13, 186, 204, 0.22);
+    --vc-date-disabled-color: var(--light-grey);
+    --vc-date-outside-color: var(--light-grey);
+    --vc-date-today-bg: rgba(13, 186, 204, 0.12);
+    --vc-date-today-color: var(--turquoise);
+    --vc-date-today-outside-color: var(--steel);
+    --vc-date-selected-bg: var(--turquoise);
+    --vc-date-selected-color: var(--white);
+    --vc-date-selected-outside-bg: var(--turquoise-light);
+    --vc-date-selected-outside-color: var(--white);
+
+    --vc-date-weekend-color: var(--cotton-candy);
+    --vc-date-weekend-bg-hover: rgba(241, 138, 181, 0.12);
+    --vc-date-weekend-hover-bg: rgba(241, 138, 181, 0.12);
+    --vc-date-weekend-hover-edge-bg: rgba(241, 138, 181, 0.22);
+    --vc-date-weekend-disabled-color: var(--light-grey);
+    --vc-date-weekend-today-color: var(--cotton-candy);
+    --vc-date-weekend-today-disabled-color: var(--light-grey);
+    --vc-date-weekend-outside-bg: transparent;
+    --vc-date-weekend-outside-color: var(--light-grey);
+    --vc-date-weekend-outside-bg-hover: rgba(241, 138, 181, 0.08);
+    --vc-date-weekend-outside-hover-bg: rgba(241, 138, 181, 0.08);
+    --vc-date-weekend-today-outside-color: var(--light-grey);
+    --vc-date-weekend-disabled-outside-color: var(--light-grey);
+    --vc-date-weekend-selected-bg: var(--cotton-candy);
+    --vc-date-weekend-selected-color: var(--white);
+  }
+  .dark .vc-glass .vc {
+    --vc-color: var(--text-primary);
+    --vc-header-color: var(--text-primary);
+    --vc-title-color: var(--text-primary);
+    --vc-title-color-hover: var(--turquoise);
+    --vc-title-color-disabled: var(--text-disabled);
+
+    --vc-months-years-color: var(--text-secondary);
+    --vc-months-years-bg-hover: rgba(13, 186, 204, 0.18);
+    --vc-months-years-color-disabled: var(--text-disabled);
+
+    --vc-week-numbers-title-color: var(--text-secondary);
+    --vc-week-number-color: var(--text-secondary);
+    --vc-week-number-color-hover: var(--text-primary);
+    --vc-week-day-color: var(--text-secondary);
+    --vc-week-day-color-hover: var(--text-primary);
+
+    --vc-date-color: var(--text-primary);
+    --vc-date-bg-hover: rgba(255, 255, 255, 0.08);
+    --vc-date-hover-bg: rgba(255, 255, 255, 0.08);
+    --vc-date-hover-edge-bg: rgba(255, 255, 255, 0.14);
+    --vc-date-disabled-color: var(--text-disabled);
+    --vc-date-outside-color: var(--text-disabled);
+    --vc-date-today-bg: rgba(13, 186, 204, 0.18);
+    --vc-date-today-outside-color: var(--text-tertiary);
+
+    --vc-date-weekend-bg-hover: rgba(241, 138, 181, 0.16);
+    --vc-date-weekend-hover-bg: rgba(241, 138, 181, 0.16);
+    --vc-date-weekend-hover-edge-bg: rgba(241, 138, 181, 0.24);
+    --vc-date-weekend-disabled-color: var(--text-disabled);
+    --vc-date-weekend-today-disabled-color: var(--text-disabled);
+    --vc-date-weekend-outside-color: var(--text-disabled);
+    --vc-date-weekend-outside-bg-hover: rgba(241, 138, 181, 0.1);
+    --vc-date-weekend-outside-hover-bg: rgba(241, 138, 181, 0.1);
+    --vc-date-weekend-today-outside-color: var(--text-disabled);
+    --vc-date-weekend-disabled-outside-color: var(--text-disabled);
+  }
+  /* Bo góc + font đồng bộ với phần còn lại của app */
+  .vc-glass .vc { font-family: 'Nunito', sans-serif; }
+  .vc-glass .vc-date__btn,
+  .vc-glass .vc-months__month,
+  .vc-glass .vc-years__year { border-radius: 9999px; }
 `;
 
 /* ==============================================================================
@@ -532,6 +639,23 @@ function firstProfitCreditDate(depositDate) {
   return d;
 }
 
+// Ngày mà 1 khoản NẠP QUỸ (allocation) bắt đầu được cộng vào "gốc sinh lời"
+// (interestBase) để tính lãi hàng ngày — áp dụng đúng quy tắc "kỳ nhận lợi
+// nhuận đầu tiên" ở trên cho MỌI lần nạp (không chỉ lần nạp đầu tiên của quỹ):
+// = firstProfitCreditDate(ngày nạp) - 1 ngày (vì lợi nhuận của "ngày sinh lời X"
+// luôn được hiển thị vào ngày X+1, nên gốc phải sẵn sàng từ ngày X = creditDate-1
+// để lợi nhuận đầu tiên hiển thị đúng vào creditDate).
+// => Nạp T2-T5: gốc bắt đầu sinh lời từ hôm sau (nạp +1 ngày).
+// => Nạp T6/T7/CN: gốc bắt đầu sinh lời từ đúng Thứ 2 tuần kế tiếp.
+// Tiền nạp vẫn được cộng vào SỐ DƯ (balance) ngay lập tức để hiển thị đúng —
+// chỉ riêng phần TÍNH LÃI là bị delay theo quy tắc này.
+function allocationInterestEligibleDate(depositDate) {
+  const creditDate = firstProfitCreditDate(depositDate);
+  const eligible = new Date(creditDate);
+  eligible.setDate(eligible.getDate() - 1);
+  return eligible;
+}
+
 // FIX: xác định giao dịch "nạp ban đầu" của 1 quỹ dựa vào cờ is_initial (được set khi
 // tạo quỹ hoặc khi sửa "Số tiền nạp ban đầu" trong form chỉnh sửa quỹ), KHÔNG suy luận
 // bằng "giao dịch allocation có ngày sớm nhất" như trước — vì cách cũ có thể nổi bật/ghi đè
@@ -569,19 +693,34 @@ function fundBalanceWithProfit(category, transactions) {
   const today = toDay(new Date());
   const yesterday = new Date(today); yesterday.setDate(yesterday.getDate() - 1);
 
+  // changesByDay: tổng số dư THỰC (hiển thị) — nạp/rút cộng trừ ngay theo ngày giao dịch.
+  // eligibleChangesByDay: phần "gốc sinh lời" dùng để TÍNH LÃI — khoản nạp chỉ được cộng
+  // vào gốc sinh lời kể từ allocationInterestEligibleDate() (delay theo quy tắc kỳ đầu),
+  // khoản rút thì trừ khỏi gốc sinh lời ngay lập tức (rút rồi thì không còn sinh lời nữa).
   const changesByDay = {};
+  const eligibleChangesByDay = {};
   history.forEach((t) => {
     const key = toDay(t.date || t.created_at).getTime();
     const delta = t.type === 'allocation' ? Number(t.amount) : -Number(t.amount);
     changesByDay[key] = (changesByDay[key] || 0) + delta;
+    const eligibleKey = t.type === 'allocation'
+      ? toDay(allocationInterestEligibleDate(t.date || t.created_at)).getTime()
+      : key;
+    eligibleChangesByDay[eligibleKey] = (eligibleChangesByDay[eligibleKey] || 0) + delta;
   });
 
   let balance = 0;
+  let interestBase = 0;
   const cursor = new Date(startDate);
   while (cursor <= yesterday) {
     balance += changesByDay[cursor.getTime()] || 0;
-    // Lợi nhuận = Số dư * Tỷ suất/365, làm tròn xuống
-    if (balance > 0 && dailyRate > 0) balance += Math.floor(balance * dailyRate);
+    interestBase += eligibleChangesByDay[cursor.getTime()] || 0;
+    // Lợi nhuận = Gốc sinh lời * Tỷ suất/365, làm tròn xuống
+    if (interestBase > 0 && dailyRate > 0) {
+      const profit = Math.floor(interestBase * dailyRate);
+      balance += profit;
+      interestBase += profit;
+    }
     cursor.setDate(cursor.getDate() + 1);
   }
   balance += changesByDay[today.getTime()] || 0;
@@ -602,17 +741,28 @@ function fundBalanceAtDate(category, transactions, cutoffDate) {
   const endDate = toDay(cutoffDate); // inclusive? we process until endDate (including that day)
 
   const changesByDay = {};
+  const eligibleChangesByDay = {};
   history.forEach((t) => {
     const key = toDay(t.date || t.created_at).getTime();
     const delta = t.type === 'allocation' ? Number(t.amount) : -Number(t.amount);
     changesByDay[key] = (changesByDay[key] || 0) + delta;
+    const eligibleKey = t.type === 'allocation'
+      ? toDay(allocationInterestEligibleDate(t.date || t.created_at)).getTime()
+      : key;
+    eligibleChangesByDay[eligibleKey] = (eligibleChangesByDay[eligibleKey] || 0) + delta;
   });
 
   let balance = 0;
+  let interestBase = 0;
   const cursor = new Date(startDate);
   while (cursor <= endDate) {
     balance += changesByDay[cursor.getTime()] || 0;
-    if (balance > 0 && dailyRate > 0) balance += Math.floor(balance * dailyRate);
+    interestBase += eligibleChangesByDay[cursor.getTime()] || 0;
+    if (interestBase > 0 && dailyRate > 0) {
+      const profit = Math.floor(interestBase * dailyRate);
+      balance += profit;
+      interestBase += profit;
+    }
     cursor.setDate(cursor.getDate() + 1);
   }
   return balance;
@@ -647,20 +797,34 @@ function fundTransactionsWithBalance(category, transactions) {
   const yesterday = new Date(today); yesterday.setDate(yesterday.getDate() - 1);
 
   const txsByDay = {};
+  // Gốc sinh lời được cộng vào theo ngày ĐỦ ĐIỀU KIỆN (quy tắc kỳ đầu), không phải
+  // ngày giao dịch thực tế — xem allocationInterestEligibleDate()
+  const eligibleChangesByDay = {};
   txs.forEach((t) => {
     const key = toDay(t.date || t.created_at).getTime();
     (txsByDay[key] = txsByDay[key] || []).push(t);
+    const delta = t.type === 'allocation' ? Number(t.amount) : -Number(t.amount);
+    const eligibleKey = t.type === 'allocation'
+      ? toDay(allocationInterestEligibleDate(t.date || t.created_at)).getTime()
+      : key;
+    eligibleChangesByDay[eligibleKey] = (eligibleChangesByDay[eligibleKey] || 0) + delta;
   });
 
   const result = [];
   let balance = 0;
+  let interestBase = 0;
   const cursor = new Date(startDate);
   while (cursor <= yesterday) {
     (txsByDay[cursor.getTime()] || []).forEach((t) => {
       balance += t.type === 'allocation' ? Number(t.amount) : -Number(t.amount);
       result.push({ ...t, balanceAfter: balance });
     });
-    if (balance > 0 && dailyRate > 0) balance += Math.floor(balance * dailyRate);
+    interestBase += eligibleChangesByDay[cursor.getTime()] || 0;
+    if (interestBase > 0 && dailyRate > 0) {
+      const profit = Math.floor(interestBase * dailyRate);
+      balance += profit;
+      interestBase += profit;
+    }
     cursor.setDate(cursor.getDate() + 1);
   }
   (txsByDay[today.getTime()] || []).forEach((t) => {
@@ -685,21 +849,29 @@ function fundDailyProfitHistory(category, transactions) {
   const yesterday = new Date(today); yesterday.setDate(yesterday.getDate() - 1);
 
   const changesByDay = {};
+  const eligibleChangesByDay = {};
   history.forEach((t) => {
     const key = toDay(t.date || t.created_at).getTime();
     const delta = t.type === 'allocation' ? Number(t.amount) : -Number(t.amount);
     changesByDay[key] = (changesByDay[key] || 0) + delta;
+    const eligibleKey = t.type === 'allocation'
+      ? toDay(allocationInterestEligibleDate(t.date || t.created_at)).getTime()
+      : key;
+    eligibleChangesByDay[eligibleKey] = (eligibleChangesByDay[eligibleKey] || 0) + delta;
   });
 
   const days = [];
   let balance = 0;
+  let interestBase = 0;
   const cursor = new Date(startDate);
   while (cursor <= yesterday) {
     balance += changesByDay[cursor.getTime()] || 0;
+    interestBase += eligibleChangesByDay[cursor.getTime()] || 0;
     let profit = 0;
-    if (balance > 0 && dailyRate > 0) {
-      profit = Math.floor(balance * dailyRate);
+    if (interestBase > 0 && dailyRate > 0) {
+      profit = Math.floor(interestBase * dailyRate);
       balance += profit;
+      interestBase += profit;
     }
     if (profit > 0) days.push({ date: new Date(cursor), profit, balance });
     cursor.setDate(cursor.getDate() + 1);
@@ -2247,7 +2419,7 @@ function EditFundForm({ category, onClose, onSaved, isNew, initialAmount, firstA
         {(isNew || (firstAllocation && Number(form.initial_allocation) > 0)) && (
           <div className="mb-3">
             <label className="text-xs text-steel dark:text-light-grey font-semibold block mb-1">Ngày nạp quỹ lần đầu</label>
-            <input type="date" value={form.initial_allocation_date} max={new Date().toISOString().slice(0, 10)} onChange={(e) => setForm({ ...form, initial_allocation_date: e.target.value })} className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none dark:text-white text-blueberry [color-scheme:light] dark:[color-scheme:dark]" />
+            <DateField value={form.initial_allocation_date} max={new Date().toISOString().slice(0, 10)} onChange={(v) => setForm({ ...form, initial_allocation_date: v })} className="w-full justify-between bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm dark:text-white text-blueberry" />
           </div>
         )}
         <MoneyInput value={form.target_amount} onChange={(v) => setForm({ ...form, target_amount: v })} placeholder="Số tiền mục tiêu (không bắt buộc)" className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none mb-3 dark:text-white dark:placeholder:text-light-grey text-blueberry" />
@@ -2327,7 +2499,7 @@ function QuickAllocateWithdrawForm({ category, mode, onClose, onSaved }) {
           <button onClick={onClose}><X size={18} className="text-steel dark:text-light-grey" /></button>
         </div>
         <MoneyInput value={amount} onChange={setAmount} placeholder="Số tiền" className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-lg font-bold outline-none mb-3 dark:text-white dark:placeholder:text-light-grey text-blueberry" />
-        <input type="date" value={date} onChange={(e) => setDate(e.target.value)} max={new Date().toISOString().slice(0, 10)} className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none mb-3 dark:text-white text-blueberry" />
+        <DateField value={date} onChange={setDate} max={new Date().toISOString().slice(0, 10)} className="w-full justify-between bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm mb-3 dark:text-white text-blueberry" />
         <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Ghi chú (không bắt buộc)" className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none mb-3 dark:text-white dark:placeholder:text-light-grey text-blueberry" />
 
         {mode === 'allocation' && (
@@ -2393,7 +2565,7 @@ function QuickAdjustBalanceForm({ account, currentBalance, onClose, onSaved }) {
         <p className="text-xs text-steel dark:text-light-grey mb-3">{mode ? 'Nhập số tiền muốn tăng/giảm.' : 'Không chọn gì cả — nhập thẳng số dư mới, hệ thống tự tính chênh lệch.'}</p>
         <MoneyInput value={amount} onChange={setAmount} placeholder={mode ? 'Số tiền' : 'Số dư mới'} className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-lg font-bold outline-none mb-3 dark:text-white dark:placeholder:text-light-grey text-blueberry" />
         <p className="text-sm text-blueberry dark:text-white font-semibold mb-2">Ngày</p>
-        <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none mb-3 dark:text-white dark:placeholder:text-light-grey text-blueberry" />
+        <DateField value={date} onChange={setDate} className="w-full justify-between bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm mb-3 dark:text-white text-blueberry" />
         <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Ghi chú (không bắt buộc)" className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none mb-4 dark:text-white dark:placeholder:text-light-grey text-blueberry" />
         <button onClick={handleSave} disabled={saving} className={`w-full text-white rounded-xl py-3 font-bold flex items-center justify-center gap-2 disabled:opacity-60 shadow-md ${mode === 'decrease' ? 'bg-cotton-candy shadow-cotton-candy/30' : mode === 'increase' ? 'bg-gradient-primary shadow-turquoise/30' : 'bg-blueberry shadow-blueberry/30'}`}>
           {saving ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />} Lưu cập nhật
@@ -2465,7 +2637,7 @@ function EditGoalForm({ goal, onClose, onSaved, isNew, softDelete }) {
         <MoneyInput value={form.current_amount} onChange={(v) => setForm({ ...form, current_amount: v })} placeholder="Số tiền hiện có" className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none mb-3 dark:text-white dark:placeholder:text-light-grey text-blueberry" />
 
         <p className="text-sm text-blueberry dark:text-white font-semibold mb-2">Ngày bắt đầu</p>
-        <input type="date" value={form.start_date} onChange={(e) => setForm({ ...form, start_date: e.target.value })} className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none mb-3 dark:text-white dark:placeholder:text-light-grey text-blueberry" />
+        <DateField value={form.start_date} onChange={(v) => setForm({ ...form, start_date: v })} className="w-full justify-between bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm mb-3 dark:text-white text-blueberry" />
 
         <textarea value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} placeholder="Ghi chú (không bắt buộc)" rows={2} className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none mb-3 resize-none dark:text-white dark:placeholder:text-light-grey text-blueberry" />
 
@@ -2476,7 +2648,7 @@ function EditGoalForm({ goal, onClose, onSaved, isNew, softDelete }) {
         {form.isDone && (
           <>
             <p className="text-sm text-blueberry dark:text-white font-semibold mb-2">Ngày hoàn thành</p>
-            <input type="date" value={form.end_date} onChange={(e) => setForm({ ...form, end_date: e.target.value })} className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none mb-3 dark:text-white dark:placeholder:text-light-grey text-blueberry" />
+            <DateField value={form.end_date} onChange={(v) => setForm({ ...form, end_date: v })} className="w-full justify-between bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm mb-3 dark:text-white text-blueberry" />
             <MoneyInput value={form.actual_amount} onChange={(v) => setForm({ ...form, actual_amount: v })} placeholder="Số tiền thực tế khi hoàn thành (không bắt buộc)" className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none mb-3 dark:text-white dark:placeholder:text-light-grey text-blueberry" />
           </>
         )}
@@ -3986,9 +4158,9 @@ function FundDetail({ category, transactions, categories, accounts, onBack, relo
           </div>
           <div className="flex flex-wrap items-center gap-2 mb-4">
             <div className="flex items-center gap-2 bg-white dark:bg-[#2a2a44] rounded-full px-3 py-1.5 shadow-soft">
-              <input type="date" value={historyDateFrom} onChange={(e) => setHistoryDateFrom(e.target.value)} className="bg-transparent text-xs font-semibold outline-none text-blueberry dark:text-white [color-scheme:light] dark:[color-scheme:dark]" />
+              <DateField value={historyDateFrom} onChange={setHistoryDateFrom} showIcon={false} clearable={false} className="bg-transparent text-xs font-semibold text-blueberry dark:text-white" />
               <span className="text-steel dark:text-light-grey text-xs">→</span>
-              <input type="date" value={historyDateTo} onChange={(e) => setHistoryDateTo(e.target.value)} className="bg-transparent text-xs font-semibold outline-none text-blueberry dark:text-white [color-scheme:light] dark:[color-scheme:dark]" />
+              <DateField value={historyDateTo} onChange={setHistoryDateTo} showIcon={false} clearable={false} align="right" className="bg-transparent text-xs font-semibold text-blueberry dark:text-white" />
             </div>
             {hasHistoryDateFilter && (
               <button onClick={() => { setHistoryDateFrom(''); setHistoryDateTo(''); }} className="text-xs font-bold text-steel dark:text-light-grey underline">Xoá lọc ngày</button>
@@ -4046,7 +4218,10 @@ function FundDetail({ category, transactions, categories, accounts, onBack, relo
                           {item.balanceAfter !== undefined && <p className="text-steel dark:text-light-grey text-xs mt-0.5">Số dư: {formatMoney(item.balanceAfter)}</p>}
                         </div>
                         {!isProfit && (
-                          <button onClick={() => setEditingTx(item)} className="w-7 h-7 rounded-full hover:bg-ice-cream dark:hover:bg-night-sky/30 flex items-center justify-center text-steel dark:text-light-grey flex-shrink-0">
+                          // Khoản "Nạp quỹ lần đầu" (isInitial) bấm bút chì -> mở popup chỉnh sửa
+                          // THÔNG TIN QUỸ (vì số tiền ban đầu được sửa chung trong form đó);
+                          // các khoản nạp/rút khác -> mở form sửa GIAO DỊCH bình thường.
+                          <button onClick={() => (isInitial ? setShowEdit(true) : setEditingTx(item))} className="w-7 h-7 rounded-full hover:bg-ice-cream dark:hover:bg-night-sky/30 flex items-center justify-center text-steel dark:text-light-grey flex-shrink-0">
                             <Pencil size={14} />
                           </button>
                         )}
@@ -4138,9 +4313,9 @@ function FundDetail({ category, transactions, categories, accounts, onBack, relo
               </div>
               <div className="flex flex-wrap items-center gap-2 mb-4">
                 <div className="flex items-center gap-2 frost-inset rounded-full px-3 py-1.5">
-                  <input type="date" value={historyDateFrom} onChange={(e) => setHistoryDateFrom(e.target.value)} className="bg-transparent text-xs font-semibold outline-none text-blueberry dark:text-white [color-scheme:light] dark:[color-scheme:dark]" />
+                  <DateField value={historyDateFrom} onChange={setHistoryDateFrom} showIcon={false} clearable={false} className="bg-transparent text-xs font-semibold text-blueberry dark:text-white" />
                   <span className="text-steel dark:text-light-grey text-xs">→</span>
-                  <input type="date" value={historyDateTo} onChange={(e) => setHistoryDateTo(e.target.value)} className="bg-transparent text-xs font-semibold outline-none text-blueberry dark:text-white [color-scheme:light] dark:[color-scheme:dark]" />
+                  <DateField value={historyDateTo} onChange={setHistoryDateTo} showIcon={false} clearable={false} align="right" className="bg-transparent text-xs font-semibold text-blueberry dark:text-white" />
                 </div>
                 {hasHistoryDateFilter && (
                   <button onClick={() => { setHistoryDateFrom(''); setHistoryDateTo(''); }} className="text-xs font-bold text-steel dark:text-light-grey underline">Xoá lọc ngày</button>
@@ -4201,7 +4376,8 @@ function FundDetail({ category, transactions, categories, accounts, onBack, relo
                         </div>
                         <p className={`font-bold text-sm flex-shrink-0 ${item.type === 'expense' ? 'text-cotton-candy' : 'text-turquoise'}`}>{item.type === 'expense' ? '-' : '+'}{formatMoney(item.amount)}</p>
                         {!item.isProfit && (
-                          <button onClick={() => setEditingTx(item)} className="w-7 h-7 rounded-full hover:bg-ice-cream dark:hover:bg-night-sky/30 flex items-center justify-center text-steel dark:text-light-grey flex-shrink-0">
+                          // Xem giải thích ở bản mobile: khoản nạp ban đầu -> mở sửa thông tin quỹ
+                          <button onClick={() => (isInitial ? setShowEdit(true) : setEditingTx(item))} className="w-7 h-7 rounded-full hover:bg-ice-cream dark:hover:bg-night-sky/30 flex items-center justify-center text-steel dark:text-light-grey flex-shrink-0">
                             <Pencil size={14} />
                           </button>
                         )}
@@ -5577,9 +5753,9 @@ function TxLedgerModal({ title, txs, categories, accounts, allTx, spendingPoolBy
 
         <div className="flex flex-wrap items-center gap-2 mb-4 flex-shrink-0">
           <div className="flex items-center gap-2 frost-inset rounded-full px-3 py-1.5">
-            <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="bg-transparent text-xs font-semibold outline-none text-blueberry dark:text-white [color-scheme:light] dark:[color-scheme:dark]" />
+            <DateField value={dateFrom} onChange={setDateFrom} showIcon={false} clearable={false} className="bg-transparent text-xs font-semibold text-blueberry dark:text-white" />
             <span className="text-steel dark:text-light-grey text-xs">→</span>
-            <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="bg-transparent text-xs font-semibold outline-none text-blueberry dark:text-white [color-scheme:light] dark:[color-scheme:dark]" />
+            <DateField value={dateTo} onChange={setDateTo} showIcon={false} clearable={false} align="right" className="bg-transparent text-xs font-semibold text-blueberry dark:text-white" />
           </div>
           <select value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value)} className="frost-inset rounded-full text-xs font-semibold px-3 py-2 outline-none text-blueberry dark:text-white [color-scheme:light] dark:[color-scheme:dark]">
             <option value="all">Tất cả nguồn</option>
@@ -6084,8 +6260,8 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
               <option value="year">Năm</option>
               <option value="custom">Tùy chỉnh</option>
             </select>
-            {timeType === 'day' && <input type="date" value={selectedDay} onChange={(e) => setSelectedDay(e.target.value)} className="w-full mt-2 bg-white/20 backdrop-blur rounded-xl px-4 py-2 text-sm text-white outline-none" />}
-            {timeType === 'week' && <input type="date" value={selectedWeek} onChange={(e) => setSelectedWeek(e.target.value)} className="w-full mt-2 bg-white/20 backdrop-blur rounded-xl px-4 py-2 text-sm text-white outline-none" />}
+            {timeType === 'day' && <DateField value={selectedDay} onChange={setSelectedDay} className="w-full justify-between mt-2 bg-white/20 backdrop-blur rounded-xl px-4 py-2 text-sm text-white" />}
+            {timeType === 'week' && <DateField value={selectedWeek} onChange={setSelectedWeek} className="w-full justify-between mt-2 bg-white/20 backdrop-blur rounded-xl px-4 py-2 text-sm text-white" />}
             {timeType === 'month' && (
               <div className="flex gap-2 mt-2">
                 <select value={selectedMonth} onChange={(e) => setSelectedMonth(Number(e.target.value))} className="flex-1 bg-white/20 backdrop-blur rounded-xl px-4 py-2 text-sm text-white outline-none [color-scheme:light] dark:[color-scheme:dark]">
@@ -6115,8 +6291,8 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
             )}
             {timeType === 'custom' && (
               <div className="flex gap-2 mt-2">
-                <input type="date" value={customStart} onChange={(e) => setCustomStart(e.target.value)} className="flex-1 bg-white/20 backdrop-blur rounded-xl px-4 py-2 text-sm text-white outline-none" />
-                <input type="date" value={customEnd} onChange={(e) => setCustomEnd(e.target.value)} className="flex-1 bg-white/20 backdrop-blur rounded-xl px-4 py-2 text-sm text-white outline-none" />
+                <DateField value={customStart} onChange={setCustomStart} className="flex-1 justify-between bg-white/20 backdrop-blur rounded-xl px-4 py-2 text-sm text-white" />
+                <DateField value={customEnd} onChange={setCustomEnd} align="right" className="flex-1 justify-between bg-white/20 backdrop-blur rounded-xl px-4 py-2 text-sm text-white" />
               </div>
             )}
           </div>
@@ -6206,8 +6382,8 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
               <option value="year">Năm</option>
               <option value="custom">Tùy chỉnh</option>
             </select>
-            {timeType === 'day' && <input type="date" value={selectedDay} onChange={(e) => setSelectedDay(e.target.value)} className="frost-inset rounded-full text-sm font-bold px-4 py-2 outline-none text-blueberry dark:text-white" />}
-            {timeType === 'week' && <input type="date" value={selectedWeek} onChange={(e) => setSelectedWeek(e.target.value)} className="frost-inset rounded-full text-sm font-bold px-4 py-2 outline-none text-blueberry dark:text-white" />}
+            {timeType === 'day' && <DateField value={selectedDay} onChange={setSelectedDay} className="frost-inset rounded-full text-sm font-bold px-4 py-2 text-blueberry dark:text-white" />}
+            {timeType === 'week' && <DateField value={selectedWeek} onChange={setSelectedWeek} className="frost-inset rounded-full text-sm font-bold px-4 py-2 text-blueberry dark:text-white" />}
             {timeType === 'month' && (
               <>
                 <select value={selectedMonth} onChange={(e) => setSelectedMonth(Number(e.target.value))} className="frost-inset rounded-full text-sm font-bold px-4 py-2 outline-none text-blueberry dark:text-white [color-scheme:light] dark:[color-scheme:dark]">
@@ -6237,8 +6413,8 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
             )}
             {timeType === 'custom' && (
               <>
-                <input type="date" value={customStart} onChange={(e) => setCustomStart(e.target.value)} className="frost-inset rounded-full text-sm font-bold px-4 py-2 outline-none text-blueberry dark:text-white" />
-                <input type="date" value={customEnd} onChange={(e) => setCustomEnd(e.target.value)} className="frost-inset rounded-full text-sm font-bold px-4 py-2 outline-none text-blueberry dark:text-white" />
+                <DateField value={customStart} onChange={setCustomStart} className="frost-inset rounded-full text-sm font-bold px-4 py-2 text-blueberry dark:text-white" />
+                <DateField value={customEnd} onChange={setCustomEnd} align="right" className="frost-inset rounded-full text-sm font-bold px-4 py-2 text-blueberry dark:text-white" />
               </>
             )}
           </div>
