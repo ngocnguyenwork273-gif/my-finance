@@ -873,7 +873,11 @@ function fundDailyProfitHistory(category, transactions) {
       balance += profit;
       interestBase += profit;
     }
-    if (profit > 0) days.push({ date: new Date(cursor), profit, balance });
+    // FIX: trước đây chỉ push khi profit > 0, khiến những ngày lãi làm tròn xuống
+    // còn 0đ (gốc sinh lời còn nhỏ, hoặc vừa rút bớt) bị ẩn hẳn khỏi lịch sử thay vì
+    // hiển thị "0đ" — nhìn giống như bị "mất" dòng lợi nhuận của ngày đó.
+    // Giờ luôn ghi nhận đủ mọi ngày trong chuỗi, kể cả ngày lãi = 0đ.
+    days.push({ date: new Date(cursor), profit, balance });
     cursor.setDate(cursor.getDate() + 1);
   }
   return days.reverse();
@@ -2460,8 +2464,10 @@ function QuickAllocateWithdrawForm({ category, mode, onClose, onSaved }) {
   const [saving, setSaving] = useState(false);
   const [selectedYear, setSelectedYear] = useState(Number(currentPeriodKey().split('-')[0]));
   const [selectedPeriod, setSelectedPeriod] = useState(currentPeriodKey());
-  // FIX: cho phép chỉnh sửa ngày nhập (trước đây hard-code là ngày hôm nay)
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  // FIX: cho phép chỉnh sửa cả ngày lẫn giờ:phút nhập (trước đây chỉ chỉnh được ngày,
+  // giờ:phút luôn tự động lấy giờ hiện tại lúc lưu). Đồng bộ pattern datetime-local
+  // đang dùng ở AddTransaction / EditTransaction — mặc định = giờ hiện tại, cho sửa tự do.
+  const [dateTime, setDateTime] = useState(nowForInput());
   const yearNow = new Date().getFullYear();
   const years = Array.from({ length: 5 }, (_, i) => yearNow - 2 + i);
   const periods = buildPeriods(selectedYear);
@@ -2474,17 +2480,15 @@ function QuickAllocateWithdrawForm({ category, mode, onClose, onSaved }) {
 
   async function handleSave() {
     if (!amount || Number(amount) === 0) { alert('Nhập số tiền'); return; }
-    if (!date) { alert('Chọn ngày nhập'); return; }
+    if (!dateTime) { alert('Chọn ngày giờ nhập'); return; }
     setSaving(true);
     let noteToSave = note || null;
     if (mode === 'allocation' && selectedPeriod) {
       noteToSave = tagPeriodNote(selectedPeriod, note);
     }
-    // Giữ giờ:phút:giây hiện tại, chỉ thay phần ngày theo lựa chọn của người dùng
-    const createdAt = new Date(date + 'T' + new Date().toTimeString().slice(0, 8)).toISOString();
     const { error } = await supabase.from('transactions').insert({
       category_id: category.id, type: mode, amount: Number(amount), note: noteToSave,
-      date, created_at: createdAt,
+      date: dateTime.slice(0, 10), created_at: new Date(dateTime).toISOString(),
     });
     setSaving(false);
     if (error) { alert('Lỗi: ' + error.message); return; }
@@ -2499,7 +2503,7 @@ function QuickAllocateWithdrawForm({ category, mode, onClose, onSaved }) {
           <button onClick={onClose}><X size={18} className="text-steel dark:text-light-grey" /></button>
         </div>
         <MoneyInput value={amount} onChange={setAmount} placeholder="Số tiền" className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-lg font-bold outline-none mb-3 dark:text-white dark:placeholder:text-light-grey text-blueberry" />
-        <DateField value={date} onChange={setDate} max={new Date().toISOString().slice(0, 10)} className="w-full justify-between bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm mb-3 dark:text-white text-blueberry" />
+        <input type="datetime-local" value={dateTime} onChange={(e) => setDateTime(e.target.value)} className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none mb-3 dark:text-white text-blueberry [color-scheme:light] dark:[color-scheme:dark]" />
         <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Ghi chú (không bắt buộc)" className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none mb-3 dark:text-white dark:placeholder:text-light-grey text-blueberry" />
 
         {mode === 'allocation' && (
@@ -3995,10 +3999,12 @@ function FundDetail({ category, transactions, categories, accounts, onBack, relo
   const firstDepositDate = firstAllocation ? new Date(firstAllocation.date || firstAllocation.created_at) : null;
   const firstCreditDate = firstDepositDate ? firstProfitCreditDate(firstDepositDate) : null;
 
-  // Kết hợp tất cả: giao dịch nạp/rút + lợi nhuận, sắp xếp theo thời gian tăng dần
+  // Kết hợp tất cả: giao dịch nạp/rút + lợi nhuận, sắp xếp theo thời gian tăng dần.
+  // Riêng cho danh sách gộp "Tất cả": vẫn bỏ qua ngày lãi = 0đ để đỡ rác màn hình
+  // (tab "Lợi nhuận" riêng ở dailyProfitHistory thì hiện đủ mọi ngày, không ẩn).
   const combinedHistory = [
     ...allHistory.map(tx => ({ ...tx, type: tx.type, isProfit: false })),
-    ...dailyProfitHistory.map(d => {
+    ...dailyProfitHistory.filter(d => d.profit > 0).map(d => {
       // Những ngày lợi nhuận trước "kỳ đầu tiên" đều dồn hiển thị vào đúng firstCreditDate;
       // từ firstCreditDate trở đi, lợi nhuận ngày D hiển thị vào ngày D+1 như bình thường
       const dDay = new Date(d.date); dDay.setHours(0, 0, 0, 0);
