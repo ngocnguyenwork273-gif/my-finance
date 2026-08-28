@@ -8,7 +8,8 @@ import {
   ArrowLeft, Download, X, Check, Loader2, Target, Wallet, Trash2, Pencil, LogOut, Mail, Lock, Search, Bell, Sun, Moon, User,
   Filter, MoreHorizontal, Eye, EyeOff, LayoutGrid, List, ArrowUpDown, Calendar, Clock, Star,
   ChevronDown, ChevronRight, ChevronLeft, Camera, KeyRound, UserCog, SlidersHorizontal,
-  AlertTriangle, Info, PieChart, LineChart, BarChart, CircleDollarSign, FileText, SendHorizontal
+  AlertTriangle, Info, PieChart, LineChart, BarChart, CircleDollarSign, FileText, SendHorizontal,
+  BadgeCheck, CreditCard
 } from 'lucide-react';
 import ReactCrop from 'react-image-crop';
 import 'react-image-crop/dist/ReactCrop.css';
@@ -157,17 +158,16 @@ const fincheckStyles = `
     z-index: -1;
   }
   .dark .frost-card {
-    background: linear-gradient(150deg, rgba(70,72,120,0.42), rgba(32,32,58,0.34));
+    background: linear-gradient(150deg, rgba(52,52,86,0.72), rgba(24,24,42,0.60));
     backdrop-filter: blur(40px) saturate(220%);
     -webkit-backdrop-filter: blur(40px) saturate(220%);
-    border: 1px solid rgba(255,255,255,0.24);
-    box-shadow: 0 24px 48px rgba(0,0,0,0.6),
-      0 0 0 1px rgba(13,186,204,0.20), 0 0 40px -8px rgba(13,186,204,0.18),
-      0 16px 36px -14px rgba(159,127,224,0.5),
-      inset 0 1px 0 rgba(255,255,255,0.22), inset 0 -1px 0 rgba(0,0,0,0.3);
+    border: 1px solid rgba(255,255,255,0.18);
+    box-shadow: 20px 20px 40px rgba(0,0,0,0.55), -8px -8px 22px rgba(255,255,255,0.03),
+      0 0 0 1px rgba(13,186,204,0.08), 0 12px 28px -14px rgba(159,127,224,0.25),
+      inset 0 1px 0 rgba(255,255,255,0.14);
   }
   .dark .frost-card::before {
-    background: linear-gradient(115deg, rgba(255,255,255,0.20) 0%, rgba(255,255,255,0.05) 22%, rgba(255,255,255,0) 45%);
+    background: linear-gradient(115deg, rgba(255,255,255,0.10) 0%, rgba(255,255,255,0.03) 22%, rgba(255,255,255,0) 45%);
   }
   .frost-inset {
     position: relative;
@@ -178,11 +178,11 @@ const fincheckStyles = `
     box-shadow: inset 7px 7px 16px rgba(48,49,80,0.16), inset -7px -7px 16px rgba(255,255,255,0.95);
   }
   .dark .frost-inset {
-    background: rgba(255,255,255,0.06);
+    background: rgba(255,255,255,0.045);
     backdrop-filter: blur(14px) saturate(180%);
     -webkit-backdrop-filter: blur(14px) saturate(180%);
-    border: 1px solid rgba(255,255,255,0.20);
-    box-shadow: inset 7px 7px 16px rgba(0,0,0,0.5), inset -7px -7px 16px rgba(255,255,255,0.08);
+    border: 1px solid rgba(255,255,255,0.12);
+    box-shadow: inset 7px 7px 16px rgba(0,0,0,0.45), inset -7px -7px 16px rgba(255,255,255,0.05);
   }
   .frost-pill {
     background: rgba(255,255,255,0.55);
@@ -202,12 +202,11 @@ const fincheckStyles = `
      so the backdrop-blur on cards has real color/contrast to blur (this is what makes the glass
      effect actually read as "glass" instead of a flat translucent panel). */
   .frost-blob {
-    position: fixed;
+    position: absolute;
     border-radius: 9999px;
-    filter: blur(60px);
+    filter: blur(50px);
     pointer-events: none;
     opacity: 0.9;
-    z-index: 0;
   }
 
 
@@ -466,6 +465,12 @@ function formatMoney(n) {
   return Math.abs(n).toLocaleString('en-US') + 'đ';
 }
 
+// Giống formatMoney nhưng GIỮ dấu âm — dùng cho các số có thể âm (Dư sau chi...)
+// để không bị lệch với phần trăm âm hiển thị bên cạnh, gây hiểu nhầm số liệu.
+function formatMoneySigned(n) {
+  return (n < 0 ? '-' : '') + Math.abs(n).toLocaleString('en-US') + 'đ';
+}
+
 // Supabase Storage object key không chấp nhận dấu tiếng Việt, khoảng trắng, ký tự đặc biệt.
 // Chuẩn hoá tên file trước khi upload để tránh lỗi "Invalid key".
 function sanitizeFileName(name) {
@@ -622,7 +627,7 @@ function accountBalanceAtDate(account, transactions, cutoffDate) {
     })
     .reduce((s, t) => {
       if (t.type === 'income') return s + Number(t.amount);
-      if (t.type === 'expense') return s - Number(t.amount);
+      if (t.type === 'expense' || t.type === 'allocation') return s - Number(t.amount); // tiền rời khỏi ví
       return s + Number(t.amount); // adjustment
     }, 0);
   return Number(account.initial_balance || 0) + delta;
@@ -704,10 +709,10 @@ function fundDailyProfitHistory(category, transactions) {
 
 function accountBalance(acc, transactions) {
   const delta = transactions
-    .filter((t) => t.account_id === acc.id && (t.type === 'income' || t.type === 'expense' || t.type === 'adjustment'))
+    .filter((t) => t.account_id === acc.id && (t.type === 'income' || t.type === 'expense' || t.type === 'adjustment' || t.type === 'allocation'))
     .reduce((s, t) => {
       if (t.type === 'income') return s + Number(t.amount);
-      if (t.type === 'expense') return s - Number(t.amount);
+      if (t.type === 'expense' || t.type === 'allocation') return s - Number(t.amount); // tiền rời khỏi ví (chi tiêu hoặc chuyển sang quỹ)
       return s + Number(t.amount);
     }, 0);
   return Number(acc.initial_balance || 0) + delta;
@@ -963,8 +968,13 @@ function calculateFinancialsFromTxs(txs, categories, spendingPoolOverride) {
   const accumulationBeforeSpend = Math.max(incomeForSpendingPool - spendingPool, 0);
 
   // 8A. Nạp quỹ từ Chi pool
+  // Loại trừ khoản "Nạp quỹ lần đầu" (is_initial === true): khoản này không chọn nguồn
+  // tiền, không phải chi từ Thu nhập được chi của kỳ — nó chỉ dùng để tính Tổng tài sản.
+  // Đồng thời chỉ tính vào Thu nhập được chi những lần nạp quỹ có nguồn = "Thu nhập"
+  // (account_id === null). Nạp quỹ từ 1 ví/tài khoản khác (account_id != null) không
+  // trừ vào Thu nhập được chi — tiền chỉ chuyển từ ví đó sang quỹ.
   const allocationFromSpendingPool = periodTxs
-    .filter((t) => t.type === 'allocation')
+    .filter((t) => t.type === 'allocation' && t.is_initial !== true && t.account_id === null)
     .reduce((s, t) => s + Number(t.amount), 0);
 
   // 8B/8C. Chi tiêu: phân biệt chi từ quỹ (isFund) vs chi thường (theo nguồn tiền)
@@ -1142,8 +1152,8 @@ function SidebarDesktop({ screen, setScreen, sidebarCollapsed, toggleSidebar, th
       }}
     >
       {/* ambient glass glow blobs — decorative only */}
-      <div className={`pointer-events-none absolute -top-16 -left-10 w-56 h-56 rounded-full blur-3xl ${isDark ? 'bg-turquoise/25' : 'bg-turquoise/45'}`} />
-      <div className={`pointer-events-none absolute bottom-24 -right-14 w-56 h-56 rounded-full blur-3xl ${isDark ? 'bg-lavender/25' : 'bg-lavender/45'}`} />
+      <div className={`pointer-events-none absolute -top-16 -left-10 w-56 h-56 rounded-full blur-3xl ${isDark ? 'bg-turquoise/25' : 'bg-turquoise-light/60'}`} />
+      <div className={`pointer-events-none absolute bottom-24 -right-14 w-56 h-56 rounded-full blur-3xl ${isDark ? 'bg-lavender/25' : 'bg-lavender-light/60'}`} />
       <div className={`pointer-events-none absolute inset-y-0 right-0 w-px bg-gradient-to-b from-transparent to-transparent ${isDark ? 'via-white/10' : 'via-white/70'}`} />
 
       <div className={`relative flex items-center mb-8 ${sidebarCollapsed ? 'justify-center px-0' : 'gap-2 px-1'}`}>
@@ -1212,20 +1222,90 @@ function SidebarDesktop({ screen, setScreen, sidebarCollapsed, toggleSidebar, th
   );
 }
 
-function HeaderDesktop({ onAddClick, displayName, avatarUrl, theme, toggleTheme, openSettings }) {
-  const [showMenu, setShowMenu] = useState(false);
-  const [search, setSearch] = useState('');
-  const isDark = theme === 'dark';
-  useCloseOnEscape(showMenu, () => setShowMenu(false));
+// Menu dropdown avatar dùng chung (desktop header + mobile dashboard),
+// theo cấu trúc "trigger + card menu (nhóm mục + separator + đăng xuất)"
+// giống DropdownMenuAvatar (shadcn) mà người dùng cung cấp — viết lại bằng
+// React thuần vì project này không cài shadcn/ui (@/components/ui/...).
+function AvatarMenu({ avatarUrl, displayName, openSettings, variant = 'desktop' }) {
+  const [open, setOpen] = useState(false);
+  useCloseOnEscape(open, () => setOpen(false));
+
+  const items = [
+    { key: 'profile', label: 'Hồ sơ', icon: BadgeCheck },
+    { key: 'data', label: 'Dữ liệu', icon: CreditCard },
+    { key: 'history', label: 'Lịch sử', icon: Clock },
+  ];
+
+  function go(section) {
+    setOpen(false);
+    openSettings && openSettings(section);
+  }
 
   async function handleLogout() {
-    setShowMenu(false);
+    setOpen(false);
     await supabase.auth.signOut();
   }
 
+  const initial = (displayName || 'B')[0].toUpperCase();
+  const isDesktop = variant === 'desktop';
+
+  return (
+    <div className="relative">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className={isDesktop
+          ? 'flex items-center gap-2 pl-2 pr-2.5 py-1.5 rounded-full hover:bg-ice-cream dark:hover:bg-night-sky/30 transition'
+          : 'w-11 h-11 rounded-full bg-white/30 backdrop-blur flex items-center justify-center text-white border border-white/40 overflow-hidden'}
+      >
+        {avatarUrl ? (
+          <img src={avatarUrl} alt="" className={isDesktop ? 'w-9 h-9 rounded-full object-cover flex-shrink-0' : 'w-full h-full object-cover'} />
+        ) : isDesktop ? (
+          <div className="w-9 h-9 rounded-full bg-gradient-secondary flex items-center justify-center text-white font-bold text-sm flex-shrink-0">{initial}</div>
+        ) : (
+          <span className="font-bold">{initial}</span>
+        )}
+        {isDesktop && (
+          <>
+            <span className="text-sm font-bold text-blueberry dark:text-white">{displayName || 'Bạn'}</span>
+            <ChevronDown size={14} className="text-steel dark:text-light-grey" />
+          </>
+        )}
+      </button>
+
+      {open && (
+        <>
+          <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
+          <div className={`absolute ${isDesktop ? 'top-12' : 'top-14'} right-0 bg-white/95 dark:bg-[#1e1e32]/95 backdrop-blur-xl backdrop-saturate-150 rounded-2xl shadow-card border border-white/60 dark:border-[rgba(255,255,255,0.10)] py-1.5 w-56 z-40 overflow-hidden`}>
+            {items.map(({ key, label, icon: Icon }) => (
+              <button
+                key={key}
+                onClick={() => go(key)}
+                className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-blueberry dark:text-white hover:bg-ice-cream dark:hover:bg-night-sky/30"
+              >
+                <Icon size={15} className="text-steel dark:text-light-grey" /> {label}
+              </button>
+            ))}
+            <div className="h-px bg-light-grey/20 dark:bg-light-grey/10 my-1.5" />
+            <button
+              onClick={handleLogout}
+              className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-cotton-candy hover:bg-cotton-candy-light dark:hover:bg-night-sky/30"
+            >
+              <LogOut size={15} /> Đăng xuất
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function HeaderDesktop({ onAddClick, displayName, avatarUrl, theme, toggleTheme, openSettings }) {
+  const [search, setSearch] = useState('');
+  const isDark = theme === 'dark';
+
   return (
     <header
-      className="hidden md:flex sticky top-0 z-10 px-6 md:px-8 py-4 items-center justify-between relative overflow-hidden"
+      className="hidden md:flex sticky top-0 z-10 px-6 md:px-8 py-4 items-center justify-between relative"
       style={{
         background: isDark ? 'rgba(20,20,45,0.55)' : 'rgba(255,255,255,0.55)',
         backdropFilter: 'blur(24px) saturate(180%)',
@@ -1234,8 +1314,12 @@ function HeaderDesktop({ onAddClick, displayName, avatarUrl, theme, toggleTheme,
         boxShadow: isDark ? '0 10px 30px -18px rgba(0,0,0,0.45)' : '0 10px 30px -18px rgba(48,49,80,0.18)',
       }}
     >
-      <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/70 to-transparent dark:via-white/15" />
-      <div className="pointer-events-none absolute -top-10 right-24 w-56 h-32 rounded-full bg-turquoise/35 dark:bg-turquoise/20 blur-2xl" />
+      {/* Lớp riêng chỉ để cắt viền các blob trang trí — KHÔNG bọc luôn nội dung
+          tương tác (menu avatar), tránh bị overflow-hidden cắt mất khi mở dropdown. */}
+      <div className="pointer-events-none absolute inset-0 overflow-hidden">
+        <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/70 to-transparent dark:via-white/15" />
+        <div className="absolute -top-10 right-24 w-56 h-32 rounded-full bg-turquoise-light/45 dark:bg-turquoise/20 blur-2xl" />
+      </div>
       <div className="flex items-center gap-2 bg-white/50 dark:bg-white/[0.06] backdrop-blur rounded-full px-4 py-2.5 w-72 border border-white/60 dark:border-white/10 relative z-10">
         <Search size={16} className="text-steel dark:text-light-grey" />
         <input
@@ -1252,42 +1336,7 @@ function HeaderDesktop({ onAddClick, displayName, avatarUrl, theme, toggleTheme,
         <button className="w-9 h-9 rounded-full bg-white/50 dark:bg-white/[0.06] backdrop-blur border border-white/60 dark:border-white/10 flex items-center justify-center text-steel dark:text-light-grey">
           <Bell size={16} />
         </button>
-        <div className="relative">
-          <button onClick={() => setShowMenu((v) => !v)} className="flex items-center gap-2 pl-2 pr-2.5 py-1.5 rounded-full hover:bg-ice-cream dark:hover:bg-night-sky/30 transition">
-            {avatarUrl ? (
-              <img src={avatarUrl} alt="" className="w-9 h-9 rounded-full object-cover flex-shrink-0" />
-            ) : (
-              <div className="w-9 h-9 rounded-full bg-gradient-secondary flex items-center justify-center text-white font-bold text-sm flex-shrink-0">
-                {(displayName || 'B')[0].toUpperCase()}
-              </div>
-            )}
-            <span className="text-sm font-bold text-blueberry dark:text-white">{displayName || 'Bạn'}</span>
-            <ChevronDown size={14} className="text-steel dark:text-light-grey" />
-          </button>
-          {showMenu && (
-            <>
-              <div className="fixed inset-0 z-30" onClick={() => setShowMenu(false)} />
-              <div className="absolute top-12 right-0 bg-white/85 dark:bg-[#1e1e32]/70 backdrop-blur-xl backdrop-saturate-150 rounded-2xl shadow-card border border-white/60 dark:border-[rgba(255,255,255,0.10)] py-1.5 w-56 z-40">
-                <button
-                  onClick={() => {
-                    setShowMenu(false);
-                    openSettings && openSettings('profile');
-                  }}
-                  className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-blueberry dark:text-white hover:bg-ice-cream dark:hover:bg-night-sky/30"
-                >
-                  <SettingsIcon size={15} /> Cài đặt
-                </button>
-                <div className="h-px bg-light-grey/20 dark:bg-light-grey/10 my-1.5" />
-                <button
-                  onClick={handleLogout}
-                  className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-cotton-candy hover:bg-cotton-candy-light dark:hover:bg-night-sky/30"
-                >
-                  <LogOut size={15} /> Đăng xuất
-                </button>
-              </div>
-            </>
-          )}
-        </div>
+        <AvatarMenu avatarUrl={avatarUrl} displayName={displayName} openSettings={openSettings} variant="desktop" />
       </div>
     </header>
   );
@@ -1561,19 +1610,19 @@ function AddTransaction({ onClose, accounts, categories, transactions, onSaved, 
   const isFundCategory = type === 'expense' && !!activeCat?.is_fund;
   const overLimit = type === 'expense' && activeCat?.monthly_limit && Number(amount) > Number(activeCat.monthly_limit);
 
-  const usesPeriod = type === 'income' || type === 'allocation' || (type === 'expense' && !isFundCategory && expenseSource === 'income');
+  const usesPeriod = type === 'income' || (type === 'allocation' && expenseSource === 'income') || (type === 'expense' && !isFundCategory && expenseSource === 'income');
   // Compute financials for the selected period using the new logic
   const financials = usesPeriod && selectedPeriod
     ? calculatePeriodFinancials(selectedPeriod, transactions, categories, spendingPoolByPeriod?.[selectedPeriod])
     : null;
   const remainingAfterSpend = financials?.remainingAfterSpend ?? 0;
-  const periodOverLimit = (type === 'allocation' || (type === 'expense' && !isFundCategory && expenseSource === 'income'))
+  const periodOverLimit = ((type === 'allocation' && expenseSource === 'income') || (type === 'expense' && !isFundCategory && expenseSource === 'income'))
     && amount
     && Number(amount) > remainingAfterSpend;
 
   const fundBalanceNow = isFundCategory ? fundBalanceWithProfit(activeCat, transactions || []) : null;
   const fundOverBalance = isFundCategory && amount && Number(amount) > fundBalanceNow;
-  const sourceAccount = type === 'expense' && !isFundCategory && expenseSource && expenseSource !== 'income' ? accounts.find((a) => a.id === expenseSource) : null;
+  const sourceAccount = ((type === 'expense' && !isFundCategory) || type === 'allocation') && expenseSource && expenseSource !== 'income' ? accounts.find((a) => a.id === expenseSource) : null;
   const sourceOverBalance = sourceAccount && amount && Number(amount) > accountBalance(sourceAccount, transactions || []);
 
   function handleAmountChange(e) { setAmount(e.target.value.replace(/\D/g, '')); }
@@ -1631,9 +1680,15 @@ function AddTransaction({ onClose, accounts, categories, transactions, onSaved, 
       if (!selectedPeriod) { alert('Vui lòng chọn Kỳ'); return; }
       noteToSave = tagPeriodNote(selectedPeriod, note);
     } else if (type === 'allocation') {
-      if (!selectedPeriod) { alert('Vui lòng chọn Kỳ (nguồn thu nhập để nạp quỹ)'); return; }
-      if (periodOverLimit) { alert('Số tiền nạp vượt quá Thu nhập được chi còn lại của kỳ thu nhập.'); return; }
-      noteToSave = tagPeriodNote(selectedPeriod, note);
+      if (!expenseSource) { alert('Vui lòng chọn Nguồn tiền cho khoản nạp quỹ này.'); return; }
+      if (expenseSource === 'income') {
+        if (!selectedPeriod) { alert('Vui lòng chọn Kỳ (nguồn thu nhập để nạp quỹ)'); return; }
+        if (periodOverLimit) { alert('Số tiền nạp vượt quá Thu nhập được chi còn lại của kỳ thu nhập.'); return; }
+        noteToSave = tagPeriodNote(selectedPeriod, note);
+      } else {
+        if (sourceOverBalance) { alert('Số dư nguồn tiền không đủ.'); return; }
+        accountIdToSave = expenseSource;
+      }
     } else if (type === 'expense') {
       if (isFundCategory) {
         // Chi tiêu từ quỹ: trừ thẳng vào quỹ, không cần chọn nguồn tiền.
@@ -1678,7 +1733,7 @@ function AddTransaction({ onClose, accounts, categories, transactions, onSaved, 
             <button onClick={() => handleTypeChange('allocation')} className={`flex-1 py-2 rounded-full text-xs sm:text-sm font-semibold transition ${type === 'allocation' ? 'bg-white dark:bg-[#2a2a44] text-turquoise shadow' : 'text-steel dark:text-light-grey'}`}>Nạp quỹ</button>
             <button onClick={() => handleTypeChange('expense')} className={`flex-1 py-2 rounded-full text-xs sm:text-sm font-semibold transition ${type === 'expense' ? 'bg-white dark:bg-[#2a2a44] text-turquoise shadow' : 'text-steel dark:text-light-grey'}`}>Chi tiêu</button>
           </div>
-          {type === 'allocation' && <p className="text-steel dark:text-light-grey text-xs mt-2 text-center">Rút từ thu nhập của 1 Kỳ để chuyển vào quỹ, chưa tính là tiền rời khỏi ví.</p>}
+          {type === 'allocation' && <p className="text-steel dark:text-light-grey text-xs mt-2 text-center">Nạp quỹ từ Thu nhập của 1 Kỳ, hoặc chuyển thẳng từ 1 ví/tài khoản.</p>}
           {type === 'income' && <p className="text-steel dark:text-light-grey text-xs mt-2 text-center">Thu nhập được gom theo Kỳ — nhiều khoản thu trong cùng 1 Kỳ sẽ được cộng dồn lại.</p>}
         </div>
         <div className="px-5 mt-8 text-center">
@@ -1716,6 +1771,28 @@ function AddTransaction({ onClose, accounts, categories, transactions, onSaved, 
           </div>
         )}
 
+        {type === 'allocation' && (
+          <div className="px-5 mt-8">
+            <p className="text-blueberry dark:text-white font-bold text-sm mb-3">Nguồn tiền <span className="text-cotton-candy">*</span></p>
+            <div className="grid grid-cols-4 sm:grid-cols-5 gap-3">
+              <button onClick={() => handleExpenseSourceSelect('income')} className="flex flex-col items-center gap-1.5">
+                <EmojiCircle emoji="💵" size={48} active={expenseSource === 'income'} activeColor="#0DBACC" />
+                <span className={`text-[11px] text-center leading-tight ${expenseSource === 'income' ? 'text-blueberry dark:text-white font-semibold' : 'text-steel dark:text-light-grey'}`}>Thu nhập</span>
+              </button>
+              {accounts.map((acc) => {
+                const active = expenseSource === acc.id;
+                return (
+                  <button key={acc.id} onClick={() => handleExpenseSourceSelect(acc.id)} className="flex flex-col items-center gap-1.5">
+                    <EmojiCircle emoji={acc.icon} size={48} active={active} activeColor="#0DBACC" />
+                    <span className={`text-[11px] text-center leading-tight ${active ? 'text-blueberry dark:text-white font-semibold' : 'text-steel dark:text-light-grey'}`}>{acc.name}</span>
+                  </button>
+                );
+              })}
+            </div>
+            <p className="text-steel dark:text-light-grey text-xs mt-2">Chọn "Thu nhập" nếu nạp quỹ từ Thu nhập được chi của Kỳ (sẽ trừ vào Thu nhập được chi). Chọn 1 ví/tài khoản khác nếu chuyển thẳng tiền có sẵn vào quỹ (KHÔNG trừ vào Thu nhập được chi).</p>
+          </div>
+        )}
+
         {type === 'expense' && !isFundCategory && (
           <div className="px-5 mt-8">
             <p className="text-blueberry dark:text-white font-bold text-sm mb-3">Nguồn tiền <span className="text-cotton-candy">*</span></p>
@@ -1741,11 +1818,11 @@ function AddTransaction({ onClose, accounts, categories, transactions, onSaved, 
         {usesPeriod && (
           <div className="px-5 mt-8">
             <p className="text-blueberry dark:text-white font-bold text-sm mb-3">Năm <span className="text-cotton-candy">*</span></p>
-            <select value={selectedYear} onChange={(e) => handleYearChange(Number(e.target.value))} className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none mb-3 dark:text-white text-blueberry">
+            <select value={selectedYear} onChange={(e) => handleYearChange(Number(e.target.value))} className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none mb-3 dark:text-white text-blueberry [color-scheme:light] dark:[color-scheme:dark]">
               {years.map((y) => <option key={y} value={y}>{y}</option>)}
             </select>
             <p className="text-blueberry dark:text-white font-bold text-sm mb-3">Kỳ <span className="text-cotton-candy">*</span></p>
-            <select value={selectedPeriod} onChange={(e) => setSelectedPeriod(e.target.value)} className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none dark:text-white text-blueberry">
+            <select value={selectedPeriod} onChange={(e) => setSelectedPeriod(e.target.value)} className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none dark:text-white text-blueberry [color-scheme:light] dark:[color-scheme:dark]">
               {periods.map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
             </select>
             {financials && (
@@ -1791,7 +1868,7 @@ function EditTransaction({ transaction, onClose, accounts, categories, transacti
     return Number(pk.split('-')[0]);
   });
   const [selectedPeriod, setSelectedPeriod] = useState(() => parsePeriodTag(transaction.note) || dateToPeriodKey(transaction.date || transaction.created_at));
-  const [expenseSource, setExpenseSource] = useState(transaction.account_id || null);
+  const [expenseSource, setExpenseSource] = useState(transaction.account_id || 'income');
   const [note, setNote] = useState(stripPeriodTag(transaction.note || ''));
   const [dateTime, setDateTime] = useState(() => {
     const d = new Date(transaction.created_at || transaction.date);
@@ -1807,7 +1884,7 @@ function EditTransaction({ transaction, onClose, accounts, categories, transacti
   const activeCat = categories.find((c) => c.id === selectedCategory);
   const isFundCategory = type === 'expense' && !!activeCat?.is_fund;
   const overLimit = type === 'expense' && activeCat?.monthly_limit && Number(amount) > Number(activeCat.monthly_limit);
-  const usesPeriod = type === 'income' || type === 'allocation' || (type === 'expense' && !isFundCategory && expenseSource === 'income');
+  const usesPeriod = type === 'income' || (type === 'allocation' && expenseSource === 'income') || (type === 'expense' && !isFundCategory && expenseSource === 'income');
 
   // Exclude the current transaction from the pool calculation to check if the new amount exceeds remaining
   const otherTxs = (allTx || []).filter(t => t.id !== transaction.id);
@@ -1815,13 +1892,13 @@ function EditTransaction({ transaction, onClose, accounts, categories, transacti
     ? calculatePeriodFinancials(selectedPeriod, otherTxs, categories, spendingPoolByPeriod?.[selectedPeriod])
     : null;
   const remainingAfterSpend = financials?.remainingAfterSpend ?? 0;
-  const periodOverLimit = (type === 'allocation' || (type === 'expense' && !isFundCategory && expenseSource === 'income'))
+  const periodOverLimit = ((type === 'allocation' && expenseSource === 'income') || (type === 'expense' && !isFundCategory && expenseSource === 'income'))
     && amount
     && Number(amount) > remainingAfterSpend;
 
   const fundBalanceNow = isFundCategory ? fundBalanceWithProfit(activeCat, allTx || []) : null;
   const fundOverBalance = isFundCategory && amount && Number(amount) > fundBalanceNow;
-  const sourceAccount = type === 'expense' && !isFundCategory && expenseSource && expenseSource !== 'income' ? accounts.find((a) => a.id === expenseSource) : null;
+  const sourceAccount = ((type === 'expense' && !isFundCategory) || type === 'allocation') && expenseSource && expenseSource !== 'income' ? accounts.find((a) => a.id === expenseSource) : null;
   const sourceOverBalance = sourceAccount && amount && Number(amount) > accountBalance(sourceAccount, allTx || []);
 
   // Fix categoryList bug
@@ -1870,9 +1947,15 @@ function EditTransaction({ transaction, onClose, accounts, categories, transacti
       if (!selectedPeriod) { alert('Vui lòng chọn Kỳ'); return; }
       noteToSave = tagPeriodNote(selectedPeriod, note);
     } else if (type === 'allocation') {
-      if (!selectedPeriod) { alert('Vui lòng chọn Kỳ (nguồn thu nhập để nạp quỹ)'); return; }
-      if (periodOverLimit) { alert('Số tiền nạp vượt quá Thu nhập được chi còn lại của kỳ thu nhập.'); return; }
-      noteToSave = tagPeriodNote(selectedPeriod, note);
+      if (!expenseSource) { alert('Vui lòng chọn Nguồn tiền cho khoản nạp quỹ này.'); return; }
+      if (expenseSource === 'income') {
+        if (!selectedPeriod) { alert('Vui lòng chọn Kỳ (nguồn thu nhập để nạp quỹ)'); return; }
+        if (periodOverLimit) { alert('Số tiền nạp vượt quá Thu nhập được chi còn lại của kỳ thu nhập.'); return; }
+        noteToSave = tagPeriodNote(selectedPeriod, note);
+      } else {
+        if (sourceOverBalance) { alert('Số dư nguồn tiền không đủ.'); return; }
+        accountIdToSave = expenseSource;
+      }
     } else if (type === 'expense') {
       if (isFundCategory) {
         if (fundOverBalance) { alert('Số dư quỹ không đủ.'); return; }
@@ -1950,6 +2033,28 @@ function EditTransaction({ transaction, onClose, accounts, categories, transacti
           </div>
         )}
 
+        {type === 'allocation' && (
+          <div className="px-5 mt-8">
+            <p className="text-blueberry dark:text-white font-bold text-sm mb-3">Nguồn tiền <span className="text-cotton-candy">*</span></p>
+            <div className="grid grid-cols-4 sm:grid-cols-5 gap-3">
+              <button onClick={() => handleExpenseSourceSelect('income')} className="flex flex-col items-center gap-1.5">
+                <EmojiCircle emoji="💵" size={48} active={expenseSource === 'income'} activeColor="#0DBACC" />
+                <span className={`text-[11px] text-center leading-tight ${expenseSource === 'income' ? 'text-blueberry dark:text-white font-semibold' : 'text-steel dark:text-light-grey'}`}>Thu nhập</span>
+              </button>
+              {accounts.map((acc) => {
+                const active = expenseSource === acc.id;
+                return (
+                  <button key={acc.id} onClick={() => handleExpenseSourceSelect(acc.id)} className="flex flex-col items-center gap-1.5">
+                    <EmojiCircle emoji={acc.icon} size={48} active={active} activeColor="#0DBACC" />
+                    <span className={`text-[11px] text-center leading-tight ${active ? 'text-blueberry dark:text-white font-semibold' : 'text-steel dark:text-light-grey'}`}>{acc.name}</span>
+                  </button>
+                );
+              })}
+            </div>
+            <p className="text-steel dark:text-light-grey text-xs mt-2">Chọn "Thu nhập" nếu nạp quỹ từ Thu nhập được chi của Kỳ (sẽ trừ vào Thu nhập được chi). Chọn 1 ví/tài khoản khác nếu chuyển thẳng tiền có sẵn vào quỹ (KHÔNG trừ vào Thu nhập được chi).</p>
+          </div>
+        )}
+
         {type === 'expense' && !isFundCategory && (
           <div className="px-5 mt-8">
             <p className="text-blueberry dark:text-white font-bold text-sm mb-3">Nguồn tiền <span className="text-cotton-candy">*</span></p>
@@ -1975,11 +2080,11 @@ function EditTransaction({ transaction, onClose, accounts, categories, transacti
         {usesPeriod && (
           <div className="px-5 mt-8">
             <p className="text-blueberry dark:text-white font-bold text-sm mb-3">Năm <span className="text-cotton-candy">*</span></p>
-            <select value={selectedYear} onChange={(e) => handleYearChange(Number(e.target.value))} className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none mb-3 dark:text-white text-blueberry">
+            <select value={selectedYear} onChange={(e) => handleYearChange(Number(e.target.value))} className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none mb-3 dark:text-white text-blueberry [color-scheme:light] dark:[color-scheme:dark]">
               {years.map((y) => <option key={y} value={y}>{y}</option>)}
             </select>
             <p className="text-blueberry dark:text-white font-bold text-sm mb-3">Kỳ <span className="text-cotton-candy">*</span></p>
-            <select value={selectedPeriod} onChange={(e) => setSelectedPeriod(e.target.value)} className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none dark:text-white text-blueberry">
+            <select value={selectedPeriod} onChange={(e) => setSelectedPeriod(e.target.value)} className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none dark:text-white text-blueberry [color-scheme:light] dark:[color-scheme:dark]">
               {periods.map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
             </select>
             {financials && (
@@ -2038,7 +2143,7 @@ function EditAccountModal({ account, onClose, onSaved, isNew }) {
         </div>
         <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Tên tài khoản" className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none mb-3 dark:text-white dark:placeholder:text-light-grey text-blueberry" />
         <input value={form.icon} onChange={(e) => setForm({ ...form, icon: e.target.value })} placeholder="Emoji (vd: 🏦)" className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none mb-3 dark:text-white dark:placeholder:text-light-grey text-blueberry" />
-        <select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })} className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none mb-3 dark:text-white dark:placeholder:text-light-grey text-blueberry">
+        <select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })} className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none mb-3 dark:text-white dark:placeholder:text-light-grey text-blueberry [color-scheme:light] dark:[color-scheme:dark]">
           {ACCOUNT_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
         </select>
         <MoneyInput value={form.initial_balance} onChange={(v) => setForm({ ...form, initial_balance: v })} placeholder="Số dư ban đầu" className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none mb-4 dark:text-white dark:placeholder:text-light-grey text-blueberry" />
@@ -2059,6 +2164,9 @@ function EditFundForm({ category, onClose, onSaved, isNew, initialAmount, firstA
     interest_rate: category?.interest_rate || '',
     background_url: category?.background_url || '',
     initial_allocation: isNew ? '' : (initialAmount || ''),
+    // FIX: cho phép sửa ngày nhập số tiền nạp quỹ lần đầu (trước đây hard-code = ngày hôm nay,
+    // không có cách nào chỉnh lại sau khi đã tạo quỹ).
+    initial_allocation_date: (!isNew && firstAllocation) ? (firstAllocation.date || new Date(firstAllocation.created_at).toISOString().slice(0, 10)) : new Date().toISOString().slice(0, 10),
   });
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -2085,13 +2193,14 @@ function EditFundForm({ category, onClose, onSaved, isNew, initialAmount, firstA
       interest_rate: form.interest_rate ? Number(form.interest_rate) : 0,
       background_url: form.background_url || null,
     };
+    const initialDate = form.initial_allocation_date || new Date().toISOString().slice(0, 10);
     if (isNew) {
       const { data: newCat, error } = await supabase.from('categories').insert(payload).select().single();
       if (error) { setSaving(false); alert('Lỗi: ' + error.message); return; }
       if (form.initial_allocation && Number(form.initial_allocation) > 0) {
         await supabase.from('transactions').insert({
           category_id: newCat.id, type: 'allocation', amount: Number(form.initial_allocation),
-          note: 'Nạp quỹ lần đầu', date: new Date().toISOString().slice(0, 10),
+          note: 'Nạp quỹ lần đầu', date: initialDate,
           is_initial: true, // FIX: đánh dấu rõ đây là khoản nạp ban đầu, không suy luận theo ngày
         });
       }
@@ -2099,23 +2208,22 @@ function EditFundForm({ category, onClose, onSaved, isNew, initialAmount, firstA
       const { error } = await supabase.from('categories').update(payload).eq('id', category.id);
       if (error) { setSaving(false); alert('Lỗi: ' + error.message); return; }
       const newInitial = form.initial_allocation ? Number(form.initial_allocation) : 0;
-      if (newInitial !== Number(initialAmount || 0)) {
-        // FIX: chỉ cập nhật amount nếu firstAllocation THỰC SỰ đã được đánh dấu is_initial.
-        // Nếu firstAllocation chỉ là kết quả fallback "giao dịch sớm nhất" (dữ liệu cũ,
-        // chưa có cờ is_initial) thì KHÔNG được ghi đè amount của nó — vì đó có thể là
-        // một lần nạp quỹ bình thường, không phải khoản "ban đầu". Thay vào đó tạo mới
-        // một giao dịch is_initial riêng để làm đại diện chính xác cho "nạp ban đầu".
-        if (firstAllocation && firstAllocation.is_initial === true) {
-          if (newInitial > 0) {
-            await supabase.from('transactions').update({ amount: newInitial }).eq('id', firstAllocation.id);
-          }
-        } else if (newInitial > 0) {
-          await supabase.from('transactions').insert({
-            category_id: category.id, type: 'allocation', amount: newInitial,
-            note: 'Nạp quỹ lần đầu', date: new Date().toISOString().slice(0, 10),
-            is_initial: true,
-          });
+      const dateChanged = firstAllocation && firstAllocation.is_initial === true && initialDate !== (firstAllocation.date || new Date(firstAllocation.created_at).toISOString().slice(0, 10));
+      // FIX: chỉ cập nhật amount nếu firstAllocation THỰC SỰ đã được đánh dấu is_initial.
+      // Nếu firstAllocation chỉ là kết quả fallback "giao dịch sớm nhất" (dữ liệu cũ,
+      // chưa có cờ is_initial) thì KHÔNG được ghi đè amount của nó — vì đó có thể là
+      // một lần nạp quỹ bình thường, không phải khoản "ban đầu". Thay vào đó tạo mới
+      // một giao dịch is_initial riêng để làm đại diện chính xác cho "nạp ban đầu".
+      if (firstAllocation && firstAllocation.is_initial === true) {
+        if (newInitial > 0 && (newInitial !== Number(initialAmount || 0) || dateChanged)) {
+          await supabase.from('transactions').update({ amount: newInitial, date: initialDate }).eq('id', firstAllocation.id);
         }
+      } else if (newInitial !== Number(initialAmount || 0) && newInitial > 0) {
+        await supabase.from('transactions').insert({
+          category_id: category.id, type: 'allocation', amount: newInitial,
+          note: 'Nạp quỹ lần đầu', date: initialDate,
+          is_initial: true,
+        });
       }
     }
     setSaving(false);
@@ -2136,6 +2244,12 @@ function EditFundForm({ category, onClose, onSaved, isNew, initialAmount, firstA
 
         {!isNew && <p className="text-sm text-blueberry dark:text-white font-semibold mb-2">Số tiền ban đầu</p>}
         <MoneyInput value={form.initial_allocation} onChange={(v) => setForm({ ...form, initial_allocation: v })} placeholder="Số tiền nạp quỹ lần đầu (không bắt buộc)" className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none mb-3 dark:text-white dark:placeholder:text-light-grey text-blueberry" />
+        {(isNew || (firstAllocation && Number(form.initial_allocation) > 0)) && (
+          <div className="mb-3">
+            <label className="text-xs text-steel dark:text-light-grey font-semibold block mb-1">Ngày nạp quỹ lần đầu</label>
+            <input type="date" value={form.initial_allocation_date} max={new Date().toISOString().slice(0, 10)} onChange={(e) => setForm({ ...form, initial_allocation_date: e.target.value })} className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none dark:text-white text-blueberry [color-scheme:light] dark:[color-scheme:dark]" />
+          </div>
+        )}
         <MoneyInput value={form.target_amount} onChange={(v) => setForm({ ...form, target_amount: v })} placeholder="Số tiền mục tiêu (không bắt buộc)" className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none mb-3 dark:text-white dark:placeholder:text-light-grey text-blueberry" />
 
         <div className="relative mb-3">
@@ -2219,10 +2333,10 @@ function QuickAllocateWithdrawForm({ category, mode, onClose, onSaved }) {
         {mode === 'allocation' && (
           <div className="mb-3">
             <p className="text-blueberry dark:text-white font-bold text-sm mb-2">Nguồn nạp (Kỳ thu nhập)</p>
-            <select value={selectedYear} onChange={(e) => handleYearChange(Number(e.target.value))} className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none mb-2 dark:text-white text-blueberry">
+            <select value={selectedYear} onChange={(e) => handleYearChange(Number(e.target.value))} className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none mb-2 dark:text-white text-blueberry [color-scheme:light] dark:[color-scheme:dark]">
               {years.map((y) => <option key={y} value={y}>{y}</option>)}
             </select>
-            <select value={selectedPeriod} onChange={(e) => setSelectedPeriod(e.target.value)} className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none dark:text-white text-blueberry">
+            <select value={selectedPeriod} onChange={(e) => setSelectedPeriod(e.target.value)} className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none dark:text-white text-blueberry [color-scheme:light] dark:[color-scheme:dark]">
               {periods.map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
             </select>
             <p className="text-steel dark:text-light-grey text-xs mt-2">Số tiền sẽ được trừ từ thu nhập của kỳ này.</p>
@@ -2343,7 +2457,7 @@ function EditGoalForm({ goal, onClose, onSaved, isNew, softDelete }) {
         <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Tên mục tiêu" className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none mb-3 dark:text-white dark:placeholder:text-light-grey text-blueberry" />
 
         <p className="text-sm text-blueberry dark:text-white font-semibold mb-2">Mức độ ưu tiên</p>
-        <select value={form.priority_term} onChange={(e) => setForm({ ...form, priority_term: e.target.value })} className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none mb-3 dark:text-white dark:placeholder:text-light-grey text-blueberry">
+        <select value={form.priority_term} onChange={(e) => setForm({ ...form, priority_term: e.target.value })} className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none mb-3 dark:text-white dark:placeholder:text-light-grey text-blueberry [color-scheme:light] dark:[color-scheme:dark]">
           {PRIORITY_TERMS.map((p) => <option key={p.value} value={p.value}>{p.value}</option>)}
         </select>
 
@@ -2387,8 +2501,6 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
   const [search, setSearch] = useState('');
   const [editingTx, setEditingTx] = useState(null);
   const [recentTxFilter, setRecentTxFilter] = useState('7d');
-  const [showAccountMenu, setShowAccountMenu] = useState(false);
-  useCloseOnEscape(showAccountMenu, () => setShowAccountMenu(false));
   const [showAddWidget, setShowAddWidget] = useState(false);
   const [showWalletPopover, setShowWalletPopover] = useState(false);
   const [showAddWallet, setShowAddWallet] = useState(false);
@@ -2518,6 +2630,26 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
   const maxIncomeBucketVal = Math.max(...incomeSeries.flatMap((c) => c.values), 1);
   const maxExpenseBucketVal = Math.max(...expenseSeries.flatMap((c) => c.values), 1);
 
+  // Ledger modal ("Xem chi tiết") cho 2 card "Thu nhập/Chi tiêu theo danh mục" — cùng
+  // TxLedgerModal đang dùng ở màn Báo cáo, lấy đúng danh sách giao dịch thô đang được
+  // lọc theo bộ lọc Tuần/Tháng/Năm (breakdownPeriod) hiện tại của 2 chart này.
+  const [ledgerModal, setLedgerModal] = useState(null); // { title, txs } | null
+  function breakdownFilteredTxs(txType) {
+    let txs = transactions.filter((t) => t.type === txType);
+    if (breakdownPeriod === 'month') {
+      txs = txs.filter((t) => transactionPeriodKey(t) === breakdownPeriodKey);
+    } else if (breakdownPeriod === 'year') {
+      txs = txs.filter((t) => Number(transactionPeriodKey(t).split('-')[0]) === breakdownYear);
+    } else {
+      const rangeStart = breakdownBuckets[0].start, rangeEnd = breakdownBuckets[breakdownBuckets.length - 1].end;
+      txs = txs.filter((t) => { const d = new Date(t.date || t.created_at); return d >= rangeStart && d <= rangeEnd; });
+    }
+    return txs;
+  }
+  const breakdownLabel = breakdownPeriod === 'month'
+    ? `Kỳ ${Number(breakdownPeriodKey.split('-')[1])}/${breakdownYear}`
+    : breakdownPeriod === 'year' ? `Năm ${breakdownYear}` : '7 ngày gần đây';
+
   function PeriodControls() {
     return (
       <div className="flex items-center gap-2 flex-wrap justify-end">
@@ -2527,16 +2659,16 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
           ))}
         </div>
         {breakdownPeriod === 'year' && (
-          <select value={breakdownYear} onChange={(e) => setBreakdownYear(Number(e.target.value))} className="bg-ice-cream dark:bg-night-sky rounded-full text-xs font-bold px-2.5 py-1.5 outline-none text-blueberry dark:text-white">
+          <select value={breakdownYear} onChange={(e) => setBreakdownYear(Number(e.target.value))} className="bg-ice-cream dark:bg-night-sky rounded-full text-xs font-bold px-2.5 py-1.5 outline-none text-blueberry dark:text-white [color-scheme:light] dark:[color-scheme:dark]">
             {breakdownYearOptions.map((y) => <option key={y} value={y}>{y}</option>)}
           </select>
         )}
         {breakdownPeriod === 'month' && (
           <>
-            <select value={breakdownYear} onChange={(e) => { const y = Number(e.target.value); setBreakdownYear(y); setBreakdownPeriodKey(`${y}-${breakdownPeriodKey.split('-')[1]}`); }} className="bg-ice-cream dark:bg-night-sky rounded-full text-xs font-bold px-2.5 py-1.5 outline-none text-blueberry dark:text-white">
+            <select value={breakdownYear} onChange={(e) => { const y = Number(e.target.value); setBreakdownYear(y); setBreakdownPeriodKey(`${y}-${breakdownPeriodKey.split('-')[1]}`); }} className="bg-ice-cream dark:bg-night-sky rounded-full text-xs font-bold px-2.5 py-1.5 outline-none text-blueberry dark:text-white [color-scheme:light] dark:[color-scheme:dark]">
               {breakdownYearOptions.map((y) => <option key={y} value={y}>{y}</option>)}
             </select>
-            <select value={breakdownPeriodKey} onChange={(e) => setBreakdownPeriodKey(e.target.value)} className="bg-ice-cream dark:bg-night-sky rounded-full text-xs font-bold px-2.5 py-1.5 outline-none text-blueberry dark:text-white">
+            <select value={breakdownPeriodKey} onChange={(e) => setBreakdownPeriodKey(e.target.value)} className="bg-ice-cream dark:bg-night-sky rounded-full text-xs font-bold px-2.5 py-1.5 outline-none text-blueberry dark:text-white [color-scheme:light] dark:[color-scheme:dark]">
               {breakdownPeriodOptions.map((p) => <option key={p.key} value={p.key}>{`Kỳ ${Number(p.key.split('-')[1])}`}</option>)}
             </select>
           </>
@@ -2586,68 +2718,8 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
   const incomeThisMonth = thisMonthTx.filter((t) => t.type === 'income').reduce((s, t) => s + Number(t.amount), 0);
   const expenseThisMonth = thisMonthTx.filter((t) => t.type === 'expense').reduce((s, t) => s + Number(t.amount), 0);
 
-  // ==== [PHASE 2] Thu nhập được chi kỳ hiện tại — logic tài chính mới (calculatePeriodFinancials) ====
-  const curFinancials = calculatePeriodFinancials(curPeriodKey, transactions, categories, spendingPoolByPeriod?.[curPeriodKey]);
-  const [editingPool, setEditingPool] = useState(false);
-  const [poolInput, setPoolInput] = useState('');
-  function startEditPool() { setPoolInput(String(curFinancials.spendingPool)); setEditingPool(true); }
-  async function confirmEditPool() {
-    if (poolInput === '' || Number.isNaN(Number(poolInput))) { alert('Nhập số tiền hợp lệ'); return; }
-    const ok = await saveSpendingPoolForPeriod(curPeriodKey, poolInput);
-    if (ok) setEditingPool(false);
-  }
-  const spendingPoolCard = (
-      <div className="bg-white dark:bg-[#1e1e32] rounded-3xl p-5 shadow-soft">
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-blueberry dark:text-white font-extrabold text-base">Thu nhập được chi kỳ này</h2>
-          {!editingPool && (
-            <button onClick={startEditPool} className="text-turquoise text-xs font-bold flex items-center gap-1"><Pencil size={12} /> Sửa</button>
-          )}
-        </div>
-        {editingPool ? (
-          <div className="flex items-center gap-2 mb-3">
-            <MoneyInput value={poolInput} onChange={setPoolInput} placeholder="Số tiền được phép chi" className="flex-1 bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-2.5 text-sm outline-none dark:text-white text-blueberry" />
-            <button onClick={confirmEditPool} className="w-9 h-9 rounded-full bg-gradient-primary text-white flex items-center justify-center flex-shrink-0"><Check size={16} /></button>
-            <button onClick={() => setEditingPool(false)} className="w-9 h-9 rounded-full bg-ice-cream dark:bg-night-sky text-steel dark:text-light-grey flex items-center justify-center flex-shrink-0"><X size={16} /></button>
-          </div>
-        ) : (
-          <p className="text-blueberry dark:text-white text-2xl font-bold mb-3">{formatMoney(curFinancials.spendingPool)}</p>
-        )}
-        <div className="grid grid-cols-2 gap-3 text-sm">
-          <div>
-            <p className="text-steel dark:text-light-grey text-xs">Thu nhập tính vào Thu nhập được chi</p>
-            <p className="text-blueberry dark:text-white font-bold">{formatMoney(curFinancials.incomeForSpendingPool)}</p>
-          </div>
-          <div>
-            <p className="text-steel dark:text-light-grey text-xs">Thu nhập đặc biệt</p>
-            <p className="text-blueberry dark:text-white font-bold">{formatMoney(curFinancials.specialIncome)}</p>
-          </div>
-          <div>
-            <p className="text-steel dark:text-light-grey text-xs">Đã dùng (nạp quỹ + chi)</p>
-            <p className="text-blueberry dark:text-white font-bold">{formatMoney(curFinancials.totalSpentFromSpendingPool)}</p>
-          </div>
-          <div>
-            <p className="text-steel dark:text-light-grey text-xs">Dư sau chi</p>
-            <p className={`font-bold ${curFinancials.remainingAfterSpend >= 0 ? 'text-turquoise' : 'text-cotton-candy'}`}>{formatMoney(curFinancials.remainingAfterSpend)}</p>
-          </div>
-          {curFinancials.accumulationBeforeSpend > 0 && (
-            <div className="col-span-2">
-              <p className="text-steel dark:text-light-grey text-xs">Tích lũy trước chi</p>
-              <p className="text-lavender font-bold">{formatMoney(curFinancials.accumulationBeforeSpend)}</p>
-            </div>
-          )}
-          {curFinancials.expenseFromFund > 0 && (
-            <div className="col-span-2">
-              <p className="text-steel dark:text-light-grey text-xs">Chi từ quỹ (không trừ Thu nhập được chi)</p>
-              <p className="text-blueberry dark:text-white font-bold">{formatMoney(curFinancials.expenseFromFund)}</p>
-            </div>
-          )}
-        </div>
-        {curFinancials.isOverSpendingPool && (
-          <p className="text-cotton-candy text-xs mt-3 font-semibold">⚠️ Đã sử dụng vượt quá Thu nhập được chi của kỳ này.</p>
-        )}
-      </div>
-  );
+  // Thẻ "Thu nhập được chi kỳ này" đã được gỡ khỏi Dashboard theo yêu cầu — việc cài đặt
+  // Thu nhập được chi cho từng kỳ nay chuyển sang mục Cài đặt > Danh mục (xem CategorySection).
 
   const prevPeriodDate = new Date(curPeriodStart); prevPeriodDate.setDate(prevPeriodDate.getDate() - 1);
   const prevPeriodKey = currentPeriodKey(prevPeriodDate);
@@ -2717,11 +2789,11 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
   function TotalsPeriodSelect({ month, year, onMonthChange, onYearChange }) {
     return (
       <div className="flex items-center gap-1.5">
-        <select value={month} onChange={(e) => onMonthChange(e.target.value)} className="bg-ice-cream dark:bg-night-sky rounded-full text-xs font-bold px-2.5 py-1.5 outline-none text-blueberry dark:text-white">
+        <select value={month} onChange={(e) => onMonthChange(e.target.value)} className="bg-ice-cream dark:bg-night-sky rounded-full text-xs font-bold px-2.5 py-1.5 outline-none text-blueberry dark:text-white [color-scheme:light] dark:[color-scheme:dark]">
           <option value="all">Cả năm</option>
           {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => <option key={m} value={m}>{`Th${m}`}</option>)}
         </select>
-        <select value={year} onChange={(e) => onYearChange(Number(e.target.value))} className="bg-ice-cream dark:bg-night-sky rounded-full text-xs font-bold px-2.5 py-1.5 outline-none text-blueberry dark:text-white">
+        <select value={year} onChange={(e) => onYearChange(Number(e.target.value))} className="bg-ice-cream dark:bg-night-sky rounded-full text-xs font-bold px-2.5 py-1.5 outline-none text-blueberry dark:text-white [color-scheme:light] dark:[color-scheme:dark]">
           {totalsYearOptions.map((y) => <option key={y} value={y}>{y}</option>)}
         </select>
       </div>
@@ -2823,25 +2895,7 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
         <div className="w-full min-h-[100dvh] pb-28 relative">
           <div className="px-5 pt-8 flex items-center justify-between">
             <div><p className="text-white/80 text-sm font-semibold">Chào bạn!</p><h1 className="text-white text-2xl font-extrabold">{displayName || 'Bạn'}</h1></div>
-            <div className="relative">
-              <button onClick={() => setShowAccountMenu((v) => !v)} className="w-11 h-11 rounded-full bg-white/30 backdrop-blur flex items-center justify-center text-white border border-white/40 overflow-hidden">
-                {avatarUrl ? <img src={avatarUrl} alt="" className="w-full h-full object-cover" /> : <span className="font-bold">{(displayName || 'B')[0].toUpperCase()}</span>}
-              </button>
-              {showAccountMenu && (
-                <>
-                  <div className="fixed inset-0 z-30" onClick={() => setShowAccountMenu(false)} />
-                  <div className="absolute top-14 right-0 bg-white dark:bg-[#1e1e32] rounded-2xl shadow-card border-0 dark:border dark:border-[rgba(189,189,203,0.1)] py-1.5 w-52 z-40">
-                    <button onClick={() => { setShowAccountMenu(false); openSettings ? openSettings('profile') : setScreen('settings'); }} className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-blueberry dark:text-white hover:bg-ice-cream dark:hover:bg-night-sky/30">
-                      <UserCog size={15} /> Cài đặt
-                    </button>
-                    <div className="h-px bg-light-grey/20 dark:bg-light-grey/10 my-1.5" />
-                    <button onClick={async () => { setShowAccountMenu(false); await supabase.auth.signOut(); }} className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-cotton-candy hover:bg-cotton-candy-light dark:hover:bg-night-sky/30">
-                      <LogOut size={15} /> Đăng xuất
-                    </button>
-                  </div>
-                </>
-              )}
-            </div>
+            <AvatarMenu avatarUrl={avatarUrl} displayName={displayName} openSettings={openSettings || (() => setScreen('settings'))} variant="mobile" />
           </div>
           <div className="px-5 mt-4">
             <p className="text-white/70 text-xs font-semibold">Tổng tài sản</p>
@@ -2861,12 +2915,9 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
                 </button>
               ))}
           </div>
-          <div className="mt-6 px-5">
-            {spendingPoolCard}
-          </div>
           <div className="frost-card mt-6 rounded-[2.5rem] min-h-[60vh] px-5 pt-6 pb-6 overflow-hidden">
-            <div className="pointer-events-none absolute rounded-full blur-3xl opacity-90 w-56 h-56 bg-turquoise/35 dark:bg-turquoise/50 -top-10 -right-10" />
-            <div className="pointer-events-none absolute rounded-full blur-3xl opacity-90 w-48 h-48 bg-cotton-candy/35 dark:bg-cotton-candy/50 bottom-24 -left-10" />
+            <div className="frost-blob z-0 w-56 h-56 bg-turquoise-light/70 dark:bg-turquoise/22 -top-10 -right-10" />
+            <div className="frost-blob z-0 w-48 h-48 bg-cotton-candy-light/70 dark:bg-cotton-candy/22 bottom-24 -left-10" />
             <div className="relative flex items-center justify-between mb-4">
               <h2 className="text-blueberry dark:text-white font-extrabold text-lg">Ngân sách tháng này</h2>
             </div>
@@ -2991,16 +3042,13 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
 
       {/* Desktop version */}
       <div className="hidden md:block relative">
-        <div className="frost-blob w-[30rem] h-[30rem] bg-baby-blue/35 dark:bg-baby-blue/50 top-24 right-12" />
-        <div className="frost-blob w-[26rem] h-[26rem] bg-lavender/35 dark:bg-lavender/50 bottom-16 left-56" />
+        <div className="frost-blob z-0 w-96 h-96 bg-baby-blue-light/70 dark:bg-baby-blue/22 -top-10 right-0" />
+        <div className="frost-blob z-0 w-80 h-80 bg-lavender-light/70 dark:bg-lavender/22 top-64 -left-10" />
         <div className="relative flex items-center justify-between mb-6">
           <h1 className="text-blueberry dark:text-white text-2xl font-extrabold">Dashboard</h1>
           <button onClick={() => setShowAddWidget(true)} className="bg-gradient-primary text-white rounded-full pl-3 pr-4 py-2 text-sm font-bold flex items-center gap-1.5 shadow-md shadow-turquoise/30">
             <Plus size={15} /> Thêm widget
           </button>
-        </div>
-        <div className="relative mb-6">
-          {spendingPoolCard}
         </div>
         <div
           className="relative grid gap-6"
@@ -3134,7 +3182,7 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
               <div className="flex items-center justify-between mb-4 gap-2">
                 <h3 className="text-blueberry dark:text-white font-extrabold">Hoạt động gần đây</h3>
                 <div className="flex items-center gap-2 flex-shrink-0">
-                  <select value={recentTxFilter} onChange={(e) => setRecentTxFilter(e.target.value)} className="frost-inset rounded-full text-xs font-bold px-3 py-1.5 outline-none text-blueberry dark:text-white">
+                  <select value={recentTxFilter} onChange={(e) => setRecentTxFilter(e.target.value)} className="frost-inset rounded-full text-xs font-bold px-3 py-1.5 outline-none text-blueberry dark:text-white [color-scheme:light] dark:[color-scheme:dark]">
                     <option value="7d">7d</option>
                     <option value="month">Tháng</option>
                     <option value="year">Năm</option>
@@ -3317,7 +3365,10 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
           <div className="frost-card rounded-3xl p-6">
             <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
               <h3 className="text-blueberry dark:text-white font-extrabold">Thu nhập theo danh mục</h3>
-              <PeriodControls />
+              <div className="flex items-center gap-2 flex-wrap justify-end">
+                <PeriodControls />
+                <button onClick={() => setLedgerModal({ title: `Thu nhập theo danh mục — ${breakdownLabel}`, txs: breakdownFilteredTxs('income') })} className="text-xs font-bold text-turquoise hover:underline whitespace-nowrap">Xem chi tiết</button>
+              </div>
             </div>
             {incomeSeries.length === 0 ? <p className="text-steel dark:text-light-grey text-sm text-center py-6">Chưa có thu nhập trong khoảng này.</p> : (
               <CategoryBarChart series={incomeSeries} maxVal={maxIncomeBucketVal} />
@@ -3325,13 +3376,31 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
           </div>
 
           <div className="frost-card rounded-3xl p-6">
-            <h3 className="text-blueberry dark:text-white font-extrabold mb-4">Chi tiêu theo danh mục</h3>
+            <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+              <h3 className="text-blueberry dark:text-white font-extrabold">Chi tiêu theo danh mục</h3>
+              <div className="flex items-center gap-2 flex-wrap justify-end">
+                <PeriodControls />
+                <button onClick={() => setLedgerModal({ title: `Chi tiêu theo danh mục — ${breakdownLabel}`, txs: breakdownFilteredTxs('expense') })} className="text-xs font-bold text-cotton-candy hover:underline whitespace-nowrap">Xem chi tiết</button>
+              </div>
+            </div>
             {expenseSeries.length === 0 ? <p className="text-steel dark:text-light-grey text-sm text-center py-6">Chưa có chi tiêu trong khoảng này.</p> : (
               <CategoryBarChart series={expenseSeries} maxVal={maxExpenseBucketVal} />
             )}
           </div>
         </div>
       </div>
+
+      {ledgerModal && (
+        <TxLedgerModal
+          title={ledgerModal.title}
+          txs={ledgerModal.txs}
+          categories={categories}
+          accounts={accounts}
+          allTx={transactions}
+          spendingPoolByPeriod={spendingPoolByPeriod}
+          onClose={() => setLedgerModal(null)}
+        />
+      )}
 
       {showAddWidget && (
         <div className="fixed inset-0 bg-black/40 flex items-end md:items-center md:justify-center z-30" onClick={() => setShowAddWidget(false)}>
@@ -3483,8 +3552,8 @@ function Funds({ setScreen, categories, transactions, onOpenFund, reload, onAddC
 
       {/* Desktop version */}
       <div className="hidden md:block relative">
-        <div className="frost-blob w-[30rem] h-[30rem] bg-turquoise/35 dark:bg-turquoise/50 top-24 right-12" />
-        <div className="frost-blob w-[26rem] h-[26rem] bg-lavender/35 dark:bg-lavender/50 bottom-16 left-56" />
+        <div className="frost-blob z-0 w-96 h-96 bg-turquoise-light/70 dark:bg-turquoise/22 -top-10 right-10" />
+        <div className="frost-blob z-0 w-80 h-80 bg-lavender-light/70 dark:bg-lavender/22 top-96 -left-10" />
         <h1 className="relative text-blueberry dark:text-white text-2xl font-extrabold mb-6">Quản lý quỹ</h1>
 
         <div className="relative grid grid-cols-4 gap-4 mb-6">
@@ -3728,11 +3797,15 @@ function Funds({ setScreen, categories, transactions, onOpenFund, reload, onAddC
 /* ==============================================================================
    10. FUND DETAIL
    ============================================================================== */
-function FundDetail({ category, transactions, onBack, reload, softDelete, setScreen, onAddClick, displayName, avatarUrl, theme, toggleTheme, openSettings, sidebarCollapsed, toggleSidebar, spendingPoolByPeriod }) {
+function FundDetail({ category, transactions, categories, accounts, onBack, reload, softDelete, setScreen, onAddClick, displayName, avatarUrl, theme, toggleTheme, openSettings, sidebarCollapsed, toggleSidebar, spendingPoolByPeriod }) {
   const [filter, setFilter] = useState('all');
   const [showEdit, setShowEdit] = useState(false);
   const [quickMode, setQuickMode] = useState(null);
   const [editingTx, setEditingTx] = useState(null);
+  // FIX: bộ lọc khoảng thời gian cho Lịch sử quỹ (áp dụng cho cả bản mobile lẫn desktop)
+  const [historyDateFrom, setHistoryDateFrom] = useState('');
+  const [historyDateTo, setHistoryDateTo] = useState('');
+  const hasHistoryDateFilter = historyDateFrom || historyDateTo;
 
   // Lấy tất cả giao dịch nạp/rút, sắp xếp theo thời gian tăng dần
   const allHistory = transactions
@@ -3794,8 +3867,22 @@ function FundDetail({ category, transactions, onBack, reload, softDelete, setScr
     filter === 'profit' ? combinedHistory.filter(item => item.isProfit) :
     combinedHistory.filter(item => item.type === filter && !item.isProfit);
 
+  // Ngày/giờ "thực" của 1 dòng lịch sử — giao dịch dùng "date" (ngày nghiệp vụ), lợi nhuận
+  // dùng "created_at" (đã được set = ngày credit). Dùng chung cho hiển thị lẫn lọc theo ngày.
+  function historyItemDate(item) {
+    return new Date(item.isProfit ? item.created_at : (item.date || item.created_at));
+  }
+
+  // Lọc theo khoảng ngày do người dùng chọn (nếu có)
+  const dateFilteredHistory = !hasHistoryDateFilter ? filteredHistory : filteredHistory.filter((item) => {
+    const d = historyItemDate(item);
+    if (historyDateFrom && d < new Date(historyDateFrom + 'T00:00:00')) return false;
+    if (historyDateTo && d > new Date(historyDateTo + 'T23:59:59')) return false;
+    return true;
+  });
+
   // Đảo ngược để hiển thị mới nhất lên đầu
-  const displayHistory = [...filteredHistory].reverse();
+  const displayHistory = [...dateFilteredHistory].reverse();
 
   const balance = fundBalanceWithProfit(category, transactions);
   const principalBalance = fundBalance(category.id, transactions);
@@ -3892,10 +3979,20 @@ function FundDetail({ category, transactions, onBack, reload, softDelete, setScr
         <div className="px-5 mt-6">
           <h2 className="text-blueberry dark:text-white font-extrabold text-lg mb-3">Hoạt động gần đây</h2>
 
-          <div className="flex gap-2 overflow-x-auto pb-1 mb-4 scrollbar-hide">
+          <div className="flex gap-2 overflow-x-auto pb-1 mb-3 scrollbar-hide">
             {[{ key: 'all', label: 'Tất cả' }, { key: 'allocation', label: 'Góp quỹ' }, { key: 'expense', label: 'Rút quỹ' }, { key: 'profit', label: 'Lợi nhuận' }].map((f) => (
               <button key={f.key} onClick={() => setFilter(f.key)} className={`px-4 py-1.5 rounded-full text-sm flex-shrink-0 font-semibold ${filter === f.key ? 'bg-gradient-primary text-white shadow-md shadow-turquoise/30' : 'bg-white dark:bg-[#2a2a44] text-steel dark:text-light-grey shadow-soft'}`}>{f.label}</button>
             ))}
+          </div>
+          <div className="flex flex-wrap items-center gap-2 mb-4">
+            <div className="flex items-center gap-2 bg-white dark:bg-[#2a2a44] rounded-full px-3 py-1.5 shadow-soft">
+              <input type="date" value={historyDateFrom} onChange={(e) => setHistoryDateFrom(e.target.value)} className="bg-transparent text-xs font-semibold outline-none text-blueberry dark:text-white [color-scheme:light] dark:[color-scheme:dark]" />
+              <span className="text-steel dark:text-light-grey text-xs">→</span>
+              <input type="date" value={historyDateTo} onChange={(e) => setHistoryDateTo(e.target.value)} className="bg-transparent text-xs font-semibold outline-none text-blueberry dark:text-white [color-scheme:light] dark:[color-scheme:dark]" />
+            </div>
+            {hasHistoryDateFilter && (
+              <button onClick={() => { setHistoryDateFrom(''); setHistoryDateTo(''); }} className="text-xs font-bold text-steel dark:text-light-grey underline">Xoá lọc ngày</button>
+            )}
           </div>
 
           {displayHistory.length === 0 ? (
@@ -3944,7 +4041,7 @@ function FundDetail({ category, transactions, onBack, reload, softDelete, setScr
                             </div>
                             <p className={`font-bold text-sm flex-shrink-0 ${amountColor}`}>{item.type === 'expense' ? '-' : '+'}{formatMoney(item.amount)}</p>
                           </div>
-                          <p className="text-steel dark:text-light-grey text-xs mt-0.5">{timeDisplay}</p>
+                          <p className="text-steel dark:text-light-grey text-xs mt-0.5">{itemDate.toLocaleDateString('vi-VN')} · {timeDisplay}</p>
                           {noteText && <p className="text-steel dark:text-light-grey text-xs mt-0.5 truncate">{noteText}</p>}
                           {item.balanceAfter !== undefined && <p className="text-steel dark:text-light-grey text-xs mt-0.5">Số dư: {formatMoney(item.balanceAfter)}</p>}
                         </div>
@@ -4031,13 +4128,23 @@ function FundDetail({ category, transactions, onBack, reload, softDelete, setScr
             </div>
 
  <div className="frost-card rounded-3xl p-6 ">
-              <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
                 <h2 className="text-blueberry dark:text-white font-extrabold text-lg">Lịch sử</h2>
-                <div className="flex gap-2">
+                <div className="flex gap-2 flex-wrap">
                   {[{ key: 'all', label: 'Tất cả' }, { key: 'allocation', label: 'Nạp (Thu)' }, { key: 'expense', label: 'Chi' }, { key: 'profit', label: 'Lợi nhuận' }].map((f) => (
                     <button key={f.key} onClick={() => setFilter(f.key)} className={`px-3 py-1.5 rounded-full text-xs flex-shrink-0 font-bold ${filter === f.key ? 'bg-gradient-primary text-white shadow-md shadow-turquoise/30' : 'frost-inset text-steel dark:text-light-grey'}`}>{f.label}</button>
                   ))}
                 </div>
+              </div>
+              <div className="flex flex-wrap items-center gap-2 mb-4">
+                <div className="flex items-center gap-2 frost-inset rounded-full px-3 py-1.5">
+                  <input type="date" value={historyDateFrom} onChange={(e) => setHistoryDateFrom(e.target.value)} className="bg-transparent text-xs font-semibold outline-none text-blueberry dark:text-white [color-scheme:light] dark:[color-scheme:dark]" />
+                  <span className="text-steel dark:text-light-grey text-xs">→</span>
+                  <input type="date" value={historyDateTo} onChange={(e) => setHistoryDateTo(e.target.value)} className="bg-transparent text-xs font-semibold outline-none text-blueberry dark:text-white [color-scheme:light] dark:[color-scheme:dark]" />
+                </div>
+                {hasHistoryDateFilter && (
+                  <button onClick={() => { setHistoryDateFrom(''); setHistoryDateTo(''); }} className="text-xs font-bold text-steel dark:text-light-grey underline">Xoá lọc ngày</button>
+                )}
               </div>
               {filter === 'profit' ? (
                 rate === 0 ? <p className="text-steel dark:text-light-grey text-sm text-center py-8">Chưa đặt tỷ suất lợi nhuận cho quỹ này.</p> : (
@@ -4072,6 +4179,9 @@ function FundDetail({ category, transactions, onBack, reload, softDelete, setScr
                     const isInitial = item.type === 'allocation' && firstAllocation && item.id === firstAllocation.id;
                     const isOverLimit = (item.note || '').startsWith('[Vượt hạn mức]');
                     const showTopBorder = idx > 0 && !isInitial;
+                    const itemDateTime = historyItemDate(item);
+                    const dateTimeLabel = `${itemDateTime.toLocaleDateString('vi-VN')} ${itemDateTime.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}`;
+                    const noteLine = item.isProfit ? item.note : stripPeriodTag(item.note);
                     return (
                       <div key={item.id} className={`flex items-center gap-3 py-3 ${isInitial ? 'bg-turquoise/10 -mx-2 px-2 rounded-xl border border-turquoise' : showTopBorder ? 'border-t border-[rgba(189,189,203,0.2)] dark:border-[rgba(189,189,203,0.1)]' : ''}`}>
                         <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${isInitial ? 'bg-turquoise' : item.type === 'allocation' ? 'bg-turquoise/10' : item.isProfit ? 'bg-turquoise/10' : 'bg-cotton-candy/10'}`}>
@@ -4085,9 +4195,8 @@ function FundDetail({ category, transactions, onBack, reload, softDelete, setScr
                             </p>
                             {isOverLimit && <span className="text-[10px] font-bold text-white bg-cotton-candy px-2 py-0.5 rounded-full">Vượt hạn mức</span>}
                           </div>
-                          <p className="text-steel dark:text-light-grey text-xs">
-                            {item.isProfit ? item.note : stripPeriodTag(item.note) || new Date(item.created_at || item.date).toLocaleString('vi-VN')}
-                          </p>
+                          <p className="text-steel dark:text-light-grey text-xs">{dateTimeLabel}</p>
+                          {noteLine && <p className="text-steel dark:text-light-grey text-xs">{noteLine}</p>}
                           {item.balanceAfter !== undefined && <p className="text-steel dark:text-light-grey text-xs">Số dư: {formatMoney(item.balanceAfter)}</p>}
                         </div>
                         <p className={`font-bold text-sm flex-shrink-0 ${item.type === 'expense' ? 'text-cotton-candy' : 'text-turquoise'}`}>{item.type === 'expense' ? '-' : '+'}{formatMoney(item.amount)}</p>
@@ -4123,8 +4232,8 @@ function FundDetail({ category, transactions, onBack, reload, softDelete, setScr
         <EditTransaction
           transaction={editingTx}
           onClose={() => setEditingTx(null)}
-          accounts={[]} /* Chỉ truyền nếu cần */
-          categories={categories}
+          accounts={accounts || []}
+          categories={categories || []}
           transactions={transactions}
           onSaved={() => { reload(); setEditingTx(null); }}
           spendingPoolByPeriod={spendingPoolByPeriod}
@@ -4176,8 +4285,8 @@ function Accounts({ setScreen, accounts, transactions, onOpenAccount, reload, on
       </div>
 
       <div className="hidden md:block relative">
-        <div className="frost-blob w-[30rem] h-[30rem] bg-baby-blue/35 dark:bg-baby-blue/50 top-24 right-12" />
-        <div className="frost-blob w-[26rem] h-[26rem] bg-cotton-candy/35 dark:bg-cotton-candy/50 bottom-16 left-56" />
+        <div className="frost-blob z-0 w-96 h-96 bg-baby-blue-light/70 dark:bg-baby-blue/22 -top-10 right-10" />
+        <div className="frost-blob z-0 w-80 h-80 bg-cotton-candy-light/70 dark:bg-cotton-candy/22 top-96 -left-10" />
         <div className="relative flex items-center justify-between mb-2">
           <div>
             <h1 className="text-blueberry dark:text-white text-2xl font-extrabold">Quản lý ví</h1>
@@ -4217,13 +4326,13 @@ function Accounts({ setScreen, accounts, transactions, onOpenAccount, reload, on
 /* ==============================================================================
    12. ACCOUNT DETAIL
    ============================================================================== */
-function AccountDetail({ account, transactions, categories, onBack, reload, softDelete, setScreen, onAddClick, displayName, avatarUrl, theme, toggleTheme, openSettings, sidebarCollapsed, toggleSidebar, spendingPoolByPeriod }) {
+function AccountDetail({ account, transactions, categories, accounts, onBack, reload, softDelete, setScreen, onAddClick, displayName, avatarUrl, theme, toggleTheme, openSettings, sidebarCollapsed, toggleSidebar, spendingPoolByPeriod }) {
   const [showAdjust, setShowAdjust] = useState(false);
   const [showEdit, setShowEdit] = useState(false);
   const [editingTx, setEditingTx] = useState(null);
 
   const history = transactions
-    .filter((t) => t.account_id === account.id && (t.type === 'income' || t.type === 'expense' || t.type === 'adjustment'))
+    .filter((t) => t.account_id === account.id && (t.type === 'income' || t.type === 'expense' || t.type === 'adjustment' || t.type === 'allocation'))
     .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
   const balance = accountBalance(account, transactions);
   const typeLabel = ACCOUNT_TYPES.find((t) => t.value === account.type)?.label || account.type;
@@ -4379,8 +4488,8 @@ function AccountDetail({ account, transactions, categories, onBack, reload, soft
         <EditTransaction
           transaction={editingTx}
           onClose={() => setEditingTx(null)}
-          accounts={[]}
-          categories={categories}
+          accounts={accounts || []}
+          categories={categories || []}
           transactions={transactions}
           onSaved={() => { reload(); setEditingTx(null); }}
           spendingPoolByPeriod={spendingPoolByPeriod}
@@ -4483,8 +4592,8 @@ function Goals({ setScreen, goals, loadingGoals, reload, softDelete, onAddClick,
       </div>
 
       <div className="hidden md:block relative" onClick={() => { setOpenMenuId(null); setShowFilterMenu(false); setShowSortMenu(false); }}>
-        <div className="frost-blob w-[30rem] h-[30rem] bg-lavender/35 dark:bg-lavender/50 top-24 right-12" />
-        <div className="frost-blob w-[26rem] h-[26rem] bg-turquoise/35 dark:bg-turquoise/50 bottom-16 left-56" />
+        <div className="frost-blob z-0 w-96 h-96 bg-lavender-light/70 dark:bg-lavender/22 -top-10 right-10" />
+        <div className="frost-blob z-0 w-80 h-80 bg-turquoise-light/70 dark:bg-turquoise/22 top-96 -left-10" />
         <h1 className="relative text-blueberry dark:text-white text-2xl font-extrabold mb-6">Mục tiêu</h1>
 
         <div className="relative grid grid-cols-4 gap-4 mb-6">
@@ -4728,7 +4837,7 @@ function Goals({ setScreen, goals, loadingGoals, reload, softDelete, onAddClick,
 /* ==============================================================================
    14. SETTINGS
    ============================================================================== */
-function Settings({ setScreen, categories, accounts, reload, softDelete, user, onProfileUpdated, onAddClick, theme, toggleTheme, initialSection, openSettings, sidebarCollapsed, toggleSidebar, onResetData, resettingData, logs, logActivity, restoreLog }) {
+function Settings({ setScreen, categories, accounts, reload, softDelete, user, onProfileUpdated, onAddClick, theme, toggleTheme, initialSection, openSettings, sidebarCollapsed, toggleSidebar, onResetData, resettingData, logs, logActivity, restoreLog, spendingPoolByPeriod, saveSpendingPoolForPeriod }) {
   const displayName = user?.user_metadata?.first_name || user?.user_metadata?.full_name;
   const avatarUrl = user?.user_metadata?.avatar_url;
   const [section, setSection] = useState(initialSection || 'profile');
@@ -4924,7 +5033,7 @@ function Settings({ setScreen, categories, accounts, reload, softDelete, user, o
 
           <div className="mt-4 bg-white dark:bg-[#1e1e32] rounded-[2.5rem] min-h-[76vh] px-5 pt-6 pb-6 shadow-soft scrollbar-hide">
             {section === 'profile' && <ProfileSection user={user} onUpdated={onProfileUpdated} logActivity={logActivity} />}
-            {section === 'categories' && <CategorySection categories={categories} reload={reload} softDelete={softDelete} />}
+            {section === 'categories' && <CategorySection categories={categories} reload={reload} softDelete={softDelete} spendingPoolByPeriod={spendingPoolByPeriod} saveSpendingPoolForPeriod={saveSpendingPoolForPeriod} />}
             {section === 'data' && ResetDataPanel}
             {section === 'history' && SystemHistoryPanel}
           </div>
@@ -4946,7 +5055,7 @@ function Settings({ setScreen, categories, accounts, reload, softDelete, user, o
 
  <div className="frost-card rounded-3xl p-6">
           {section === 'profile' && <ProfileSection user={user} onUpdated={onProfileUpdated} logActivity={logActivity} />}
-          {section === 'categories' && <CategorySection categories={categories} reload={reload} softDelete={softDelete} />}
+          {section === 'categories' && <CategorySection categories={categories} reload={reload} softDelete={softDelete} spendingPoolByPeriod={spendingPoolByPeriod} saveSpendingPoolForPeriod={saveSpendingPoolForPeriod} />}
           {section === 'data' && ResetDataPanel}
           {section === 'history' && SystemHistoryPanel}
         </div>
@@ -5071,13 +5180,30 @@ function ProfileSection({ user, onUpdated, logActivity }) {
   );
 }
 
-function CategorySection({ categories, reload, softDelete }) {
+function CategorySection({ categories, reload, softDelete, spendingPoolByPeriod, saveSpendingPoolForPeriod }) {
   const [tab, setTab] = useState('expense');
   // Bộ lọc hiển thị theo isFund — chỉ lọc hiển thị, không đổi dữ liệu
   const [fundFilter, setFundFilter] = useState('all'); // 'all' | 'fund' | 'not_fund'
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState({ name: '', icon: '', monthly_limit: '', is_fund: false, interest_rate: '', include_in_spending_pool: true });
   const [saving, setSaving] = useState(false);
+
+  // ==== Thu nhập được chi theo kỳ — chọn kỳ rồi nhập số tiền được phép chi ====
+  const nowYear = new Date().getFullYear();
+  const [poolYear, setPoolYear] = useState(nowYear);
+  const [poolPeriodKey, setPoolPeriodKey] = useState(currentPeriodKey());
+  const [poolAmountInput, setPoolAmountInput] = useState('');
+  const [savingPool, setSavingPool] = useState(false);
+  const poolPeriods = buildPeriods(poolYear);
+  const currentPoolValue = spendingPoolByPeriod ? spendingPoolByPeriod[poolPeriodKey] : undefined;
+
+  async function handleSavePool() {
+    if (poolAmountInput === '' || Number.isNaN(Number(poolAmountInput))) { alert('Nhập số tiền hợp lệ'); return; }
+    setSavingPool(true);
+    const ok = await saveSpendingPoolForPeriod(poolPeriodKey, poolAmountInput);
+    setSavingPool(false);
+    if (ok) setPoolAmountInput('');
+  }
 
   function startNew() { setForm({ name: '', icon: '', monthly_limit: '', is_fund: false, interest_rate: '', include_in_spending_pool: true }); setEditing('new'); }
   function startEdit(cat) { setForm({ name: cat.name, icon: cat.icon || '', monthly_limit: cat.monthly_limit || '', is_fund: cat.is_fund || false, interest_rate: cat.interest_rate || '', include_in_spending_pool: cat.include_in_spending_pool !== false }); setEditing(cat.id); }
@@ -5117,6 +5243,31 @@ function CategorySection({ categories, reload, softDelete }) {
         <button onClick={() => setTab('expense')} className={`flex-1 py-2 rounded-full text-sm font-bold ${tab === 'expense' ? 'bg-white dark:bg-[#2a2a44] text-turquoise shadow' : 'text-steel dark:text-light-grey'}`}>Chi tiêu</button>
         <button onClick={() => setTab('income')} className={`flex-1 py-2 rounded-full text-sm font-bold ${tab === 'income' ? 'bg-white dark:bg-[#2a2a44] text-turquoise shadow' : 'text-steel dark:text-light-grey'}`}>Thu nhập</button>
       </div>
+
+      {tab === 'income' && (
+        <div className="bg-ice-cream dark:bg-night-sky rounded-2xl p-4 mb-4">
+          <p className="text-blueberry dark:text-white font-bold text-sm mb-1">Thu nhập được chi theo kỳ</p>
+          <p className="text-steel dark:text-light-grey text-xs mb-3">Chọn kỳ, rồi nhập số tiền được phép chi trong kỳ đó. Nếu chưa cài đặt, kỳ sẽ mặc định lấy bằng tổng thu nhập tính vào Thu nhập được chi.</p>
+          <div className="flex flex-col sm:flex-row gap-2 mb-2">
+            <select value={poolYear} onChange={(e) => setPoolYear(Number(e.target.value))} className="bg-white dark:bg-[#2a2a44] rounded-xl px-3 py-2.5 text-sm outline-none dark:text-white text-blueberry [color-scheme:light] dark:[color-scheme:dark]">
+              {[nowYear - 1, nowYear, nowYear + 1].map((y) => <option key={y} value={y}>{y}</option>)}
+            </select>
+            <select value={poolPeriodKey} onChange={(e) => setPoolPeriodKey(e.target.value)} className="flex-1 bg-white dark:bg-[#2a2a44] rounded-xl px-3 py-2.5 text-sm outline-none dark:text-white text-blueberry [color-scheme:light] dark:[color-scheme:dark]">
+              {poolPeriods.map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
+            </select>
+          </div>
+          <div className="flex items-center gap-2">
+            <MoneyInput value={poolAmountInput} onChange={setPoolAmountInput} placeholder="Số tiền được phép chi" className="flex-1 bg-white dark:bg-[#2a2a44] rounded-xl px-4 py-2.5 text-sm outline-none dark:text-white text-blueberry" />
+            <button onClick={handleSavePool} disabled={savingPool} className="w-10 h-10 rounded-full bg-gradient-primary text-white flex items-center justify-center flex-shrink-0 disabled:opacity-60">
+              {savingPool ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />}
+            </button>
+          </div>
+          <p className="text-steel dark:text-light-grey text-xs mt-2">
+            Hiện tại: <span className="font-bold text-blueberry dark:text-white">{currentPoolValue != null ? formatMoney(currentPoolValue) : 'Chưa cài đặt (mặc định theo thu nhập)'}</span>
+          </p>
+        </div>
+      )}
+
       <div className="flex items-center gap-2 mb-4 overflow-x-auto scrollbar-hide">
         {FUND_FILTERS.map((f) => (
           <button
@@ -5221,7 +5372,11 @@ function HoverDetailCard({ className, children, detail, align = 'left' }) {
   return (
     <div
       ref={ref}
-      className={`relative ${className || ''}`}
+      // .frost-card dùng `isolation: isolate` (để giữ lớp gradient trang trí ::before
+      // không lộ ra ngoài) — điều này vô tình "nhốt" popup bên dưới vào riêng 1 stacking
+      // context của card. Khi popup đang mở, ta nâng hẳn z-index của CHÍNH card cha lên
+      // trên các card anh em (và các khối phía dưới) để popup thoát ra hiển thị đúng.
+      className={`relative ${open ? 'z-50' : 'z-0'} ${className || ''}`}
       onMouseEnter={() => { if (hasHover) setOpen(true); }}
       onMouseLeave={() => { if (hasHover) setOpen(false); }}
       onClick={() => { if (!hasHover) setOpen((v) => !v); }}
@@ -5237,7 +5392,10 @@ function HoverDetailCard({ className, children, detail, align = 'left' }) {
   );
 }
 
-function BreakdownDetailList({ title, items, total, colorClass }) {
+// onViewDetail (optional): nếu được truyền, hiện nút "Xem chi tiết" ở cuối popup —
+// bấm vào sẽ mở TxLedgerModal liệt kê từng giao dịch (nội dung, ghi chú, ngày, nguồn trừ,
+// số dư nguồn sau GD, số tiền) thay vì chỉ xem tổng theo danh mục như popup hover này.
+function BreakdownDetailList({ title, items, total, colorClass, onViewDetail }) {
   return (
     <div>
       <p className="text-[11px] font-bold text-steel dark:text-light-grey mb-2 uppercase tracking-wide">{title}</p>
@@ -5259,6 +5417,204 @@ function BreakdownDetailList({ title, items, total, colorClass }) {
       <div className="flex items-center justify-between border-t border-light-grey/30 dark:border-[rgba(189,189,203,0.15)] pt-2 mt-1">
         <span className="text-sm font-bold text-blueberry dark:text-white">Tổng</span>
         <span className={`text-sm font-bold ${colorClass}`}>{formatMoney(total)}</span>
+      </div>
+      {onViewDetail && (
+        <button
+          onClick={(e) => { e.stopPropagation(); onViewDetail(); }}
+          className={`w-full text-center text-xs font-bold mt-3 py-1.5 rounded-full hover:opacity-80 transition ${colorClass} bg-current/10`}
+        >
+          Xem chi tiết →
+        </button>
+      )}
+    </div>
+  );
+}
+
+// Xác định "nguồn trừ" (nơi tiền đi ra) của 1 giao dịch — dùng chung cho cả việc
+// hiển thị nhãn LẪN việc gom danh sách nguồn cho bộ lọc trong TxLedgerModal.
+function txSourceInfo(tx, categories, accounts) {
+  const cat = categories.find((c) => c.id === tx.category_id);
+  const account = tx.account_id ? accounts.find((a) => a.id === tx.account_id) : null;
+  if (tx.type === 'expense' && cat?.is_fund) return { key: `fund:${cat.id}`, label: `Quỹ: ${cat.name}` };
+  if (account) return { key: `account:${account.id}`, label: account.name };
+  // Khoản thu nhập: chỉ gắn nhãn "Thu nhập được chi" nếu danh mục thật sự được tính vào
+  // Chi pool (include_in_spending_pool !== false). "Thu nhập đặc biệt" (vd: Thưởng Lễ/Tết)
+  // chỉ là thu nhập thường, KHÔNG cộng vào Thu nhập được chi nên không được gắn nhãn đó.
+  if (tx.type === 'income') {
+    const isPoolIncome = cat ? cat.include_in_spending_pool !== false : true;
+    return isPoolIncome ? { key: 'pool', label: 'Thu nhập được chi' } : { key: 'special-income', label: 'Thu nhập' };
+  }
+  return { key: 'pool', label: 'Thu nhập được chi' };
+}
+
+// Số dư "Thu nhập được chi" (pool) của KỲ chứa giao dịch `tx`, TÍNH NGAY SAU khi giao
+// dịch đó xảy ra. Pool là khái niệm ảo theo từng kỳ (21 → 20) chứ không phải 1 ví có
+// sẵn số dư trong DB, nên phải tự cộng dồn: spendingPool của kỳ đó, trừ dần các khoản
+// nạp quỹ/chi tiêu trừ vào pool theo đúng thứ tự thời gian, tới đúng giao dịch này thì dừng.
+function poolBalanceAfterTx(tx, allTx, categories, spendingPoolByPeriod) {
+  const periodKey = transactionPeriodKey(tx);
+  const financials = calculatePeriodFinancials(periodKey, allTx, categories, spendingPoolByPeriod?.[periodKey]);
+  const catById = new Map(categories.map((c) => [c.id, c]));
+  const poolTxs = allTx
+    .filter((t) => transactionPeriodKey(t) === periodKey)
+    .filter((t) => {
+      if (t.type === 'allocation') return t.is_initial !== true && t.account_id === null;
+      if (t.type === 'expense') { const c = catById.get(t.category_id); return !(c && c.is_fund) && t.account_id === null; }
+      return false;
+    })
+    .sort((a, b) => {
+      const da = new Date(a.date || a.created_at), db = new Date(b.date || b.created_at);
+      if (da - db !== 0) return da - db;
+      return new Date(a.created_at || a.date) - new Date(b.created_at || b.date);
+    });
+  let cumulative = 0;
+  for (const t of poolTxs) {
+    cumulative += Number(t.amount);
+    if (t.id === tx.id) break;
+  }
+  return financials.spendingPool - cumulative;
+}
+
+// Với 1 khoản THU NHẬP được tính vào Thu nhập được chi (include_in_spending_pool !== false),
+// "số dư nguồn sau GD" thể hiện tổng đã cộng dồn vào Thu nhập được chi của kỳ tính đến
+// đúng giao dịch này (theo thứ tự thời gian) — giúp thấy Thu nhập được chi đang được
+// "lấp đầy" tới đâu qua từng khoản thu.
+function poolIncomeCumulativeAfterTx(tx, allTx, categories) {
+  const periodKey = transactionPeriodKey(tx);
+  const catById = new Map(categories.map((c) => [c.id, c]));
+  const incomeTxs = allTx
+    .filter((t) => transactionPeriodKey(t) === periodKey && t.type === 'income')
+    .filter((t) => { const c = catById.get(t.category_id); return c ? c.include_in_spending_pool !== false : true; })
+    .sort((a, b) => {
+      const da = new Date(a.date || a.created_at), db = new Date(b.date || b.created_at);
+      if (da - db !== 0) return da - db;
+      return new Date(a.created_at || a.date) - new Date(b.created_at || b.date);
+    });
+  let cumulative = 0;
+  for (const t of incomeTxs) {
+    cumulative += Number(t.amount);
+    if (t.id === tx.id) break;
+  }
+  return cumulative;
+}
+
+// Bảng chi tiết từng giao dịch cho 1 nhóm (VD: "Chi tiêu tháng 9/2026") — mở từ nút
+// "Xem chi tiết" trong popup hover của các thẻ tổng kết (Thu nhập / Thu nhập được chi /
+// Thu nhập đặc biệt / Chi tiêu). Hiển thị: nội dung chi, ghi chú, ngày, nguồn trừ,
+// số dư nguồn sau giao dịch, số tiền.
+function TxLedgerRow({ tx, categories, accounts, allTx, spendingPoolByPeriod }) {
+  const txDate = new Date(tx.date || tx.created_at);
+  const source = txSourceInfo(tx, categories, accounts);
+
+  let balanceAfter = null;
+  if (source.key.startsWith('fund:')) {
+    const cat = categories.find((c) => c.id === tx.category_id);
+    balanceAfter = fundBalanceAtDate(cat, allTx, txDate);
+  } else if (source.key.startsWith('account:')) {
+    const account = accounts.find((a) => a.id === tx.account_id);
+    balanceAfter = accountBalanceAtDate(account, allTx, txDate);
+  } else if (source.key === 'pool') {
+    // "Thu nhập được chi" (pool): với khoản CHI/nạp quỹ trừ vào pool, hiện số dư còn lại
+    // sau giao dịch; với khoản THU NHẬP cộng vào pool, hiện tổng đã cộng dồn tính đến
+    // giao dịch này (không có "số dư sau khi trừ" vì đây là chiều cộng vào, không phải trừ ra).
+    const isPoolDeduction = (tx.type === 'expense') || (tx.type === 'allocation' && tx.is_initial !== true);
+    if (isPoolDeduction) balanceAfter = poolBalanceAfterTx(tx, allTx, categories, spendingPoolByPeriod);
+    else if (tx.type === 'income') balanceAfter = poolIncomeCumulativeAfterTx(tx, allTx, categories);
+  }
+  // source.key === 'special-income' (Thu nhập đặc biệt): không có số dư nguồn liên quan, giữ '—'.
+
+  const cat = categories.find((c) => c.id === tx.category_id);
+  const isOutflow = tx.type === 'expense' || tx.type === 'allocation';
+  const dateTimeLabel = `${txDate.toLocaleDateString('vi-VN')} ${txDate.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}`;
+  return (
+    <tr className="border-b border-[rgba(189,189,203,0.15)] dark:border-[rgba(189,189,203,0.08)] last:border-0">
+      <td className="py-2.5 pl-3 pr-3 text-sm text-blueberry dark:text-white font-semibold whitespace-nowrap">{cat?.name || '—'}</td>
+      <td className="py-2.5 pr-3 text-xs text-steel dark:text-light-grey whitespace-nowrap">{dateTimeLabel}</td>
+      <td className="py-2.5 pr-3 text-xs text-steel dark:text-light-grey whitespace-nowrap">{source.label}</td>
+      <td className="py-2.5 pr-3 text-xs text-steel dark:text-light-grey whitespace-nowrap">{balanceAfter !== null ? formatMoney(balanceAfter) : '—'}</td>
+      <td className="py-2.5 pr-3 text-xs text-steel dark:text-light-grey max-w-[200px] truncate">{stripPeriodTag(tx.note) || '—'}</td>
+      <td className={`py-2.5 pr-3 text-sm font-bold text-right whitespace-nowrap ${isOutflow ? 'text-cotton-candy' : 'text-turquoise'}`}>
+        {isOutflow ? '-' : '+'}{formatMoney(tx.amount)}
+      </td>
+    </tr>
+  );
+}
+
+function TxLedgerModal({ title, txs, categories, accounts, allTx, spendingPoolByPeriod, onClose }) {
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  const [sourceFilter, setSourceFilter] = useState('all');
+
+  // Danh sách nguồn để đổ vào dropdown filter — lấy từ chính tập txs được truyền vào
+  // (không lấy từ toàn bộ accounts/funds, để chỉ hiện những nguồn THỰC SỰ xuất hiện ở đây).
+  const sourceOptions = (() => {
+    const map = new Map();
+    txs.forEach((t) => { const s = txSourceInfo(t, categories, accounts); if (!map.has(s.key)) map.set(s.key, s.label); });
+    return Array.from(map, ([key, label]) => ({ key, label }));
+  })();
+
+  const filtered = txs.filter((t) => {
+    const d = new Date(t.date || t.created_at);
+    if (dateFrom && d < new Date(dateFrom + 'T00:00:00')) return false;
+    if (dateTo && d > new Date(dateTo + 'T23:59:59')) return false;
+    if (sourceFilter !== 'all' && txSourceInfo(t, categories, accounts).key !== sourceFilter) return false;
+    return true;
+  });
+  const sorted = [...filtered].sort((a, b) => new Date(b.date || b.created_at) - new Date(a.date || a.created_at));
+  const total = sorted.reduce((s, t) => s + Number(t.amount), 0);
+  const hasActiveFilter = dateFrom || dateTo || sourceFilter !== 'all';
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" onClick={onClose}>
+      <div className="frost-card bg-white dark:bg-[#1e1e32] w-full max-w-5xl rounded-3xl p-6 max-h-[85vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+        <div className="flex justify-between items-start mb-4 flex-shrink-0">
+          <div>
+            <h3 className="font-extrabold text-blueberry dark:text-white text-lg">{title}</h3>
+            <p className="text-steel dark:text-light-grey text-xs mt-0.5">{sorted.length} giao dịch · Tổng {formatMoney(total)}</p>
+          </div>
+          <button onClick={onClose} className="w-8 h-8 rounded-full hover:bg-ice-cream dark:hover:bg-night-sky/30 flex items-center justify-center flex-shrink-0"><X size={18} className="text-steel dark:text-light-grey" /></button>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2 mb-4 flex-shrink-0">
+          <div className="flex items-center gap-2 frost-inset rounded-full px-3 py-1.5">
+            <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="bg-transparent text-xs font-semibold outline-none text-blueberry dark:text-white [color-scheme:light] dark:[color-scheme:dark]" />
+            <span className="text-steel dark:text-light-grey text-xs">→</span>
+            <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="bg-transparent text-xs font-semibold outline-none text-blueberry dark:text-white [color-scheme:light] dark:[color-scheme:dark]" />
+          </div>
+          <select value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value)} className="frost-inset rounded-full text-xs font-semibold px-3 py-2 outline-none text-blueberry dark:text-white [color-scheme:light] dark:[color-scheme:dark]">
+            <option value="all">Tất cả nguồn</option>
+            {sourceOptions.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
+          </select>
+          {hasActiveFilter && (
+            <button onClick={() => { setDateFrom(''); setDateTo(''); setSourceFilter('all'); }} className="text-xs font-bold text-steel dark:text-light-grey hover:text-blueberry dark:hover:text-white underline">
+              Xoá lọc
+            </button>
+          )}
+        </div>
+
+        <div className="overflow-auto flex-1 -mx-2 px-2">
+          {sorted.length === 0 ? (
+            <p className="text-steel dark:text-light-grey text-sm text-center py-10">Không có giao dịch nào khớp bộ lọc.</p>
+          ) : (
+            <table className="w-full text-left border-collapse">
+              <thead className="sticky top-0 z-10">
+                <tr className="text-[11px] uppercase font-bold text-steel dark:text-light-grey bg-ice-cream dark:bg-night-sky border-b border-[rgba(189,189,203,0.25)]">
+                  <th className="py-2.5 pl-3 pr-3 rounded-l-lg">Nội dung</th>
+                  <th className="py-2.5 pr-3">Ngày giờ</th>
+                  <th className="py-2.5 pr-3">Nguồn</th>
+                  <th className="py-2.5 pr-3">Số dư nguồn sau GD</th>
+                  <th className="py-2.5 pr-3">Ghi chú</th>
+                  <th className="py-2.5 pr-3 text-right rounded-r-lg">Số tiền</th>
+                </tr>
+              </thead>
+              <tbody>
+                {sorted.map((tx) => (
+                  <TxLedgerRow key={tx.id} tx={tx} categories={categories} accounts={accounts} allTx={allTx} spendingPoolByPeriod={spendingPoolByPeriod} />
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -5652,6 +6008,26 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
   const [drilldownTransactions, setDrilldownTransactions] = useState([]);
   const [showDrilldown, setShowDrilldown] = useState(false);
 
+  // Ledger modal state — dùng cho nút "Xem chi tiết" trong popup hover của các thẻ
+  // tổng kết (Thu nhập / Thu nhập được chi / Thu nhập đặc biệt / Chi tiêu).
+  const [ledgerModal, setLedgerModal] = useState(null); // { title, txs } | null
+
+  // Danh sách giao dịch thô (chưa gộp theo danh mục) cho từng thẻ — dùng để render
+  // bảng chi tiết trong TxLedgerModal, khớp với cách tính income/spendingPool/specialIncome/
+  // totalActualExpense ở trên (calculateFinancialsFromTxs).
+  const incomeLedgerTxs = periodTxs.filter((t) => t.type === 'income');
+  const poolIncomeLedgerTxs = periodTxs.filter((t) => {
+    if (t.type !== 'income') return false;
+    const c = categories.find((c2) => c2.id === t.category_id);
+    return c ? c.include_in_spending_pool !== false : true;
+  });
+  const specialIncomeLedgerTxs = periodTxs.filter((t) => {
+    if (t.type !== 'income') return false;
+    const c = categories.find((c2) => c2.id === t.category_id);
+    return c ? c.include_in_spending_pool === false : false;
+  });
+  const expenseLedgerTxs = periodTxs.filter((t) => t.type === 'expense');
+
   function openDrilldown(categoryId, txType = 'expense') {
     const cat = categories.find(c => c.id === categoryId);
     const txs = periodTxs.filter(t => t.category_id === categoryId && t.type === txType)
@@ -5699,7 +6075,7 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
             <button onClick={() => setScreen('dashboard')} className="w-9 h-9 rounded-full bg-white/30 backdrop-blur flex items-center justify-center"><X size={18} className="text-white" /></button>
           </div>
           <div className="px-5 mt-2">
-            <select value={timeType} onChange={(e) => setTimeType(e.target.value)} className="w-full bg-white/20 backdrop-blur rounded-xl px-4 py-2 text-sm text-white outline-none">
+            <select value={timeType} onChange={(e) => setTimeType(e.target.value)} className="w-full bg-white/20 backdrop-blur rounded-xl px-4 py-2 text-sm text-white outline-none [color-scheme:light] dark:[color-scheme:dark]">
               <option value="day">Ngày</option>
               <option value="week">Tuần</option>
               <option value="month">Tháng</option>
@@ -5712,7 +6088,7 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
             {timeType === 'week' && <input type="date" value={selectedWeek} onChange={(e) => setSelectedWeek(e.target.value)} className="w-full mt-2 bg-white/20 backdrop-blur rounded-xl px-4 py-2 text-sm text-white outline-none" />}
             {timeType === 'month' && (
               <div className="flex gap-2 mt-2">
-                <select value={selectedMonth} onChange={(e) => setSelectedMonth(Number(e.target.value))} className="flex-1 bg-white/20 backdrop-blur rounded-xl px-4 py-2 text-sm text-white outline-none">
+                <select value={selectedMonth} onChange={(e) => setSelectedMonth(Number(e.target.value))} className="flex-1 bg-white/20 backdrop-blur rounded-xl px-4 py-2 text-sm text-white outline-none [color-scheme:light] dark:[color-scheme:dark]">
                   {Array.from({length:12}, (_,i) => i+1).map(m => <option key={m} value={m}>{m}</option>)}
                 </select>
                 <input type="number" value={selectedYear} onChange={(e) => setSelectedYear(Number(e.target.value))} className="w-20 bg-white/20 backdrop-blur rounded-xl px-4 py-2 text-sm text-white outline-none" />
@@ -5720,7 +6096,7 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
             )}
             {timeType === 'quarter' && (
               <div className="flex gap-2 mt-2">
-                <select value={selectedQuarter} onChange={(e) => setSelectedQuarter(Number(e.target.value))} className="flex-1 bg-white/20 backdrop-blur rounded-xl px-4 py-2 text-sm text-white outline-none">
+                <select value={selectedQuarter} onChange={(e) => setSelectedQuarter(Number(e.target.value))} className="flex-1 bg-white/20 backdrop-blur rounded-xl px-4 py-2 text-sm text-white outline-none [color-scheme:light] dark:[color-scheme:dark]">
                   <option value={1}>Q1</option><option value={2}>Q2</option><option value={3}>Q3</option><option value={4}>Q4</option>
                 </select>
                 <input type="number" value={selectedYear} onChange={(e) => setSelectedYear(Number(e.target.value))} className="w-20 bg-white/20 backdrop-blur rounded-xl px-4 py-2 text-sm text-white outline-none" />
@@ -5728,7 +6104,7 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
             )}
             {timeType === '6month' && (
               <div className="flex gap-2 mt-2">
-                <select value={selectedHalf} onChange={(e) => setSelectedHalf(Number(e.target.value))} className="flex-1 bg-white/20 backdrop-blur rounded-xl px-4 py-2 text-sm text-white outline-none">
+                <select value={selectedHalf} onChange={(e) => setSelectedHalf(Number(e.target.value))} className="flex-1 bg-white/20 backdrop-blur rounded-xl px-4 py-2 text-sm text-white outline-none [color-scheme:light] dark:[color-scheme:dark]">
                   <option value={1}>H1</option><option value={2}>H2</option>
                 </select>
                 <input type="number" value={selectedYear} onChange={(e) => setSelectedYear(Number(e.target.value))} className="w-20 bg-white/20 backdrop-blur rounded-xl px-4 py-2 text-sm text-white outline-none" />
@@ -5751,16 +6127,16 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
               <HoverDetailCard className="flex justify-between items-center py-1" detail={<AssetBreakdownDetail wallets={assetWalletItems} funds={assetFundItems} gold={assetGoldItems} total={totalAssetsEnd} />}>
                 <span className="text-steel dark:text-light-grey">Tài sản (cuối kỳ)</span><span className="font-bold text-blueberry dark:text-white">{formatMoney(totalAssetsEnd)}</span>
               </HoverDetailCard>
-              <HoverDetailCard className="flex justify-between items-center py-1" detail={<BreakdownDetailList title="Tổng thu nhập" items={incomeDetailItems} total={income} colorClass="text-turquoise" />}>
+              <HoverDetailCard className="flex justify-between items-center py-1" detail={<BreakdownDetailList title="Tổng thu nhập" items={incomeDetailItems} total={income} colorClass="text-turquoise" onViewDetail={() => setLedgerModal({ title: `Thu nhập — ${periodLabel}`, txs: incomeLedgerTxs })} />}>
                 <span className="text-steel dark:text-light-grey">Thu nhập</span><span className="font-bold text-turquoise">{formatMoney(income)}</span>
               </HoverDetailCard>
-              <HoverDetailCard className="flex justify-between items-center py-1" detail={<BreakdownDetailList title="Thu nhập được chi" items={poolIncomeDetailItems} total={spendingPool} colorClass="text-baby-blue" />}>
+              <HoverDetailCard className="flex justify-between items-center py-1" detail={<BreakdownDetailList title="Thu nhập được chi" items={poolIncomeDetailItems} total={spendingPool} colorClass="text-baby-blue" onViewDetail={() => setLedgerModal({ title: `Thu nhập được chi — ${periodLabel}`, txs: poolIncomeLedgerTxs })} />}>
                 <span className="text-steel dark:text-light-grey">Thu nhập được chi</span><span className="font-bold text-baby-blue">{formatMoney(spendingPool)}</span>
               </HoverDetailCard>
-              <HoverDetailCard className="flex justify-between items-center py-1" detail={<BreakdownDetailList title="Thu nhập đặc biệt" items={specialIncomeDetailItems} total={specialIncome} colorClass="text-lavender" />}>
+              <HoverDetailCard className="flex justify-between items-center py-1" detail={<BreakdownDetailList title="Thu nhập đặc biệt" items={specialIncomeDetailItems} total={specialIncome} colorClass="text-lavender" onViewDetail={() => setLedgerModal({ title: `Thu nhập đặc biệt — ${periodLabel}`, txs: specialIncomeLedgerTxs })} />}>
                 <span className="text-steel dark:text-light-grey">Thu nhập đặc biệt</span><span className="font-bold text-lavender">{formatMoney(specialIncome)}</span>
               </HoverDetailCard>
-              <HoverDetailCard className="flex justify-between items-center py-1" detail={<BreakdownDetailList title="Chi tiêu" items={expenseDetailItems} total={totalActualExpense} colorClass="text-cotton-candy" />}>
+              <HoverDetailCard className="flex justify-between items-center py-1" detail={<BreakdownDetailList title="Chi tiêu" items={expenseDetailItems} total={totalActualExpense} colorClass="text-cotton-candy" onViewDetail={() => setLedgerModal({ title: `Chi tiêu — ${periodLabel}`, txs: expenseLedgerTxs })} />}>
                 <span className="text-steel dark:text-light-grey">Chi tiêu</span><span className="font-bold text-cotton-candy">{formatMoney(totalActualExpense)}</span>
               </HoverDetailCard>
             </div>
@@ -5778,7 +6154,7 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
             <div className="space-y-1">
               <div className="flex justify-between"><span>Nạp quỹ</span><span className="font-bold text-baby-blue">{formatMoney(allocation)}</span></div>
               <div className="flex justify-between"><span>Chi tiêu</span><span className="font-bold text-cotton-candy">{formatMoney(expenseFromIncome)}</span></div>
-              <div className="flex justify-between border-t pt-2"><span className="font-bold">Dư sau chi</span><span className={`font-bold ${remaining >= 0 ? 'text-turquoise' : 'text-cotton-candy'}`}>{formatMoney(remaining)}</span></div>
+              <div className="flex justify-between border-t pt-2"><span className="font-bold">Dư sau chi</span><span className={`font-bold ${remaining >= 0 ? 'text-turquoise' : 'text-cotton-candy'}`}>{formatMoneySigned(remaining)}</span></div>
             </div>
             {accumulationBeforeSpend > 0 && (
               <p className="text-xs text-lavender mt-2 font-semibold">Tích lũy trước chi: {formatMoney(accumulationBeforeSpend)}</p>
@@ -5816,12 +6192,12 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
       </div>
 
       <div className="hidden md:block relative">
-        <div className="frost-blob w-[30rem] h-[30rem] bg-baby-blue/35 dark:bg-baby-blue/50 top-24 right-12" />
-        <div className="frost-blob w-[26rem] h-[26rem] bg-lavender/35 dark:bg-lavender/50 bottom-16 left-56" />
+        <div className="frost-blob z-0 w-96 h-96 bg-baby-blue-light/70 dark:bg-baby-blue/22 -top-10 right-10" />
+        <div className="frost-blob z-0 w-80 h-80 bg-lavender-light/70 dark:bg-lavender/22 top-[600px] -left-10" />
         <div className="relative flex items-center justify-between mb-6 flex-wrap gap-4">
           <h1 className="text-blueberry dark:text-white text-2xl font-extrabold">Báo cáo &amp; Phân tích</h1>
           <div className="flex items-center gap-2 flex-wrap">
-            <select value={timeType} onChange={(e) => setTimeType(e.target.value)} className="frost-inset rounded-full text-sm font-bold px-4 py-2 outline-none text-blueberry dark:text-white">
+            <select value={timeType} onChange={(e) => setTimeType(e.target.value)} className="frost-inset rounded-full text-sm font-bold px-4 py-2 outline-none text-blueberry dark:text-white [color-scheme:light] dark:[color-scheme:dark]">
               <option value="day">Ngày</option>
               <option value="week">Tuần</option>
               <option value="month">Tháng</option>
@@ -5834,7 +6210,7 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
             {timeType === 'week' && <input type="date" value={selectedWeek} onChange={(e) => setSelectedWeek(e.target.value)} className="frost-inset rounded-full text-sm font-bold px-4 py-2 outline-none text-blueberry dark:text-white" />}
             {timeType === 'month' && (
               <>
-                <select value={selectedMonth} onChange={(e) => setSelectedMonth(Number(e.target.value))} className="frost-inset rounded-full text-sm font-bold px-4 py-2 outline-none text-blueberry dark:text-white">
+                <select value={selectedMonth} onChange={(e) => setSelectedMonth(Number(e.target.value))} className="frost-inset rounded-full text-sm font-bold px-4 py-2 outline-none text-blueberry dark:text-white [color-scheme:light] dark:[color-scheme:dark]">
                   {Array.from({length:12}, (_,i) => i+1).map(m => <option key={m} value={m}>{m}</option>)}
                 </select>
                 <input type="number" value={selectedYear} onChange={(e) => setSelectedYear(Number(e.target.value))} className="frost-inset rounded-full text-sm font-bold px-4 py-2 outline-none text-blueberry dark:text-white w-24" />
@@ -5842,7 +6218,7 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
             )}
             {timeType === 'quarter' && (
               <>
-                <select value={selectedQuarter} onChange={(e) => setSelectedQuarter(Number(e.target.value))} className="frost-inset rounded-full text-sm font-bold px-4 py-2 outline-none text-blueberry dark:text-white">
+                <select value={selectedQuarter} onChange={(e) => setSelectedQuarter(Number(e.target.value))} className="frost-inset rounded-full text-sm font-bold px-4 py-2 outline-none text-blueberry dark:text-white [color-scheme:light] dark:[color-scheme:dark]">
                   <option value={1}>Q1</option><option value={2}>Q2</option><option value={3}>Q3</option><option value={4}>Q4</option>
                 </select>
                 <input type="number" value={selectedYear} onChange={(e) => setSelectedYear(Number(e.target.value))} className="frost-inset rounded-full text-sm font-bold px-4 py-2 outline-none text-blueberry dark:text-white w-24" />
@@ -5850,7 +6226,7 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
             )}
             {timeType === '6month' && (
               <>
-                <select value={selectedHalf} onChange={(e) => setSelectedHalf(Number(e.target.value))} className="frost-inset rounded-full text-sm font-bold px-4 py-2 outline-none text-blueberry dark:text-white">
+                <select value={selectedHalf} onChange={(e) => setSelectedHalf(Number(e.target.value))} className="frost-inset rounded-full text-sm font-bold px-4 py-2 outline-none text-blueberry dark:text-white [color-scheme:light] dark:[color-scheme:dark]">
                   <option value={1}>H1</option><option value={2}>H2</option>
                 </select>
                 <input type="number" value={selectedYear} onChange={(e) => setSelectedYear(Number(e.target.value))} className="frost-inset rounded-full text-sm font-bold px-4 py-2 outline-none text-blueberry dark:text-white w-24" />
@@ -5874,7 +6250,7 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
             <div><p className="text-steel dark:text-light-grey text-sm">Thu nhập</p><p className="text-xl font-bold text-turquoise">{formatMoney(income)}</p></div>
             <div><p className="text-steel dark:text-light-grey text-sm">Góp quỹ</p><p className="text-xl font-bold text-baby-blue">{formatMoney(allocation)}</p></div>
             <div><p className="text-steel dark:text-light-grey text-sm">Chi tiêu</p><p className="text-xl font-bold text-cotton-candy">{formatMoney(totalActualExpense)}</p></div>
-            <div><p className="text-steel dark:text-light-grey text-sm">Còn lại</p><p className={`text-xl font-bold ${remaining >= 0 ? 'text-turquoise' : 'text-cotton-candy'}`}>{formatMoney(remaining)}</p></div>
+            <div><p className="text-steel dark:text-light-grey text-sm">Còn lại</p><p className={`text-xl font-bold ${remaining >= 0 ? 'text-turquoise' : 'text-cotton-candy'}`}>{formatMoneySigned(remaining)}</p></div>
             <div><p className="text-steel dark:text-light-grey text-sm">Tài sản cuối kỳ</p><p className="text-xl font-bold text-blueberry dark:text-white">{formatMoney(totalAssetsEnd)}</p></div>
           </div>
           {assetChange !== null && (
@@ -5894,21 +6270,21 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
           </HoverDetailCard>
           <HoverDetailCard
  className="frost-card rounded-3xl p-6 cursor-pointer hover:shadow-card transition"
-            detail={<BreakdownDetailList title="Tổng thu nhập" items={incomeDetailItems} total={income} colorClass="text-turquoise" />}
+            detail={<BreakdownDetailList title="Tổng thu nhập" items={incomeDetailItems} total={income} colorClass="text-turquoise" onViewDetail={() => setLedgerModal({ title: `Thu nhập — ${periodLabel}`, txs: incomeLedgerTxs })} />}
           >
             <p className="text-steel dark:text-light-grey text-sm font-semibold">Thu nhập</p>
             <p className="text-turquoise text-2xl font-bold">{formatMoney(income)}</p>
           </HoverDetailCard>
           <HoverDetailCard
  className="frost-card rounded-3xl p-6 cursor-pointer hover:shadow-card transition"
-            detail={<BreakdownDetailList title="Thu nhập được chi" items={poolIncomeDetailItems} total={spendingPool} colorClass="text-baby-blue" />}
+            detail={<BreakdownDetailList title="Thu nhập được chi" items={poolIncomeDetailItems} total={spendingPool} colorClass="text-baby-blue" onViewDetail={() => setLedgerModal({ title: `Thu nhập được chi — ${periodLabel}`, txs: poolIncomeLedgerTxs })} />}
           >
             <p className="text-steel dark:text-light-grey text-sm font-semibold">Thu nhập được chi</p>
             <p className="text-baby-blue text-2xl font-bold">{formatMoney(spendingPool)}</p>
           </HoverDetailCard>
           <HoverDetailCard
  className="frost-card rounded-3xl p-6 cursor-pointer hover:shadow-card transition"
-            detail={<BreakdownDetailList title="Thu nhập đặc biệt" items={specialIncomeDetailItems} total={specialIncome} colorClass="text-lavender" />}
+            detail={<BreakdownDetailList title="Thu nhập đặc biệt" items={specialIncomeDetailItems} total={specialIncome} colorClass="text-lavender" onViewDetail={() => setLedgerModal({ title: `Thu nhập đặc biệt — ${periodLabel}`, txs: specialIncomeLedgerTxs })} />}
           >
             <p className="text-steel dark:text-light-grey text-sm font-semibold">Thu nhập đặc biệt</p>
             <p className="text-lavender text-2xl font-bold">{formatMoney(specialIncome)}</p>
@@ -5916,7 +6292,7 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
           <HoverDetailCard
  className="frost-card rounded-3xl p-6 cursor-pointer hover:shadow-card transition"
             align="right"
-            detail={<BreakdownDetailList title="Chi tiêu" items={expenseDetailItems} total={totalActualExpense} colorClass="text-cotton-candy" />}
+            detail={<BreakdownDetailList title="Chi tiêu" items={expenseDetailItems} total={totalActualExpense} colorClass="text-cotton-candy" onViewDetail={() => setLedgerModal({ title: `Chi tiêu — ${periodLabel}`, txs: expenseLedgerTxs })} />}
           >
             <p className="text-steel dark:text-light-grey text-sm font-semibold">Chi tiêu</p>
             <p className="text-cotton-candy text-2xl font-bold">{formatMoney(totalActualExpense)}</p>
@@ -5961,7 +6337,7 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
                 </div>
                 <div className="flex justify-between border-t pt-2">
                   <span className="font-bold">Dư sau chi</span>
-                  <span className={`font-bold ${remaining >= 0 ? 'text-turquoise' : 'text-cotton-candy'}`}>{formatMoney(remaining)} {spendingPool > 0 && <span className="text-xs font-semibold">({Math.round((remaining/spendingPool)*100)}%)</span>}</span>
+                  <span className={`font-bold ${remaining >= 0 ? 'text-turquoise' : 'text-cotton-candy'}`}>{formatMoneySigned(remaining)} {spendingPool > 0 && <span className="text-xs font-semibold">({Math.round((remaining/spendingPool)*100)}%)</span>}</span>
                 </div>
               </div>
               {expenseFromFund > 0 && (
@@ -6096,7 +6472,7 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
               <div><p className="text-steel dark:text-light-grey text-sm">Tổng thu nhập năm</p><p className="text-lg font-bold text-turquoise">{formatMoney(income)}</p></div>
               <div><p className="text-steel dark:text-light-grey text-sm">Đã nạp quỹ năm</p><p className="text-lg font-bold text-baby-blue">{formatMoney(allocation)}</p></div>
               <div><p className="text-steel dark:text-light-grey text-sm">Đã chi từ thu nhập</p><p className="text-lg font-bold text-cotton-candy">{formatMoney(expenseFromIncome)}</p></div>
-              <div><p className="text-steel dark:text-light-grey text-sm">Còn lại từ thu nhập</p><p className={`text-lg font-bold ${remaining >= 0 ? 'text-turquoise' : 'text-cotton-candy'}`}>{formatMoney(remaining)}</p></div>
+              <div><p className="text-steel dark:text-light-grey text-sm">Còn lại từ thu nhập</p><p className={`text-lg font-bold ${remaining >= 0 ? 'text-turquoise' : 'text-cotton-candy'}`}>{formatMoneySigned(remaining)}</p></div>
               <div><p className="text-steel dark:text-light-grey text-sm">Tổng chi từ quỹ</p><p className="text-lg font-bold text-cotton-candy">{formatMoney(expenseFromFund)}</p></div>
             </div>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -6120,7 +6496,7 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
             <div><p className="text-steel dark:text-light-grey text-sm">Chi tiêu</p><p className="text-xl font-bold">{formatMoney(totalActualExpense)}</p>
               {prevAgg.totalActualExpense > 0 && <span className={`text-xs ${totalActualExpense <= prevAgg.totalActualExpense ? 'text-turquoise' : 'text-cotton-candy'}`}>{totalActualExpense <= prevAgg.totalActualExpense ? '▼' : '▲'} {Math.abs(Math.round(((totalActualExpense - prevAgg.totalActualExpense)/prevAgg.totalActualExpense)*100))}%</span>}
             </div>
-            <div><p className="text-steel dark:text-light-grey text-sm">Còn lại</p><p className={`text-xl font-bold ${remaining >= 0 ? 'text-turquoise' : 'text-cotton-candy'}`}>{formatMoney(remaining)}</p>
+            <div><p className="text-steel dark:text-light-grey text-sm">Còn lại</p><p className={`text-xl font-bold ${remaining >= 0 ? 'text-turquoise' : 'text-cotton-candy'}`}>{formatMoneySigned(remaining)}</p>
               {prevAgg.remaining > 0 && <span className={`text-xs ${remaining >= prevAgg.remaining ? 'text-turquoise' : 'text-cotton-candy'}`}>{remaining >= prevAgg.remaining ? '▲' : '▼'} {Math.abs(Math.round(((remaining - prevAgg.remaining)/prevAgg.remaining)*100))}%</span>}
             </div>
           </div>
@@ -6237,6 +6613,17 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
           </div>
         )}
       </div>
+      {ledgerModal && (
+        <TxLedgerModal
+          title={ledgerModal.title}
+          txs={ledgerModal.txs}
+          categories={categories}
+          accounts={accounts}
+          allTx={transactions}
+          spendingPoolByPeriod={spendingPoolByPeriod}
+          onClose={() => setLedgerModal(null)}
+        />
+      )}
       {editingTx && (
         <EditTransaction
           transaction={editingTx}
@@ -6388,17 +6775,17 @@ function MainApp({ user, theme, toggleTheme }) {
     if (screen === 'fund-detail') {
       const cat = categories.find((c) => c.id === selectedFundId);
       if (!cat) { setScreen('dashboard'); return null; }
-      return <FundDetail category={cat} transactions={transactions} onBack={() => setScreen(fundReturnScreen)} reload={loadAll} softDelete={softDelete} setScreen={setScreen} onAddClick={() => setShowAdd(true)} displayName={displayName} avatarUrl={avatarUrl} theme={theme} toggleTheme={toggleTheme} openSettings={goToSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} spendingPoolByPeriod={spendingPoolByPeriod} />;
+      return <FundDetail category={cat} transactions={transactions} categories={categories} accounts={accounts} onBack={() => setScreen(fundReturnScreen)} reload={loadAll} softDelete={softDelete} setScreen={setScreen} onAddClick={() => setShowAdd(true)} displayName={displayName} avatarUrl={avatarUrl} theme={theme} toggleTheme={toggleTheme} openSettings={goToSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} spendingPoolByPeriod={spendingPoolByPeriod} />;
     }
     if (screen === 'account-detail') {
       const acc = accounts.find((a) => a.id === selectedAccountId);
       if (!acc) { setScreen('accounts'); return null; }
-      return <AccountDetail account={acc} transactions={transactions} categories={categories} onBack={() => setScreen(accountReturnScreen)} reload={loadAll} softDelete={softDelete} setScreen={setScreen} onAddClick={() => setShowAdd(true)} displayName={displayName} avatarUrl={avatarUrl} theme={theme} toggleTheme={toggleTheme} openSettings={goToSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} spendingPoolByPeriod={spendingPoolByPeriod} />;
+      return <AccountDetail account={acc} transactions={transactions} categories={categories} accounts={accounts} onBack={() => setScreen(accountReturnScreen)} reload={loadAll} softDelete={softDelete} setScreen={setScreen} onAddClick={() => setShowAdd(true)} displayName={displayName} avatarUrl={avatarUrl} theme={theme} toggleTheme={toggleTheme} openSettings={goToSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} spendingPoolByPeriod={spendingPoolByPeriod} />;
     }
     if (screen === 'funds') return <Funds setScreen={setScreen} categories={categories} transactions={transactions} onOpenFund={openFund} reload={loadAll} onAddClick={() => setShowAdd(true)} displayName={displayName} avatarUrl={avatarUrl} theme={theme} toggleTheme={toggleTheme} openSettings={goToSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} />;
     if (screen === 'goals') return <Goals setScreen={setScreen} goals={goals} loadingGoals={loadingGoals} reload={loadAll} softDelete={softDelete} onAddClick={() => setShowAdd(true)} displayName={displayName} avatarUrl={avatarUrl} theme={theme} toggleTheme={toggleTheme} openSettings={goToSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} />;
     if (screen === 'accounts') return <Accounts setScreen={setScreen} accounts={accounts} transactions={transactions} onOpenAccount={openAccount} reload={loadAll} onAddClick={() => setShowAdd(true)} displayName={displayName} avatarUrl={avatarUrl} theme={theme} toggleTheme={toggleTheme} openSettings={goToSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} />;
-    if (screen === 'settings') return <Settings setScreen={setScreen} categories={categories} accounts={accounts} reload={loadAll} softDelete={softDelete} user={currentUser} onProfileUpdated={refreshUser} onAddClick={() => setShowAdd(true)} theme={theme} toggleTheme={toggleTheme} initialSection={settingsSection} openSettings={goToSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} onResetData={resetAllData} resettingData={resettingData} logs={logs} logActivity={logActivity} restoreLog={restoreLog} />;
+    if (screen === 'settings') return <Settings setScreen={setScreen} categories={categories} accounts={accounts} reload={loadAll} softDelete={softDelete} user={currentUser} onProfileUpdated={refreshUser} onAddClick={() => setShowAdd(true)} theme={theme} toggleTheme={toggleTheme} initialSection={settingsSection} openSettings={goToSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} onResetData={resetAllData} resettingData={resettingData} logs={logs} logActivity={logActivity} restoreLog={restoreLog} spendingPoolByPeriod={spendingPoolByPeriod} saveSpendingPoolForPeriod={saveSpendingPoolForPeriod} />;
     if (screen === 'report') return <Report setScreen={setScreen} transactions={transactions} categories={categories} accounts={accounts} goals={goals} onAddClick={() => setShowAdd(true)} displayName={displayName} avatarUrl={avatarUrl} theme={theme} toggleTheme={toggleTheme} openSettings={goToSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} spendingPoolByPeriod={spendingPoolByPeriod} saveSpendingPoolForPeriod={saveSpendingPoolForPeriod} reload={loadAll} />;
     // Dashboard default
     return <Dashboard setScreen={setScreen} transactions={transactions} categories={categories} accounts={accounts} goals={goals} loading={loading} displayName={displayName} avatarUrl={avatarUrl} onAddClick={() => setShowAdd(true)} theme={theme} toggleTheme={toggleTheme} onOpenFund={openFund} onOpenAccount={openAccount} reload={loadAll} openSettings={goToSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} spendingPoolByPeriod={spendingPoolByPeriod} saveSpendingPoolForPeriod={saveSpendingPoolForPeriod} />;
