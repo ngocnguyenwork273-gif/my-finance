@@ -1263,8 +1263,8 @@ function ChangeBadge({ pct, good = true }) {
 }
 
 // FIX: cho phép gõ biểu thức cộng/trừ/nhân/chia (vd "50000+2000") rồi tự tính ra kết quả.
-// Khi đang gõ (focus) thì hiện nguyên văn biểu thức người dùng nhập (không format số);
-// khi rời khỏi ô (blur) hoặc bấm Enter mới tính ra kết quả và format lại thành tiền.
+// Hỗ trợ 2 kiểu: (1) gõ số thường rồi rời khỏi ô/Enter mới tính; (2) gõ kèm dấu "="
+// ở bất kỳ đâu (vd "45000+5000=" hoặc "=45000+5000") sẽ TÍNH NGAY LẬP TỨC, giống máy tính/Excel.
 function evalMoneyExpression(str) {
   const cleaned = (str || '').replace(/[^0-9+\-*/.() ]/g, '');
   if (!cleaned.trim()) return 0;
@@ -1279,12 +1279,25 @@ function evalMoneyExpression(str) {
 function MoneyInput({ value, onChange, placeholder, className }) {
   const [focused, setFocused] = useState(false);
   const [rawText, setRawText] = useState('');
+  const inputRef = useRef(null);
 
   function handleFocus() { setFocused(true); setRawText(value ? String(value) : ''); }
 
   function handleChange(e) {
+    const typed = e.target.value;
+    if (typed.includes('=')) {
+      // người dùng gõ dấu "=" -> tính ngay, không đợi rời ô
+      const expr = typed.replace('=', '');
+      const cleaned = expr.replace(/[^0-9+\-*/.() ]/g, '');
+      const result = evalMoneyExpression(cleaned);
+      onChange(result !== null ? String(result) : (value || ''));
+      setRawText('');
+      setFocused(false);
+      inputRef.current?.blur();
+      return;
+    }
     // vẫn cho gõ số + các phép toán, không chặn ký tự toán tử như trước
-    setRawText(e.target.value.replace(/[^0-9+\-*/.() ]/g, ''));
+    setRawText(typed.replace(/[^0-9+\-*/.() ]/g, ''));
   }
 
   function commit() {
@@ -1298,7 +1311,7 @@ function MoneyInput({ value, onChange, placeholder, className }) {
   const displayValue = focused ? rawText : (value ? Number(value).toLocaleString('en-US') : '');
 
   return (
-    <input type="text" inputMode="text" value={displayValue}
+    <input ref={inputRef} type="text" inputMode="text" value={displayValue}
       onFocus={handleFocus} onChange={handleChange} onBlur={handleBlur} onKeyDown={handleKeyDown}
       placeholder={placeholder} className={className} />
   );
