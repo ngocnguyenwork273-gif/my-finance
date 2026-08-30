@@ -1262,11 +1262,45 @@ function ChangeBadge({ pct, good = true }) {
   );
 }
 
+// FIX: cho phép gõ biểu thức cộng/trừ/nhân/chia (vd "50000+2000") rồi tự tính ra kết quả.
+// Khi đang gõ (focus) thì hiện nguyên văn biểu thức người dùng nhập (không format số);
+// khi rời khỏi ô (blur) hoặc bấm Enter mới tính ra kết quả và format lại thành tiền.
+function evalMoneyExpression(str) {
+  const cleaned = (str || '').replace(/[^0-9+\-*/.() ]/g, '');
+  if (!cleaned.trim()) return 0;
+  try {
+    // eslint-disable-next-line no-new-func
+    const result = Function('"use strict"; return (' + cleaned + ')')();
+    if (typeof result === 'number' && isFinite(result)) return Math.round(result);
+  } catch (e) { /* biểu thức không hợp lệ -> bỏ qua, giữ giá trị cũ */ }
+  return null;
+}
+
 function MoneyInput({ value, onChange, placeholder, className }) {
-  function handleChange(e) { onChange(e.target.value.replace(/\D/g, '')); }
+  const [focused, setFocused] = useState(false);
+  const [rawText, setRawText] = useState('');
+
+  function handleFocus() { setFocused(true); setRawText(value ? String(value) : ''); }
+
+  function handleChange(e) {
+    // vẫn cho gõ số + các phép toán, không chặn ký tự toán tử như trước
+    setRawText(e.target.value.replace(/[^0-9+\-*/.() ]/g, ''));
+  }
+
+  function commit() {
+    const result = evalMoneyExpression(rawText);
+    onChange(result !== null ? String(result) : (value || ''));
+  }
+
+  function handleBlur() { setFocused(false); commit(); }
+  function handleKeyDown(e) { if (e.key === 'Enter') { e.currentTarget.blur(); } }
+
+  const displayValue = focused ? rawText : (value ? Number(value).toLocaleString('en-US') : '');
+
   return (
-    <input type="text" inputMode="numeric" value={value ? Number(value).toLocaleString('en-US') : ''}
-      onChange={handleChange} placeholder={placeholder} className={className} />
+    <input type="text" inputMode="text" value={displayValue}
+      onFocus={handleFocus} onChange={handleChange} onBlur={handleBlur} onKeyDown={handleKeyDown}
+      placeholder={placeholder} className={className} />
   );
 }
 
@@ -6828,8 +6862,22 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
 /* ==============================================================================
    17. MAIN APP
    ============================================================================== */
+// FIX: nhớ vị trí màn hình hiện tại + các id liên quan (quỹ/ví đang xem, tab cài đặt)
+// vào localStorage để khi load lại trang (F5) không bị nhảy về Trang chủ.
+function loadNavState() {
+  if (typeof window === 'undefined') return {};
+  try { return JSON.parse(localStorage.getItem('navState') || '{}'); } catch { return {}; }
+}
+function saveNavState(patch) {
+  if (typeof window === 'undefined') return;
+  const current = loadNavState();
+  localStorage.setItem('navState', JSON.stringify({ ...current, ...patch }));
+}
+
 function MainApp({ user, theme, toggleTheme }) {
-  const [screen, setScreen] = useState('dashboard');
+  const initialNav = loadNavState();
+  const [screen, setScreenRaw] = useState(() => initialNav.screen || 'dashboard');
+  function setScreen(next) { setScreenRaw(next); saveNavState({ screen: next }); }
   const [accounts, setAccounts] = useState([]);
   const [categories, setCategories] = useState([]);
   const [transactions, setTransactions] = useState([]);
@@ -6869,8 +6917,12 @@ function MainApp({ user, theme, toggleTheme }) {
 
   const displayName = currentUser?.user_metadata?.first_name || currentUser?.user_metadata?.full_name || currentUser?.email?.split('@')[0];
   const avatarUrl = currentUser?.user_metadata?.avatar_url;
-  const [settingsSection, setSettingsSection] = useState('profile');
-  function goToSettings(section) { setSettingsSection(section || 'profile'); setScreen('settings'); }
+  const [settingsSection, setSettingsSection] = useState(() => initialNav.settingsSection || 'profile');
+  function goToSettings(section) {
+    const s = section || 'profile';
+    setSettingsSection(s); saveNavState({ settingsSection: s });
+    setScreen('settings');
+  }
 
   async function refreshUser() {
     const { data } = await supabase.auth.getUser();
@@ -6940,12 +6992,20 @@ function MainApp({ user, theme, toggleTheme }) {
 
   const [showAdd, setShowAdd] = useState(false);
   const [addType, setAddType] = useState('expense');
-  const [selectedFundId, setSelectedFundId] = useState(null);
-  const [fundReturnScreen, setFundReturnScreen] = useState('dashboard');
-  function openFund(id, from = 'dashboard') { setSelectedFundId(id); setFundReturnScreen(from); setScreen('fund-detail'); }
-  const [selectedAccountId, setSelectedAccountId] = useState(null);
-  const [accountReturnScreen, setAccountReturnScreen] = useState('accounts');
-  function openAccount(id, from = 'accounts') { setSelectedAccountId(id); setAccountReturnScreen(from); setScreen('account-detail'); }
+  const [selectedFundId, setSelectedFundId] = useState(() => initialNav.selectedFundId || null);
+  const [fundReturnScreen, setFundReturnScreen] = useState(() => initialNav.fundReturnScreen || 'dashboard');
+  function openFund(id, from = 'dashboard') {
+    setSelectedFundId(id); setFundReturnScreen(from);
+    saveNavState({ selectedFundId: id, fundReturnScreen: from });
+    setScreen('fund-detail');
+  }
+  const [selectedAccountId, setSelectedAccountId] = useState(() => initialNav.selectedAccountId || null);
+  const [accountReturnScreen, setAccountReturnScreen] = useState(() => initialNav.accountReturnScreen || 'accounts');
+  function openAccount(id, from = 'accounts') {
+    setSelectedAccountId(id); setAccountReturnScreen(from);
+    saveNavState({ selectedAccountId: id, accountReturnScreen: from });
+    setScreen('account-detail');
+  }
 
   function handleAddClick(type = 'expense') {
     setAddType(type);
