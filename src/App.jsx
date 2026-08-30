@@ -1848,8 +1848,7 @@ function AddTransaction({ onClose, accounts, categories, transactions, onSaved, 
   const sourceAccount = ((type === 'expense' && !isFundCategory) || type === 'allocation') && expenseSource && expenseSource !== 'income' ? accounts.find((a) => a.id === expenseSource) : null;
   const sourceOverBalance = sourceAccount && amount && Number(amount) > accountBalance(sourceAccount, transactions || []);
 
-  function handleAmountChange(e) { setAmount(e.target.value.replace(/\D/g, '')); }
-
+  // FIX: dùng chung MoneyInput để hỗ trợ gõ biểu thức cộng/trừ/nhân/chia (xem MoneyInput ở trên).
   function handleYearChange(y) {
     setSelectedYear(y);
     const month = selectedPeriod.split('-')[1];
@@ -1962,7 +1961,7 @@ function AddTransaction({ onClose, accounts, categories, transactions, onSaved, 
         <div className="px-5 mt-8 text-center">
           <p className="text-steel dark:text-light-grey text-sm font-semibold mb-1">Số tiền</p>
           <div className="flex items-center justify-center gap-1">
-            <input type="text" inputMode="numeric" value={amount ? Number(amount).toLocaleString('en-US') : ''} onChange={handleAmountChange} placeholder="0" className={`text-4xl font-bold text-center bg-transparent outline-none w-full ${overLimit || periodOverLimit ? 'text-cotton-candy' : type === 'income' || type === 'allocation' ? 'text-turquoise' : 'text-blueberry dark:text-white'}`} />
+            <MoneyInput value={amount} onChange={setAmount} placeholder="0" className={`text-4xl font-bold text-center bg-transparent outline-none w-full ${overLimit || periodOverLimit ? 'text-cotton-candy' : type === 'income' || type === 'allocation' ? 'text-turquoise' : 'text-blueberry dark:text-white'}`} />
             <span className="text-4xl font-bold text-light-grey">đ</span>
           </div>
           {overLimit && <p className="text-cotton-candy text-xs mt-2 font-semibold">⚠️ Vượt hạn mức {formatMoney(activeCat.monthly_limit)} của danh mục này!</p>}
@@ -2130,7 +2129,7 @@ function EditTransaction({ transaction, onClose, accounts, categories, transacti
     return c.type === (type === 'income' ? 'income' : 'expense');
   });
 
-  function handleAmountChange(e) { setAmount(e.target.value.replace(/\D/g, '')); }
+  // FIX: dùng chung MoneyInput để hỗ trợ gõ biểu thức cộng/trừ/nhân/chia.
   function handleYearChange(y) {
     setSelectedYear(y);
     const month = selectedPeriod.split('-')[1];
@@ -2224,7 +2223,7 @@ function EditTransaction({ transaction, onClose, accounts, categories, transacti
         <div className="px-5 mt-8 text-center">
           <p className="text-steel dark:text-light-grey text-sm font-semibold mb-1">Số tiền</p>
           <div className="flex items-center justify-center gap-1">
-            <input type="text" inputMode="numeric" value={amount ? Number(amount).toLocaleString('en-US') : ''} onChange={handleAmountChange} placeholder="0" className={`text-4xl font-bold text-center bg-transparent outline-none w-full ${overLimit || periodOverLimit ? 'text-cotton-candy' : type === 'income' || type === 'allocation' ? 'text-turquoise' : 'text-blueberry dark:text-white'}`} />
+            <MoneyInput value={amount} onChange={setAmount} placeholder="0" className={`text-4xl font-bold text-center bg-transparent outline-none w-full ${overLimit || periodOverLimit ? 'text-cotton-candy' : type === 'income' || type === 'allocation' ? 'text-turquoise' : 'text-blueberry dark:text-white'}`} />
             <span className="text-4xl font-bold text-light-grey">đ</span>
           </div>
           {overLimit && <p className="text-cotton-candy text-xs mt-2 font-semibold">⚠️ Vượt hạn mức {formatMoney(activeCat.monthly_limit)} của danh mục này!</p>}
