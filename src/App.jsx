@@ -2530,12 +2530,16 @@ function QuickAllocateWithdrawForm({ category, mode, onClose, onSaved }) {
 function QuickAdjustBalanceForm({ account, currentBalance, onClose, onSaved }) {
   const [mode, setMode] = useState(null);
   const [amount, setAmount] = useState('');
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  // FIX: cho phép chỉnh sửa cả ngày lẫn giờ:phút nhập (trước đây chỉ chỉnh được ngày,
+  // giờ:phút luôn tự động lấy giờ hiện tại lúc lưu). Đồng bộ pattern datetime-local
+  // đang dùng ở QuickAllocateWithdrawForm — mặc định = giờ hiện tại, cho sửa tự do.
+  const [dateTime, setDateTime] = useState(nowForInput());
   const [note, setNote] = useState('');
   const [saving, setSaving] = useState(false);
 
   async function handleSave() {
     if (!amount) { alert('Nhập số tiền'); return; }
+    if (!dateTime) { alert('Chọn ngày giờ nhập'); return; }
     setSaving(true);
     let signedAmount;
     if (mode === 'increase') signedAmount = Number(amount);
@@ -2548,7 +2552,7 @@ function QuickAdjustBalanceForm({ account, currentBalance, onClose, onSaved }) {
     const savedNote = note || (mode === 'increase' ? 'Tăng số dư' : mode === 'decrease' ? 'Giảm số dư' : 'Đặt số dư mới');
     const { error } = await supabase.from('transactions').insert({
       account_id: account.id, type: 'adjustment', amount: signedAmount,
-      note: isDirectSet ? `[SET] ${savedNote}` : savedNote, date, created_at: new Date(date + 'T' + new Date().toTimeString().slice(0, 8)).toISOString(),
+      note: isDirectSet ? `[SET] ${savedNote}` : savedNote, date: dateTime.slice(0, 10), created_at: new Date(dateTime).toISOString(),
     });
     setSaving(false);
     if (error) { alert('Lỗi: ' + error.message); return; }
@@ -2568,8 +2572,8 @@ function QuickAdjustBalanceForm({ account, currentBalance, onClose, onSaved }) {
         </div>
         <p className="text-xs text-steel dark:text-light-grey mb-3">{mode ? 'Nhập số tiền muốn tăng/giảm.' : 'Không chọn gì cả — nhập thẳng số dư mới, hệ thống tự tính chênh lệch.'}</p>
         <MoneyInput value={amount} onChange={setAmount} placeholder={mode ? 'Số tiền' : 'Số dư mới'} className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-lg font-bold outline-none mb-3 dark:text-white dark:placeholder:text-light-grey text-blueberry" />
-        <p className="text-sm text-blueberry dark:text-white font-semibold mb-2">Ngày</p>
-        <DateField value={date} onChange={setDate} className="w-full justify-between bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm mb-3 dark:text-white text-blueberry" />
+        <p className="text-sm text-blueberry dark:text-white font-semibold mb-2">Ngày giờ nhập</p>
+        <input type="datetime-local" value={dateTime} onChange={(e) => setDateTime(e.target.value)} className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none mb-3 dark:text-white text-blueberry [color-scheme:light] dark:[color-scheme:dark]" />
         <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Ghi chú (không bắt buộc)" className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none mb-4 dark:text-white dark:placeholder:text-light-grey text-blueberry" />
         <button onClick={handleSave} disabled={saving} className={`w-full text-white rounded-xl py-3 font-bold flex items-center justify-center gap-2 disabled:opacity-60 shadow-md ${mode === 'decrease' ? 'bg-cotton-candy shadow-cotton-candy/30' : mode === 'increase' ? 'bg-gradient-primary shadow-turquoise/30' : 'bg-blueberry shadow-blueberry/30'}`}>
           {saving ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />} Lưu cập nhật
@@ -4577,7 +4581,7 @@ function AccountDetail({ account, transactions, categories, accounts, onBack, re
                         <p className="text-blueberry dark:text-white font-bold text-sm">{label}</p>
                         {isOverLimit && <span className="text-[10px] font-bold text-white bg-cotton-candy px-2 py-0.5 rounded-full">Vượt hạn mức</span>}
                       </div>
-                      <p className="text-steel dark:text-light-grey text-xs">{displayNote || new Date(tx.created_at || tx.date).toLocaleString('vi-VN')}</p>
+                      <p className="text-steel dark:text-light-grey text-xs">{new Date(tx.created_at || tx.date).toLocaleString('vi-VN')}{displayNote ? ` · ${displayNote}` : ''}</p>
                     </div>
                     <p className={`font-bold text-sm flex-shrink-0 ${isDirectSet ? 'text-blueberry dark:text-white' : isPositive ? 'text-turquoise' : 'text-cotton-candy'}`}>{isDirectSet ? '' : isPositive ? '+' : '-'}{formatMoney(Math.abs(tx.amount))}</p>
                     {!isDirectSet && (
@@ -4639,7 +4643,7 @@ function AccountDetail({ account, transactions, categories, accounts, onBack, re
                             <p className="text-blueberry dark:text-white font-bold text-sm">{label}</p>
                             {isOverLimit && <span className="text-[10px] font-bold text-white bg-cotton-candy px-2 py-0.5 rounded-full">Vượt hạn mức</span>}
                           </div>
-                          <p className="text-steel dark:text-light-grey text-xs">{displayNote || new Date(tx.created_at || tx.date).toLocaleString('vi-VN')}</p>
+                          <p className="text-steel dark:text-light-grey text-xs">{new Date(tx.created_at || tx.date).toLocaleString('vi-VN')}{displayNote ? ` · ${displayNote}` : ''}</p>
                         </div>
                         <p className={`font-bold text-sm flex-shrink-0 ${isDirectSet ? 'text-blueberry dark:text-white' : isPositive ? 'text-turquoise' : 'text-cotton-candy'}`}>{isDirectSet ? '' : isPositive ? '+' : '-'}{formatMoney(Math.abs(tx.amount))}</p>
                         {!isDirectSet && (
