@@ -1370,7 +1370,7 @@ function SidebarDesktop({ screen, setScreen, sidebarCollapsed, toggleSidebar, th
         <button onClick={toggleSidebar} title={sidebarCollapsed ? 'Mở rộng menu' : 'Thu gọn menu'} className="w-9 h-9 rounded-xl bg-gradient-primary flex items-center justify-center flex-shrink-0 hover:opacity-90 transition shadow-md shadow-turquoise/30">
           <Wallet size={17} className="text-white" />
         </button>
-        {!sidebarCollapsed && <span className="font-extrabold text-blueberry dark:text-white text-lg">Fincheck</span>}
+        {!sidebarCollapsed && <span className="font-extrabold text-blueberry dark:text-white text-lg">PandaFi</span>}
       </div>
 
       <div className="relative flex flex-col gap-1">
