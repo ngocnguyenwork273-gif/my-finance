@@ -832,7 +832,26 @@ function _computeFundBalanceWithProfit(category, transactions) {
   return balance;
 }
 
+// Cache tương tự fundBalanceWithProfit — Report và FundDetail gọi hàm này rất nhiều lần
+// (mỗi quỹ x nhiều mốc ngày), nếu không cache thì vòng lặp từng-ngày chạy lại liên tục gây lag.
+const _fundBalanceAtDateCache = new WeakMap();
+
 function fundBalanceAtDate(category, transactions, cutoffDate) {
+  let cacheForTx = _fundBalanceAtDateCache.get(transactions);
+  if (!cacheForTx) {
+    cacheForTx = new Map();
+    _fundBalanceAtDateCache.set(transactions, cacheForTx);
+  }
+  const cutoffKey = new Date(cutoffDate).toDateString();
+  const cacheKey = `${category.id}_${category.interest_rate}_${cutoffKey}`;
+  if (cacheForTx.has(cacheKey)) return cacheForTx.get(cacheKey);
+
+  const result = _computeFundBalanceAtDate(category, transactions, cutoffDate);
+  cacheForTx.set(cacheKey, result);
+  return result;
+}
+
+function _computeFundBalanceAtDate(category, transactions, cutoffDate) {
   const rate = Number(category.interest_rate || 0);
   const dailyRate = rate / 100 / 365;
   const history = transactions
@@ -3599,25 +3618,43 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
                     const depth = idx - walletActiveIndex;
                     if (depth < -1 || depth > 3) return null;
                     const style = walletStackStyle(depth);
+                    // Dãy số trang trí kiểu thẻ ngân hàng, lấy từ id ví — chỉ để hiển thị,
+                    // không phải số tài khoản/thẻ thật (đồng bộ kiểu thẻ với bản mobile).
+                    const maskedDigits = String(acc.id || '').replace(/[^0-9a-zA-Z]/g, '').slice(-4).toUpperCase().padStart(4, '0');
                     return (
                       <button
                         key={acc.id}
                         id={`wallet-card-${acc.id}`}
                         onClick={() => { if (depth === 0) onOpenAccount(acc.id, 'dashboard'); else goToWalletIndex(idx); }}
-                        className="absolute inset-0 rounded-2xl p-5 text-left shadow-card hover:shadow-lg"
+                        className="absolute inset-0 rounded-2xl p-5 text-left shadow-card hover:shadow-lg overflow-hidden"
                         style={{
                           ...style,
                           background: accountCardGradient(acc.type),
                           transition: 'transform 320ms cubic-bezier(.22,.9,.32,1), opacity 320ms ease, box-shadow 200ms ease',
                         }}
                       >
-                        <div className="flex items-start justify-between">
-                          <EmojiCircle emoji={acc.icon} size={36} active activeColor="rgba(255,255,255,0.3)" bg="rgba(255,255,255,0.14)" />
-                          <div className="text-right text-xs text-white/90 font-semibold">{ACCOUNT_TYPES.find((t) => t.value === acc.type)?.label || acc.type}</div>
+                        <div className="pointer-events-none absolute -top-10 -right-10 w-32 h-32 rounded-full bg-white/15" />
+                        <div className="pointer-events-none absolute -bottom-14 -left-8 w-32 h-32 rounded-full bg-black/10" />
+
+                        <div className="relative flex items-start justify-between">
+                          <div className="flex items-center gap-2">
+                            <div className="w-9 h-6 rounded-md bg-white/35 border border-white/40" />
+                            <EmojiCircle emoji={acc.icon} size={30} bg="rgba(255,255,255,0.16)" />
+                          </div>
+                          <Wifi size={18} className="text-white/85 rotate-90" />
                         </div>
-                        <div className="mt-6">
-                          <div className="text-sm text-white/90 truncate font-semibold">{acc.name}</div>
-                          <div className="text-lg font-bold text-white mt-1">{formatMoney(accountBalance(acc, transactions))}</div>
+
+                        <p className="relative text-white/90 font-bold text-base tracking-[0.2em] mt-4">•••• {maskedDigits}</p>
+
+                        <div className="relative flex items-end justify-between mt-3 gap-2">
+                          <div className="min-w-0">
+                            <p className="text-white/70 text-[10px] font-semibold uppercase truncate">{acc.name}</p>
+                            <p className="text-white font-extrabold text-lg mt-0.5 truncate">{formatMoney(accountBalance(acc, transactions))}</p>
+                          </div>
+                          <div className="text-right flex-shrink-0">
+                            <p className="text-white/60 text-[9px] font-semibold uppercase">Loại ví</p>
+                            <p className="text-white/90 text-xs font-bold whitespace-nowrap">{ACCOUNT_TYPES.find((t) => t.value === acc.type)?.label || acc.type}</p>
+                          </div>
                         </div>
                       </button>
                     );
