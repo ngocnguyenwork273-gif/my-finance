@@ -1440,7 +1440,7 @@ function CustomSelect({ value, onChange, children, className = '', triggerClassN
       {open && (
         <>
           <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
-          <div className={`absolute z-40 mt-1 ${align === 'right' ? 'right-0' : 'left-0'} min-w-full frost-card rounded-2xl shadow-card overflow-hidden`}>
+          <div style={{ position: 'absolute' }} className={`z-40 mt-1 ${align === 'right' ? 'right-0' : 'left-0'} min-w-full frost-card rounded-2xl shadow-card overflow-hidden`}>
             {/* Blob màu mờ cố định (không cuộn theo list) — cho hiệu ứng kính lỏng
                 rõ ràng ngay cả khi nền phía sau phẳng/không có gì để blur. */}
             <div className="pointer-events-none absolute -top-8 -left-8 w-28 h-28 rounded-full bg-turquoise/25 blur-2xl" />
@@ -4022,7 +4022,7 @@ function Funds({ setScreen, categories, transactions, onOpenFund, reload, onAddC
                   <Filter size={13} /> Thêm bộ lọc
                 </button>
                 {showFilterMenu && (
- <div onClick={(e) => e.stopPropagation()} className="absolute left-0 top-9 z-20 frost-card rounded-2xl shadow-card p-4 w-64">
+ <div onClick={(e) => e.stopPropagation()} style={{ position: 'absolute' }} className="left-0 top-9 z-20 frost-card rounded-2xl shadow-card p-4 w-64">
                     <p className="text-xs font-bold text-steel dark:text-light-grey mb-2">Mục tiêu quỹ</p>
                     <div className="flex flex-wrap gap-2 mb-4">
                       {[['all', 'Tất cả'], ['none', 'Chưa đặt'], ['set', 'Đang tích lũy'], ['done', 'Đã đạt']].map(([k, l]) => (
@@ -4049,7 +4049,7 @@ function Funds({ setScreen, categories, transactions, onOpenFund, reload, onAddC
                   <ArrowUpDown size={14} /> {activeSortField.label}
                 </button>
                 {showSortMenu && (
- <div onClick={(e) => e.stopPropagation()} className="absolute right-0 top-10 z-20 frost-card rounded-2xl shadow-card p-2 w-56">
+ <div onClick={(e) => e.stopPropagation()} style={{ position: 'absolute' }} className="right-0 top-10 z-20 frost-card rounded-2xl shadow-card p-2 w-56">
                     <p className="text-xs font-bold text-steel dark:text-light-grey px-2 py-1.5">Sắp xếp theo</p>
                     {FUND_SORT_FIELDS.map((f) => (
                       <button key={f.key} onClick={() => { setSortField((cur) => { if (cur === f.key) { setSortDir((d) => (d === 'asc' ? 'desc' : 'asc')); return cur; } setSortDir(f.key === 'created' ? 'desc' : 'asc'); return f.key; }); }}
@@ -4112,7 +4112,7 @@ function Funds({ setScreen, categories, transactions, onOpenFund, reload, onAddC
                           <MoreHorizontal size={14} />
                         </button>
                         {openMenuId === f.id && (
- <div onClick={(e) => e.stopPropagation()} className="absolute top-10 right-2.5 z-20 frost-card rounded-xl shadow-card py-1 w-40 text-left">
+ <div onClick={(e) => e.stopPropagation()} style={{ position: 'absolute' }} className="top-10 right-2.5 z-20 frost-card rounded-xl shadow-card py-1 w-40 text-left">
                             <button onClick={() => { onOpenFund(f.id, 'funds'); setOpenMenuId(null); }} className="w-full flex items-center gap-2 px-3 py-2 text-sm text-blueberry dark:text-white hover:bg-ice-cream dark:hover:bg-night-sky/30">
                               <Eye size={14} /> Xem chi tiết
                             </button>
@@ -4193,7 +4193,7 @@ function Funds({ setScreen, categories, transactions, onOpenFund, reload, onAddC
                               <MoreHorizontal size={18} />
                             </button>
                             {openMenuId === f.id && (
- <div onClick={(e) => e.stopPropagation()} className="absolute right-4 top-12 z-20 frost-card rounded-xl shadow-card py-1 w-40 text-left">
+ <div onClick={(e) => e.stopPropagation()} style={{ position: 'absolute' }} className="right-4 top-12 z-20 frost-card rounded-xl shadow-card py-1 w-40 text-left">
                                 <button onClick={() => { onOpenFund(f.id, 'funds'); setOpenMenuId(null); }} className="w-full flex items-center gap-2 px-3 py-2 text-sm text-blueberry dark:text-white hover:bg-ice-cream dark:hover:bg-night-sky/30">
                                   <Eye size={14} /> Xem chi tiết
                                 </button>
@@ -5119,7 +5119,7 @@ function Goals({ setScreen, goals, loadingGoals, reload, softDelete, onAddClick,
                   <Filter size={13} /> Thêm bộ lọc
                 </button>
                 {showFilterMenu && (
- <div onClick={(e) => e.stopPropagation()} className="absolute left-0 top-9 z-20 frost-card rounded-2xl shadow-card p-4 w-64">
+ <div onClick={(e) => e.stopPropagation()} style={{ position: 'absolute' }} className="left-0 top-9 z-20 frost-card rounded-2xl shadow-card p-4 w-64">
                     <p className="text-xs font-bold text-steel dark:text-light-grey mb-2">Trạng thái</p>
                     <div className="flex flex-wrap gap-2 mb-4">
                       {[['all', 'Tất cả'], ['active', 'Đang làm'], ['done', 'Hoàn thành']].map(([k, l]) => (
@@ -5146,7 +5146,7 @@ function Goals({ setScreen, goals, loadingGoals, reload, softDelete, onAddClick,
                   <ArrowUpDown size={14} /> Ngày tạo
                 </button>
                 {showSortMenu && (
- <div onClick={(e) => e.stopPropagation()} className="absolute right-0 top-10 z-20 frost-card rounded-2xl shadow-card p-2 w-56">
+ <div onClick={(e) => e.stopPropagation()} style={{ position: 'absolute' }} className="right-0 top-10 z-20 frost-card rounded-2xl shadow-card p-2 w-56">
                     <p className="text-xs font-bold text-steel dark:text-light-grey px-2 py-1.5">Sắp xếp theo</p>
                     {GOAL_SORT_FIELDS.map((f) => (
                       <button key={f.key} onClick={() => { setSortField((cur) => { if (cur === f.key) { setSortDir((d) => (d === 'asc' ? 'desc' : 'asc')); return cur; } setSortDir(f.key === 'created' ? 'desc' : 'asc'); return f.key; }); }}
@@ -5199,7 +5199,7 @@ function Goals({ setScreen, goals, loadingGoals, reload, softDelete, onAddClick,
                             <MoreHorizontal size={14} />
                           </button>
                           {openMenuId === goal.id && (
- <div onClick={(e) => e.stopPropagation()} className="absolute top-10 right-2.5 z-20 frost-card rounded-xl shadow-card py-1 w-40 text-left">
+ <div onClick={(e) => e.stopPropagation()} style={{ position: 'absolute' }} className="top-10 right-2.5 z-20 frost-card rounded-xl shadow-card py-1 w-40 text-left">
                               <button onClick={() => { setEditingGoal(goal); setOpenMenuId(null); }} className="w-full flex items-center gap-2 px-3 py-2 text-sm text-blueberry dark:text-white hover:bg-ice-cream dark:hover:bg-night-sky/30">
                                 <Eye size={14} /> Xem chi tiết
                               </button>
@@ -5291,7 +5291,7 @@ function Goals({ setScreen, goals, loadingGoals, reload, softDelete, onAddClick,
                                 <MoreHorizontal size={18} />
                               </button>
                               {openMenuId === goal.id && (
- <div onClick={(e) => e.stopPropagation()} className="absolute right-4 top-12 z-20 frost-card rounded-xl shadow-card py-1 w-40 text-left">
+ <div onClick={(e) => e.stopPropagation()} style={{ position: 'absolute' }} className="right-4 top-12 z-20 frost-card rounded-xl shadow-card py-1 w-40 text-left">
                                   <button onClick={() => { setEditingGoal(goal); setOpenMenuId(null); }} className="w-full flex items-center gap-2 px-3 py-2 text-sm text-blueberry dark:text-white hover:bg-ice-cream dark:hover:bg-night-sky/30">
                                     <Eye size={14} /> Xem chi tiết
                                   </button>
