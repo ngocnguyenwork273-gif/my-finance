@@ -764,7 +764,27 @@ function fundBalance(categoryId, transactions) {
     }, 0);
 }
 
+// Cache kết quả tính lãi theo quỹ — tránh lặp lại vòng lặp tốn kém mỗi lần render.
+// Cache được khóa theo: mảng transactions hiện tại (WeakMap tự giải phóng khi data cũ bị thay),
+// + id quỹ + lãi suất + ngày hôm nay (để qua ngày mới thì tự tính lại đúng).
+const _fundBalanceCache = new WeakMap();
+
 function fundBalanceWithProfit(category, transactions) {
+  let cacheForTx = _fundBalanceCache.get(transactions);
+  if (!cacheForTx) {
+    cacheForTx = new Map();
+    _fundBalanceCache.set(transactions, cacheForTx);
+  }
+  const todayKey = new Date().toDateString();
+  const cacheKey = `${category.id}_${category.interest_rate}_${todayKey}`;
+  if (cacheForTx.has(cacheKey)) return cacheForTx.get(cacheKey);
+
+  const result = _computeFundBalanceWithProfit(category, transactions);
+  cacheForTx.set(cacheKey, result);
+  return result;
+}
+
+function _computeFundBalanceWithProfit(category, transactions) {
   const rate = Number(category.interest_rate || 0);
   const history = transactions
     .filter((t) => t.category_id === category.id && (t.type === 'allocation' || t.type === 'expense'))
