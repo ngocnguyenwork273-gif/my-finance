@@ -487,30 +487,24 @@ function ImageUploader({
     reader.addEventListener('load', () => {
       setImgSrc(reader.result);
       setZoom(1);
-      // Khung crop tạm thời — sẽ được tính lại chính xác theo kích thước thật của
-      // ảnh ngay khi ảnh load xong (xem onImageLoad), nên không cần chính xác ở đây.
-      setCrop({ unit: '%', width: 90, x: 5, y: 5, aspect: ratio });
+      // Chưa có khung crop cho tới khi ảnh load xong (xem onImageLoad) — để tránh
+      // hiện thoáng qua 1 khung sai kích thước trước khi khung thật (đã canh giữa,
+      // đúng tỉ lệ) xuất hiện.
+      setCrop(undefined);
       setShowEditor(true);
     });
     reader.readAsDataURL(file);
   }
 
   // Ảnh vừa load xong trong editor → tự tính & hiển thị ngay khung crop đã canh giữa,
-  // khớp đúng tỉ lệ đích (vd khung vuông cho avatar) dựa trên kích thước thật của ảnh.
-  // Người dùng chỉ được kéo/chỉnh khung SAU khi khung này đã tự hiện ra.
+  // khớp đúng tỉ lệ đích (vd khung vuông cho avatar), to gần hết ảnh — người dùng chỉ
+  // cần kéo để chọn đúng vùng muốn giữ, không phải tự vẽ khung từ đầu.
+  // Lưu ý: khung được lưu ở đơn vị % (không phải px) — vì % luôn khớp tỉ lệ đúng
+  // dù người dùng kéo thanh Zoom to/nhỏ ảnh sau đó (px cố định sẽ bị lệch khi ảnh
+  // đổi kích thước hiển thị do zoom, khiến khung nhìn như "tự nhiên" sai kích cỡ).
   function onImageLoad(e) {
-    const { width, height, naturalWidth, naturalHeight } = e.currentTarget;
-    const percentCrop = centeredAspectCrop(naturalWidth, naturalHeight, ratio);
-    // Quy đổi ngay sang đơn vị px theo kích thước ảnh đang hiển thị, để khớp với
-    // dạng dữ liệu mà ReactCrop trả về khi người dùng kéo/chỉnh (onChange trả px) —
-    // nhờ vậy bấm "Lưu ảnh" ngay mà chưa chỉnh gì vẫn crop đúng khung đã tự hiện ra.
-    setCrop({
-      unit: 'px',
-      x: (percentCrop.x / 100) * width,
-      y: (percentCrop.y / 100) * height,
-      width: (percentCrop.width / 100) * width,
-      height: (percentCrop.height / 100) * height,
-    });
+    const { naturalWidth, naturalHeight } = e.currentTarget;
+    setCrop(centeredAspectCrop(naturalWidth, naturalHeight, ratio));
   }
 
   function handleCancel() {
@@ -520,15 +514,16 @@ function ImageUploader({
   }
 
   function handleConfirm() {
-    if (!imageRef.current || !crop.width || !crop.height) return;
+    if (!imageRef.current || !crop || !crop.width || !crop.height) return;
     const canvas = document.createElement('canvas');
     const image = imageRef.current;
-    const scaleX = image.naturalWidth / image.width;
-    const scaleY = image.naturalHeight / image.height;
-    const cropX = crop.x * scaleX;
-    const cropY = crop.y * scaleY;
-    const cropWidth = crop.width * scaleX;
-    const cropHeight = crop.height * scaleY;
+    // crop ở đơn vị % nên quy đổi thẳng sang toạ độ pixel của ẢNH GỐC (naturalWidth/
+    // naturalHeight) — không phụ thuộc kích thước đang hiển thị (đã bị zoom to/nhỏ),
+    // nhờ vậy ảnh xuất ra luôn đúng vùng đã chọn dù trước đó có zoom bao nhiêu đi nữa.
+    const cropX = (crop.x / 100) * image.naturalWidth;
+    const cropY = (crop.y / 100) * image.naturalHeight;
+    const cropWidth = (crop.width / 100) * image.naturalWidth;
+    const cropHeight = (crop.height / 100) * image.naturalHeight;
     canvas.width = cropWidth;
     canvas.height = cropHeight;
     const ctx = canvas.getContext('2d');
@@ -564,7 +559,7 @@ function ImageUploader({
             <h3 className="text-blueberry dark:text-white font-bold text-lg mb-3">Cắt ảnh</h3>
             {/* overflow-auto cho phép kéo/pan ảnh khi ảnh lớn hơn khung xem sau khi zoom */}
             <div className="flex items-center justify-center bg-ice-cream dark:bg-night-sky rounded-2xl overflow-auto max-h-[50vh]">
-              <ReactCrop crop={crop} onChange={setCrop} aspect={ratio} circularCrop={circularCrop} keepSelection>
+              <ReactCrop crop={crop} onChange={setCrop} aspect={ratio} circularCrop={circularCrop} keepSelection disabled={!crop}>
                 <img
                   ref={imageRef}
                   src={imgSrc}
@@ -586,7 +581,7 @@ function ImageUploader({
             </div>
             <div className="flex gap-3 mt-4">
               <button onClick={handleCancel} className="flex-1 py-2.5 rounded-full text-sm font-bold text-steel dark:text-light-grey bg-ice-cream dark:bg-[#2a2a44]">Huỷ</button>
-              <button onClick={handleConfirm} className="flex-1 py-2.5 rounded-full text-sm font-bold text-white bg-gradient-primary shadow-md shadow-turquoise/30">Lưu ảnh</button>
+              <button onClick={handleConfirm} disabled={!crop} className="flex-1 py-2.5 rounded-full text-sm font-bold text-white bg-gradient-primary shadow-md shadow-turquoise/30 disabled:opacity-60">Lưu ảnh</button>
             </div>
           </div>
         </div>
@@ -1632,7 +1627,7 @@ function AvatarMenu({ avatarUrl, displayName, openSettings, variant = 'desktop' 
       {open && (
         <>
           <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
-          <div className={`absolute ${isDesktop ? 'top-12' : 'top-14'} right-0 bg-white/78 dark:bg-[#1e1e32]/70 backdrop-blur-xl backdrop-saturate-150 rounded-2xl shadow-card border border-white/60 dark:border-[rgba(255,255,255,0.10)] py-1.5 w-56 z-40 overflow-hidden relative`}>
+          <div style={{ position: 'absolute' }} className={`${isDesktop ? 'top-12' : 'top-14'} right-0 bg-white/78 dark:bg-[#1e1e32]/70 backdrop-blur-xl backdrop-saturate-150 rounded-2xl shadow-card border border-white/60 dark:border-[rgba(255,255,255,0.10)] py-1.5 w-56 z-40 overflow-hidden`}>
             <div className="pointer-events-none absolute -top-8 -right-8 w-24 h-24 rounded-full bg-turquoise/20 blur-2xl" />
             <div className="pointer-events-none absolute -bottom-8 -left-8 w-24 h-24 rounded-full bg-lavender/20 blur-2xl" />
             <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/80 dark:via-white/25 to-transparent" />
@@ -3547,7 +3542,7 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
                     {showWalletPopover && (
                       <>
                         <div className="fixed inset-0 z-30" onClick={() => setShowWalletPopover(false)} />
-                        <div className="absolute top-9 right-0 bg-white/85 dark:bg-[#1e1e32]/75 backdrop-blur-xl backdrop-saturate-150 rounded-2xl shadow-card border-0 dark:border dark:border-[rgba(189,189,203,0.1)] py-1.5 w-56 z-40 max-h-72 overflow-y-auto overflow-x-hidden scrollbar-hide relative isolate">
+                        <div style={{ position: 'absolute' }} className="top-9 right-0 bg-white/85 dark:bg-[#1e1e32]/75 backdrop-blur-xl backdrop-saturate-150 rounded-2xl shadow-card border-0 dark:border dark:border-[rgba(189,189,203,0.1)] py-1.5 w-56 z-40 max-h-72 overflow-y-auto overflow-x-hidden scrollbar-hide isolate">
                           <div className="pointer-events-none absolute -top-8 -right-8 w-24 h-24 rounded-full bg-turquoise/20 blur-2xl -z-10" />
                           <div className="pointer-events-none absolute -bottom-8 -left-8 w-24 h-24 rounded-full bg-lavender/20 blur-2xl -z-10" />
                           <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/80 dark:via-white/25 to-transparent -z-10" />
@@ -5933,7 +5928,15 @@ function HoverDetailCard({ className, children, detail, align = 'left' }) {
       {children}
       <div
         onClick={(e) => e.stopPropagation()}
-        className={`absolute ${align === 'right' ? 'right-0' : 'left-0'} top-[calc(100%+8px)] z-40 w-72 max-w-[85vw] bg-white/85 dark:bg-[#1e1e32]/75 backdrop-blur-xl backdrop-saturate-150 border-0 dark:border dark:border-[rgba(189,189,203,0.1)] rounded-2xl shadow-card p-4 max-h-72 overflow-y-auto overflow-x-hidden scrollbar-hide transition-all duration-150 origin-top relative isolate ${open ? 'opacity-100 scale-100 translate-y-0 pointer-events-auto' : 'opacity-0 scale-95 -translate-y-1 pointer-events-none'}`}
+        style={{ position: 'absolute' }}
+        // LƯU Ý: trước đây className có cả "absolute" lẫn "relative" (đi kèm "isolate").
+        // Tailwind biên dịch .relative SAU .absolute trong stylesheet, nên khi 1 phần tử có
+        // cả 2 class, "position: relative" của .relative thắng (cùng độ đặc hiệu, đứng sau
+        // thắng) — popup này bị rớt khỏi position:absolute, nằm lại trong flow bình thường
+        // và CHIẾM CHỖ THẬT trong card dù đang ẩn (opacity-0), gây ra khoảng trắng to bên
+        // dưới mỗi thẻ tổng kết. Bỏ "relative" (không cần cho isolate hoạt động) + ép cứng
+        // bằng inline style để không bao giờ lặp lại lỗi này dù thứ tự CSS có đổi.
+        className={`${align === 'right' ? 'right-0' : 'left-0'} top-[calc(100%+8px)] z-40 w-72 max-w-[85vw] bg-white/85 dark:bg-[#1e1e32]/75 backdrop-blur-xl backdrop-saturate-150 border-0 dark:border dark:border-[rgba(189,189,203,0.1)] rounded-2xl shadow-card p-4 max-h-72 overflow-y-auto overflow-x-hidden scrollbar-hide transition-all duration-150 origin-top isolate ${open ? 'opacity-100 scale-100 translate-y-0 pointer-events-auto' : 'opacity-0 scale-95 -translate-y-1 pointer-events-none'}`}
       >
         <div className="pointer-events-none absolute -top-8 -left-8 w-24 h-24 rounded-full bg-turquoise/20 blur-2xl -z-10" />
         <div className="pointer-events-none absolute -bottom-8 -right-8 w-24 h-24 rounded-full bg-lavender/20 blur-2xl -z-10" />
@@ -7280,7 +7283,8 @@ function MainApp({ user, theme, toggleTheme }) {
 
   const [logs, setLogs] = useState([]);
   async function loadLogs() {
-    const { data } = await supabase.from('system_logs').select('*').order('created_at', { ascending: false });
+    // Chỉ lấy 100 log gần nhất thay vì toàn bộ lịch sử — bảng system_logs sẽ càng ngày càng phình to
+    const { data } = await supabase.from('system_logs').select('*').order('created_at', { ascending: false }).limit(100);
     setLogs(data || []);
   }
 
@@ -7294,7 +7298,10 @@ function MainApp({ user, theme, toggleTheme }) {
     const [{ data: accData }, { data: catData }, { data: txData }, { data: goalData }] = await Promise.all([
       supabase.from('accounts').select('*').eq('is_active', true).is('deleted_at', null),
       supabase.from('categories').select('*').is('deleted_at', null),
-      supabase.from('transactions').select('*').is('deleted_at', null).order('created_at', { ascending: false }),
+      // Chỉ lấy các cột thực sự đang dùng trong app thay vì '*' (giảm dung lượng response).
+      // Lưu ý: KHÔNG thêm .limit() ở đây — fundBalanceWithProfit() cần TOÀN BỘ lịch sử
+      // giao dịch của từng quỹ để tính lãi kép đúng, giới hạn số dòng sẽ làm sai số dư quỹ.
+      supabase.from('transactions').select('id, account_id, category_id, type, amount, date, created_at, note').is('deleted_at', null).order('created_at', { ascending: false }),
       supabase.from('goals').select('*').is('deleted_at', null).order('created_at', { ascending: false }),
     ]);
     // Mục tiêu có liên kết quỹ (fund_id) thì "Số tiền hiện có" luôn lấy trực tiếp từ số dư quỹ đó,
