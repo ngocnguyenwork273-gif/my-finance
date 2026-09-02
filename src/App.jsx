@@ -9,7 +9,7 @@ import {
   Filter, MoreHorizontal, Eye, EyeOff, LayoutGrid, List, ArrowUpDown, Calendar, Clock, Star,
   ChevronDown, ChevronRight, ChevronLeft, Camera, KeyRound, UserCog, SlidersHorizontal,
   AlertTriangle, Info, PieChart, LineChart, BarChart, CircleDollarSign, FileText, SendHorizontal,
-  BadgeCheck, CreditCard
+  BadgeCheck, CreditCard, Wifi
 } from 'lucide-react';
 import ReactCrop, { centerCrop, makeAspectCrop } from 'react-image-crop';
 import 'react-image-crop/dist/ReactCrop.css';
@@ -3136,20 +3136,44 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
               Chưa có ví nào. Bấm + để thêm.
             </div>
           ) : (
-            accounts.map((acc) => (
-              <div key={acc.id} className="snap-start shrink-0 w-[85%] max-w-[280px]">
-                <button onClick={() => onOpenAccount(acc.id, 'dashboard')} className="w-full text-left bg-white/90 dark:bg-[#2a2a44]/90 backdrop-blur rounded-3xl p-4 shadow-lg shadow-black/5">
-                  <div className="flex items-center gap-3">
-                    <EmojiCircle emoji={acc.icon} size={36} active activeColor="#0DBACC" />
-                    <div>
-                      <p className="text-blueberry dark:text-white font-bold text-sm">{acc.name}</p>
-                      <p className="text-steel dark:text-light-grey text-xs capitalize">{ACCOUNT_TYPES.find(t => t.value === acc.type)?.label || acc.type}</p>
+            accounts.map((acc) => {
+              // Dãy số trang trí kiểu thẻ ngân hàng, lấy từ id ví — chỉ để hiển thị,
+              // không phải số tài khoản/thẻ thật.
+              const maskedDigits = String(acc.id || '').replace(/[^0-9a-zA-Z]/g, '').slice(-4).toUpperCase().padStart(4, '0');
+              return (
+                <div key={acc.id} className="snap-start shrink-0 w-[85%] max-w-[300px]">
+                  <button
+                    onClick={() => onOpenAccount(acc.id, 'dashboard')}
+                    style={{ background: accountCardGradient(acc.type) }}
+                    className="w-full text-left rounded-[1.75rem] p-5 relative overflow-hidden shadow-lg shadow-black/10"
+                  >
+                    <div className="pointer-events-none absolute -top-10 -right-10 w-32 h-32 rounded-full bg-white/15" />
+                    <div className="pointer-events-none absolute -bottom-14 -left-8 w-32 h-32 rounded-full bg-black/10" />
+
+                    <div className="relative flex items-start justify-between">
+                      <div className="flex items-center gap-2">
+                        <div className="w-9 h-6 rounded-md bg-white/35 border border-white/40" />
+                        <EmojiCircle emoji={acc.icon} size={30} bg="rgba(255,255,255,0.16)" />
+                      </div>
+                      <Wifi size={20} className="text-white/85 rotate-90" />
                     </div>
-                  </div>
-                  <p className="text-blueberry dark:text-white font-bold text-lg mt-2">{formatMoney(accountBalance(acc, transactions))}</p>
-                </button>
-              </div>
-            ))
+
+                    <p className="relative text-white/90 font-bold text-base sm:text-lg tracking-[0.2em] mt-5">•••• •••• •••• {maskedDigits}</p>
+
+                    <div className="relative flex items-end justify-between mt-4 gap-2">
+                      <div className="min-w-0">
+                        <p className="text-white/70 text-[10px] font-semibold uppercase truncate">{acc.name}</p>
+                        <p className="text-white font-extrabold text-xl mt-0.5 truncate">{formatMoney(accountBalance(acc, transactions))}</p>
+                      </div>
+                      <div className="text-right flex-shrink-0">
+                        <p className="text-white/60 text-[9px] font-semibold uppercase">Loại ví</p>
+                        <p className="text-white/90 text-xs font-bold whitespace-nowrap">{ACCOUNT_TYPES.find((t) => t.value === acc.type)?.label || acc.type}</p>
+                      </div>
+                    </div>
+                  </button>
+                </div>
+              );
+            })
           )}
         </div>
       </div>
@@ -3168,8 +3192,25 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
             <AvatarMenu avatarUrl={avatarUrl} displayName={displayName} openSettings={openSettings || (() => setScreen('settings'))} variant="mobile" />
           </div>
           <div className="px-5 mt-4">
-            <p className="text-white/70 text-xs font-semibold">Tổng tài sản</p>
-            <p className="text-white text-3xl font-bold">{formatMoney(totalAssets)}</p>
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-white/70 text-xs font-semibold">Tổng tài sản</p>
+                <p className="text-white text-3xl font-extrabold mt-1 truncate">{formatMoney(totalAssets)}</p>
+              </div>
+              <div className="flex items-center gap-2 flex-shrink-0 mt-0.5">
+                <button onClick={onAddClick} aria-label="Thêm giao dịch" className="w-11 h-11 rounded-full bg-gradient-secondary flex items-center justify-center shadow-lg shadow-black/10 active:scale-95 transition">
+                  <Plus size={18} className="text-white" />
+                </button>
+                <button onClick={() => setScreen('report')} aria-label="Xem báo cáo" className="w-11 h-11 rounded-full bg-gradient-primary flex items-center justify-center shadow-lg shadow-black/10 active:scale-95 transition">
+                  <BarChart3 size={18} className="text-white" />
+                </button>
+              </div>
+            </div>
+            {/* Đường biểu đồ nhỏ mang tính trang trí, cùng phong cách với khu vực
+                "Total balance" trong bản thiết kế tham khảo — không đại diện số liệu thật. */}
+            <svg width="100%" height="26" viewBox="0 0 200 26" preserveAspectRatio="none" className="w-full mt-3 opacity-60">
+              <polyline points="0,18 20,15 40,20 60,9 80,13 100,5 120,11 140,4 160,10 180,2 200,7" fill="none" stroke="rgba(255,255,255,0.6)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
           </div>
 
           {/* Mobile wallet carousel */}
