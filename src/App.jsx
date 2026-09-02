@@ -1,7 +1,7 @@
 /* ==============================================================================
    01. IMPORTS
    ============================================================================== */
-import { useState, useEffect, useRef, Fragment } from 'react';
+import { useState, useEffect, useRef, Fragment, Children } from 'react';
 import { supabase } from './supabaseClient';
 import {
   Home, Sparkles, Plus, BarChart3, Settings as SettingsIcon, TrendingUp, TrendingDown, PiggyBank, HeartPulse,
@@ -45,11 +45,13 @@ const fincheckStyles = `
     --text-placeholder: rgba(255,255,255,0.48);
     --text-disabled: rgba(255,255,255,0.35);
 
-    /* Liquid glass tokens */
-    --glass-bg: rgba(20,20,45,0.55);
-    --glass-border: rgba(255,255,255,0.12);
-    --glass-blur: blur(18px) saturate(150%);
-    --glass-shadow: 0 8px 32px rgba(0,0,0,0.18);
+    /* Liquid glass tokens — blur/saturate mạnh hơn, viền + highlight rõ hơn
+       để cảm giác "kính lỏng" rõ rệt hơn trên mọi bề mặt, cả sáng lẫn tối. */
+    --glass-bg: rgba(20,20,45,0.50);
+    --glass-border: rgba(255,255,255,0.18);
+    --glass-blur: blur(30px) saturate(190%);
+    --glass-shadow: 0 10px 42px rgba(0,0,0,0.24);
+    --glass-highlight: rgba(255,255,255,0.35);
   }
 
   /* App shell base: avoid the default browser bg (white/black) showing
@@ -65,30 +67,54 @@ const fincheckStyles = `
     background-color: #1a1a2e;
   }
 
-  /* Liquid glass — reusable surface for auth card / modal / dropdown / popover */
+  /* Liquid glass — reusable surface for auth card / modal / dropdown / popover.
+     Tăng blur/saturate + thêm lớp "sheen" (ánh sáng lướt) chuyển động rất chậm
+     để bề mặt có cảm giác kính lỏng sống động thay vì kính mờ tĩnh. Đồng thời
+     bổ sung biến thể .dark thực sự (trước đây chỉ có .glass-surface-dark —
+     một class không được gắn ở đâu cả nên auth card KHÔNG đổi theo dark mode). */
   .glass-surface {
-    background: rgba(255,255,255,0.20);
-    backdrop-filter: blur(22px) saturate(140%);
-    -webkit-backdrop-filter: blur(22px) saturate(140%);
-    border: 1px solid rgba(255,255,255,0.28);
-    box-shadow: 0 20px 60px rgba(0,0,0,0.25);
+    background: rgba(255,255,255,0.24);
+    backdrop-filter: blur(34px) saturate(190%);
+    -webkit-backdrop-filter: blur(34px) saturate(190%);
+    border: 1px solid rgba(255,255,255,0.36);
+    box-shadow: 0 24px 70px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,255,255,0.5),
+      inset 0 0 46px rgba(255,255,255,0.06);
   }
-  .dark .glass-surface-dark {
-    background: var(--glass-bg);
-    backdrop-filter: var(--glass-blur);
-    -webkit-backdrop-filter: var(--glass-blur);
-    border: 1px solid var(--glass-border);
-    box-shadow: var(--glass-shadow);
+  .glass-surface::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background: linear-gradient(115deg, rgba(255,255,255,0.5) 0%, rgba(255,255,255,0) 30%, rgba(255,255,255,0) 70%, rgba(255,255,255,0.25) 100%);
+    background-size: 220% 220%;
+    animation: liquidSheen 10s ease-in-out infinite;
+    pointer-events: none;
+    z-index: -1;
+  }
+  .dark .glass-surface {
+    background: rgba(20,20,45,0.55);
+    backdrop-filter: blur(34px) saturate(190%);
+    -webkit-backdrop-filter: blur(34px) saturate(190%);
+    border: 1px solid rgba(255,255,255,0.16);
+    box-shadow: 0 24px 70px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.12),
+      inset 0 0 46px rgba(255,255,255,0.03);
+  }
+  @keyframes liquidSheen {
+    0%, 100% { background-position: 0% 0%; }
+    50% { background-position: 100% 100%; }
   }
   .glass-input {
-    background: rgba(255,255,255,0.16);
-    border: 1px solid rgba(255,255,255,0.25);
+    background: rgba(255,255,255,0.20);
+    backdrop-filter: blur(18px) saturate(170%);
+    -webkit-backdrop-filter: blur(18px) saturate(170%);
+    border: 1px solid rgba(255,255,255,0.34);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.4);
     transition: background-color .15s, border-color .15s, box-shadow .15s;
   }
   .glass-input:focus {
     border-color: rgba(34,211,238,0.65);
-    box-shadow: 0 0 0 3px rgba(34,211,238,0.12);
-    background: rgba(255,255,255,0.22);
+    box-shadow: 0 0 0 3px rgba(34,211,238,0.14), inset 0 1px 0 rgba(255,255,255,0.5);
+    background: rgba(255,255,255,0.28);
   }
   .bg-ice-cream { background-color: var(--ice-cream); }
   .bg-turquoise { background-color: var(--turquoise); }
@@ -118,16 +144,45 @@ const fincheckStyles = `
   .border-lavender { border-color: var(--lavender); }
   .border-steel { border-color: var(--steel); }
   .border-light-grey { border-color: var(--light-grey); }
-  .shadow-soft { box-shadow: 0 1px 2px rgba(48,49,80,0.04), 0 8px 24px rgba(48,49,80,0.08); }
-  .shadow-card { box-shadow: 0 2px 4px rgba(48,49,80,0.05), 0 14px 40px rgba(48,49,80,0.11); }
+  .shadow-soft { box-shadow: 0 1px 2px rgba(48,49,80,0.04), 0 10px 30px rgba(48,49,80,0.10), inset 0 1px 0 rgba(255,255,255,0.5); }
+  .shadow-card { box-shadow: 0 2px 4px rgba(48,49,80,0.05), 0 18px 48px rgba(48,49,80,0.14), inset 0 1px 0 rgba(255,255,255,0.55); }
   .dark .bg-ice-cream { background-color: var(--night-sky); }
-  .dark .bg-white { background-color: #1e1e32; }
+  /* "bg-white" / "dark:bg-[#1e1e32]" / "dark:bg-[#2a2a44]" là các nền đặc dùng
+     cho card, modal, dropdown, segmented-control khắp app. Đổi sang kính lỏng
+     (nền bán trong suốt + backdrop-blur) thay vì màu đặc, cả sáng lẫn tối,
+     để hiệu ứng liquid glass nhất quán trên toàn bộ giao diện. */
+  .bg-white {
+    background-color: rgba(255,255,255,0.66);
+    backdrop-filter: blur(28px) saturate(190%);
+    -webkit-backdrop-filter: blur(28px) saturate(190%);
+  }
+  .dark .bg-white {
+    background-color: rgba(30,30,50,0.62);
+    backdrop-filter: blur(28px) saturate(190%);
+    -webkit-backdrop-filter: blur(28px) saturate(190%);
+  }
+  .dark .dark\:bg-\[\#1e1e32\] {
+    background-color: rgba(30,30,50,0.62);
+    backdrop-filter: blur(28px) saturate(190%);
+    -webkit-backdrop-filter: blur(28px) saturate(190%);
+  }
+  .dark .dark\:bg-\[\#2a2a44\] {
+    background-color: rgba(42,42,68,0.68);
+    backdrop-filter: blur(18px) saturate(190%);
+    -webkit-backdrop-filter: blur(18px) saturate(190%);
+  }
+  /* Tăng độ dày mặc định của backdrop-blur (Tailwind) để mọi bề mặt bán
+     trong suốt còn lại (thanh tìm kiếm, nút tròn, menu...) cũng dày kính hơn. */
+  .backdrop-blur {
+    backdrop-filter: blur(22px) saturate(190%);
+    -webkit-backdrop-filter: blur(22px) saturate(190%);
+  }
   .dark .text-blueberry { color: var(--text-primary); }
   .dark .text-steel { color: var(--light-grey); }
   .dark .border-steel { border-color: #3a3a5a; }
   .dark .border-light-grey { border-color: #3a3a5a; }
-  .dark .shadow-soft { box-shadow: 0 4px 20px rgba(0,0,0,0.3); }
-  .dark .shadow-card { box-shadow: 0 8px 32px rgba(0,0,0,0.4); }
+  .dark .shadow-soft { box-shadow: 0 4px 24px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.08); }
+  .dark .shadow-card { box-shadow: 0 10px 40px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.1); }
   .bg-gradient-primary { background: linear-gradient(135deg, var(--turquoise), var(--baby-blue)); }
   .bg-gradient-secondary { background: linear-gradient(135deg, var(--cotton-candy), var(--lavender)); }
   .bg-gradient-warm { background: linear-gradient(135deg, var(--cotton-candy-light), var(--lavender-light)); }
@@ -140,12 +195,12 @@ const fincheckStyles = `
      ========================================================================== */
   .frost-card {
     position: relative;
-    background: linear-gradient(150deg, rgba(255,255,255,0.80), rgba(255,255,255,0.48));
-    backdrop-filter: blur(40px) saturate(220%);
-    -webkit-backdrop-filter: blur(40px) saturate(220%);
+    background: linear-gradient(150deg, rgba(255,255,255,0.82), rgba(255,255,255,0.46));
+    backdrop-filter: blur(46px) saturate(240%);
+    -webkit-backdrop-filter: blur(46px) saturate(240%);
     border: 1px solid rgba(255,255,255,0.95);
-    box-shadow: 20px 20px 40px rgba(48,49,80,0.18), -12px -12px 26px rgba(255,255,255,0.9),
-      0 0 0 1px rgba(13,186,204,0.06), 0 12px 28px -14px rgba(159,127,224,0.35),
+    box-shadow: 22px 22px 44px rgba(48,49,80,0.20), -12px -12px 28px rgba(255,255,255,0.92),
+      0 0 0 1px rgba(13,186,204,0.08), 0 14px 32px -14px rgba(159,127,224,0.4),
       inset 0 1px 0 rgba(255,255,255,0.95), inset 0 -1px 0 rgba(48,49,80,0.05);
     isolation: isolate;
   }
@@ -154,49 +209,52 @@ const fincheckStyles = `
     position: absolute;
     inset: 0;
     border-radius: inherit;
-    background: linear-gradient(115deg, rgba(255,255,255,0.55) 0%, rgba(255,255,255,0.12) 22%, rgba(255,255,255,0) 45%);
+    background: linear-gradient(115deg, rgba(255,255,255,0.6) 0%, rgba(255,255,255,0.15) 22%, rgba(255,255,255,0) 45%, rgba(255,255,255,0) 70%, rgba(255,255,255,0.3) 100%);
+    background-size: 220% 220%;
+    animation: liquidSheen 12s ease-in-out infinite;
     pointer-events: none;
     z-index: -1;
   }
   .dark .frost-card {
-    background: linear-gradient(150deg, rgba(52,52,86,0.72), rgba(24,24,42,0.60));
-    backdrop-filter: blur(40px) saturate(220%);
-    -webkit-backdrop-filter: blur(40px) saturate(220%);
-    border: 1px solid rgba(255,255,255,0.18);
-    box-shadow: 20px 20px 40px rgba(0,0,0,0.55), -8px -8px 22px rgba(255,255,255,0.03),
-      0 0 0 1px rgba(13,186,204,0.08), 0 12px 28px -14px rgba(159,127,224,0.25),
-      inset 0 1px 0 rgba(255,255,255,0.14);
+    background: linear-gradient(150deg, rgba(52,52,86,0.76), rgba(24,24,42,0.58));
+    backdrop-filter: blur(46px) saturate(240%);
+    -webkit-backdrop-filter: blur(46px) saturate(240%);
+    border: 1px solid rgba(255,255,255,0.20);
+    box-shadow: 22px 22px 44px rgba(0,0,0,0.58), -8px -8px 24px rgba(255,255,255,0.04),
+      0 0 0 1px rgba(13,186,204,0.1), 0 14px 32px -14px rgba(159,127,224,0.3),
+      inset 0 1px 0 rgba(255,255,255,0.16);
   }
   .dark .frost-card::before {
-    background: linear-gradient(115deg, rgba(255,255,255,0.10) 0%, rgba(255,255,255,0.03) 22%, rgba(255,255,255,0) 45%);
+    background: linear-gradient(115deg, rgba(255,255,255,0.14) 0%, rgba(255,255,255,0.04) 22%, rgba(255,255,255,0) 45%, rgba(255,255,255,0) 70%, rgba(255,255,255,0.08) 100%);
+    background-size: 220% 220%;
   }
   .frost-inset {
     position: relative;
     background: rgba(255,255,255,0.42);
-    backdrop-filter: blur(14px) saturate(180%);
-    -webkit-backdrop-filter: blur(14px) saturate(180%);
+    backdrop-filter: blur(20px) saturate(200%);
+    -webkit-backdrop-filter: blur(20px) saturate(200%);
     border: 1px solid rgba(255,255,255,0.7);
     box-shadow: inset 7px 7px 16px rgba(48,49,80,0.16), inset -7px -7px 16px rgba(255,255,255,0.95);
   }
   .dark .frost-inset {
-    background: rgba(255,255,255,0.045);
-    backdrop-filter: blur(14px) saturate(180%);
-    -webkit-backdrop-filter: blur(14px) saturate(180%);
-    border: 1px solid rgba(255,255,255,0.12);
+    background: rgba(255,255,255,0.06);
+    backdrop-filter: blur(20px) saturate(200%);
+    -webkit-backdrop-filter: blur(20px) saturate(200%);
+    border: 1px solid rgba(255,255,255,0.13);
     box-shadow: inset 7px 7px 16px rgba(0,0,0,0.45), inset -7px -7px 16px rgba(255,255,255,0.05);
   }
   .frost-pill {
-    background: rgba(255,255,255,0.55);
-    backdrop-filter: blur(24px) saturate(200%);
-    -webkit-backdrop-filter: blur(24px) saturate(200%);
+    background: rgba(255,255,255,0.58);
+    backdrop-filter: blur(30px) saturate(220%);
+    -webkit-backdrop-filter: blur(30px) saturate(220%);
     border: 1px solid rgba(255,255,255,0.85);
     box-shadow: 8px 8px 18px rgba(48,49,80,0.13), -5px -5px 12px rgba(255,255,255,0.85);
   }
   .dark .frost-pill {
-    background: rgba(255,255,255,0.07);
-    backdrop-filter: blur(24px) saturate(200%);
-    -webkit-backdrop-filter: blur(24px) saturate(200%);
-    border: 1px solid rgba(255,255,255,0.16);
+    background: rgba(255,255,255,0.09);
+    backdrop-filter: blur(30px) saturate(220%);
+    -webkit-backdrop-filter: blur(30px) saturate(220%);
+    border: 1px solid rgba(255,255,255,0.18);
     box-shadow: 8px 8px 18px rgba(0,0,0,0.4), -5px -5px 12px rgba(255,255,255,0.04);
   }
   /* Soft ambient pastel blobs for layered depth behind frosted panels — bigger & more saturated
@@ -1349,6 +1407,58 @@ function MoneyInput({ value, onChange, placeholder, className }) {
   );
 }
 
+// ==============================================================================
+// CUSTOM SELECT — thay thế thẻ select gốc của trình duyệt dùng chung toàn app.
+// Lý do: danh sách lựa chọn của select gốc do hệ điều hành/trình duyệt tự vẽ
+// (native picker), không thể tô theo theme sáng/tối của app — trên mobile
+// thường ra nền trắng/xanh dương mặc định, lệch hẳn với giao diện tối.
+// API giữ tương thích với select gốc: nhận value/onChange (onChange nhận object
+// dạng { target: { value } } giống sự kiện thật) và các <option> con y hệt,
+// nên chỉ cần đổi tên thẻ select/select thành CustomSelect/CustomSelect.
+// - className: áp cho khung ngoài (dùng cho margin, width tổng thể, ví dụ mb-3)
+// - triggerClassName: áp cho nút hiển thị giá trị đang chọn (dùng lại nguyên
+//   className cũ của select gốc để giữ đúng màu nền/bo góc/padding sẵn có)
+// - align: 'left' | 'right' — căn menu theo cạnh nào của nút trigger
+// ==============================================================================
+function CustomSelect({ value, onChange, children, className = '', triggerClassName = '', align = 'left' }) {
+  const [open, setOpen] = useState(false);
+  const options = Children.toArray(children)
+    .filter((opt) => opt && opt.props)
+    .map((opt) => ({ value: opt.props.value, label: opt.props.children, disabled: opt.props.disabled }));
+  const selected = options.find((o) => String(o.value) === String(value));
+
+  return (
+    <div className={`relative ${className}`}>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className={`${triggerClassName} flex items-center justify-between gap-2 text-left`}
+      >
+        <span className="truncate">{selected ? selected.label : ''}</span>
+        <ChevronDown size={14} className={`flex-shrink-0 opacity-60 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
+          <div className={`absolute z-40 mt-1 ${align === 'right' ? 'right-0' : 'left-0'} min-w-full max-h-64 overflow-y-auto frost-card rounded-2xl shadow-card py-1`}>
+            {options.map((o) => (
+              <button
+                key={o.value}
+                type="button"
+                disabled={o.disabled}
+                onClick={() => { onChange({ target: { value: o.value } }); setOpen(false); }}
+                className={`w-full text-left px-4 py-2.5 text-sm whitespace-nowrap hover:bg-ice-cream dark:hover:bg-night-sky/40 transition disabled:opacity-40 ${String(o.value) === String(value) ? 'text-turquoise font-bold' : 'text-blueberry dark:text-white'}`}
+              >
+                {o.label}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 function EmojiCircle({ emoji, size = 36, active = false, activeColor = '#0DBACC', bg = '#F7F7F8' }) {
   return <div className="rounded-xl flex items-center justify-center flex-shrink-0" style={{ width: size, height: size, background: active ? activeColor : bg, fontSize: size * 0.5 }}>{emoji || '❔'}</div>;
 }
@@ -2057,13 +2167,13 @@ function AddTransaction({ onClose, accounts, categories, transactions, onSaved, 
         {usesPeriod && (
           <div className="px-5 mt-8">
             <p className="text-blueberry dark:text-white font-bold text-sm mb-3">Năm <span className="text-cotton-candy">*</span></p>
-            <select value={selectedYear} onChange={(e) => handleYearChange(Number(e.target.value))} className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none mb-3 dark:text-white text-blueberry [color-scheme:light] dark:[color-scheme:dark]">
+            <CustomSelect value={selectedYear} onChange={(e) => handleYearChange(Number(e.target.value))} className="mb-3" triggerClassName="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none dark:text-white text-blueberry [color-scheme:light] dark:[color-scheme:dark]">
               {years.map((y) => <option key={y} value={y}>{y}</option>)}
-            </select>
+            </CustomSelect>
             <p className="text-blueberry dark:text-white font-bold text-sm mb-3">Kỳ <span className="text-cotton-candy">*</span></p>
-            <select value={selectedPeriod} onChange={(e) => setSelectedPeriod(e.target.value)} className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none dark:text-white text-blueberry [color-scheme:light] dark:[color-scheme:dark]">
+            <CustomSelect value={selectedPeriod} onChange={(e) => setSelectedPeriod(e.target.value)} className="" triggerClassName="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none dark:text-white text-blueberry [color-scheme:light] dark:[color-scheme:dark]">
               {periods.map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
-            </select>
+            </CustomSelect>
             {financials && (
               <div className="mt-2 text-xs space-y-1 text-steel dark:text-light-grey">
                 <p><span className="font-semibold">Thu nhập tính vào Thu nhập được chi:</span> <span className="text-blueberry dark:text-white font-bold">{formatMoney(financials.incomeForSpendingPool)}</span></p>
@@ -2319,13 +2429,13 @@ function EditTransaction({ transaction, onClose, accounts, categories, transacti
         {usesPeriod && (
           <div className="px-5 mt-8">
             <p className="text-blueberry dark:text-white font-bold text-sm mb-3">Năm <span className="text-cotton-candy">*</span></p>
-            <select value={selectedYear} onChange={(e) => handleYearChange(Number(e.target.value))} className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none mb-3 dark:text-white text-blueberry [color-scheme:light] dark:[color-scheme:dark]">
+            <CustomSelect value={selectedYear} onChange={(e) => handleYearChange(Number(e.target.value))} className="mb-3" triggerClassName="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none dark:text-white text-blueberry [color-scheme:light] dark:[color-scheme:dark]">
               {years.map((y) => <option key={y} value={y}>{y}</option>)}
-            </select>
+            </CustomSelect>
             <p className="text-blueberry dark:text-white font-bold text-sm mb-3">Kỳ <span className="text-cotton-candy">*</span></p>
-            <select value={selectedPeriod} onChange={(e) => setSelectedPeriod(e.target.value)} className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none dark:text-white text-blueberry [color-scheme:light] dark:[color-scheme:dark]">
+            <CustomSelect value={selectedPeriod} onChange={(e) => setSelectedPeriod(e.target.value)} className="" triggerClassName="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none dark:text-white text-blueberry [color-scheme:light] dark:[color-scheme:dark]">
               {periods.map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
-            </select>
+            </CustomSelect>
             {financials && (
               <div className="mt-2 text-xs space-y-1 text-steel dark:text-light-grey">
                 <p><span className="font-semibold">Thu nhập tính vào Thu nhập được chi:</span> <span className="text-blueberry dark:text-white font-bold">{formatMoney(financials.incomeForSpendingPool)}</span></p>
@@ -2382,9 +2492,9 @@ function EditAccountModal({ account, onClose, onSaved, isNew }) {
         </div>
         <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Tên tài khoản" className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none mb-3 dark:text-white dark:placeholder:text-light-grey text-blueberry" />
         <input value={form.icon} onChange={(e) => setForm({ ...form, icon: e.target.value })} placeholder="Emoji (vd: 🏦)" className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none mb-3 dark:text-white dark:placeholder:text-light-grey text-blueberry" />
-        <select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })} className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none mb-3 dark:text-white dark:placeholder:text-light-grey text-blueberry [color-scheme:light] dark:[color-scheme:dark]">
+        <CustomSelect value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })} className="mb-3" triggerClassName="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none dark:text-white dark:placeholder:text-light-grey text-blueberry [color-scheme:light] dark:[color-scheme:dark]">
           {ACCOUNT_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
-        </select>
+        </CustomSelect>
         <MoneyInput value={form.initial_balance} onChange={(v) => setForm({ ...form, initial_balance: v })} placeholder="Số dư ban đầu" className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none mb-4 dark:text-white dark:placeholder:text-light-grey text-blueberry" />
         <button onClick={handleSave} disabled={saving} className="w-full bg-gradient-primary text-white rounded-xl py-3 font-bold flex items-center justify-center gap-2 disabled:opacity-60 shadow-md shadow-turquoise/30">
           {saving ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />} Lưu
@@ -2572,12 +2682,12 @@ function QuickAllocateWithdrawForm({ category, mode, onClose, onSaved }) {
         {mode === 'allocation' && (
           <div className="mb-3">
             <p className="text-blueberry dark:text-white font-bold text-sm mb-2">Nguồn nạp (Kỳ thu nhập)</p>
-            <select value={selectedYear} onChange={(e) => handleYearChange(Number(e.target.value))} className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none mb-2 dark:text-white text-blueberry [color-scheme:light] dark:[color-scheme:dark]">
+            <CustomSelect value={selectedYear} onChange={(e) => handleYearChange(Number(e.target.value))} className="mb-2" triggerClassName="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none dark:text-white text-blueberry [color-scheme:light] dark:[color-scheme:dark]">
               {years.map((y) => <option key={y} value={y}>{y}</option>)}
-            </select>
-            <select value={selectedPeriod} onChange={(e) => setSelectedPeriod(e.target.value)} className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none dark:text-white text-blueberry [color-scheme:light] dark:[color-scheme:dark]">
+            </CustomSelect>
+            <CustomSelect value={selectedPeriod} onChange={(e) => setSelectedPeriod(e.target.value)} className="" triggerClassName="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none dark:text-white text-blueberry [color-scheme:light] dark:[color-scheme:dark]">
               {periods.map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
-            </select>
+            </CustomSelect>
             <p className="text-steel dark:text-light-grey text-xs mt-2">Số tiền sẽ được trừ từ thu nhập của kỳ này.</p>
           </div>
         )}
@@ -2706,21 +2816,21 @@ function EditGoalForm({ goal, onClose, onSaved, isNew, softDelete, categories = 
         <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Tên mục tiêu" className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none mb-3 dark:text-white dark:placeholder:text-light-grey text-blueberry" />
 
         <p className="text-sm text-blueberry dark:text-white font-semibold mb-2">Mức độ ưu tiên</p>
-        <select value={form.priority_term} onChange={(e) => setForm({ ...form, priority_term: e.target.value })} className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none mb-3 dark:text-white dark:placeholder:text-light-grey text-blueberry [color-scheme:light] dark:[color-scheme:dark]">
+        <CustomSelect value={form.priority_term} onChange={(e) => setForm({ ...form, priority_term: e.target.value })} className="mb-3" triggerClassName="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none dark:text-white dark:placeholder:text-light-grey text-blueberry [color-scheme:light] dark:[color-scheme:dark]">
           {PRIORITY_TERMS.map((p) => <option key={p.value} value={p.value}>{p.value}</option>)}
-        </select>
+        </CustomSelect>
 
         <MoneyInput value={form.target_amount} onChange={(v) => setForm({ ...form, target_amount: v })} placeholder="Số tiền mục tiêu" className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none mb-3 dark:text-white dark:placeholder:text-light-grey text-blueberry" />
 
         <p className="text-sm text-blueberry dark:text-white font-semibold mb-2">Nguồn tiền mục tiêu (không bắt buộc)</p>
-        <select
+        <CustomSelect
           value={form.fund_id}
           onChange={(e) => setForm({ ...form, fund_id: e.target.value })}
-          className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none mb-1 dark:text-white text-blueberry [color-scheme:light] dark:[color-scheme:dark]"
+          className="mb-1" triggerClassName="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none dark:text-white text-blueberry [color-scheme:light] dark:[color-scheme:dark]"
         >
           <option value="">— Không liên kết quỹ, nhập tay —</option>
           {funds.map((f) => <option key={f.id} value={f.id}>{f.icon} {f.name}</option>)}
-        </select>
+        </CustomSelect>
         {funds.length === 0 && (
           <p className="text-xs text-steel dark:text-light-grey mb-3">Chưa có quỹ nào trong Quản lý quỹ. Tạo quỹ trước để có thể chọn làm nguồn tiền cho mục tiêu này.</p>
         )}
@@ -2929,18 +3039,18 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
           ))}
         </div>
         {breakdownPeriod === 'year' && (
-          <select value={breakdownYear} onChange={(e) => setBreakdownYear(Number(e.target.value))} className="bg-ice-cream dark:bg-night-sky rounded-full text-xs font-bold px-2.5 py-1.5 outline-none text-blueberry dark:text-white [color-scheme:light] dark:[color-scheme:dark]">
+          <CustomSelect value={breakdownYear} onChange={(e) => setBreakdownYear(Number(e.target.value))} className="" triggerClassName="bg-ice-cream dark:bg-night-sky rounded-full text-xs font-bold px-2.5 py-1.5 outline-none text-blueberry dark:text-white [color-scheme:light] dark:[color-scheme:dark]">
             {breakdownYearOptions.map((y) => <option key={y} value={y}>{y}</option>)}
-          </select>
+          </CustomSelect>
         )}
         {breakdownPeriod === 'month' && (
           <>
-            <select value={breakdownYear} onChange={(e) => { const y = Number(e.target.value); setBreakdownYear(y); setBreakdownPeriodKey(`${y}-${breakdownPeriodKey.split('-')[1]}`); }} className="bg-ice-cream dark:bg-night-sky rounded-full text-xs font-bold px-2.5 py-1.5 outline-none text-blueberry dark:text-white [color-scheme:light] dark:[color-scheme:dark]">
+            <CustomSelect value={breakdownYear} onChange={(e) => { const y = Number(e.target.value); setBreakdownYear(y); setBreakdownPeriodKey(`${y}-${breakdownPeriodKey.split('-')[1]}`); }} className="" triggerClassName="bg-ice-cream dark:bg-night-sky rounded-full text-xs font-bold px-2.5 py-1.5 outline-none text-blueberry dark:text-white [color-scheme:light] dark:[color-scheme:dark]">
               {breakdownYearOptions.map((y) => <option key={y} value={y}>{y}</option>)}
-            </select>
-            <select value={breakdownPeriodKey} onChange={(e) => setBreakdownPeriodKey(e.target.value)} className="bg-ice-cream dark:bg-night-sky rounded-full text-xs font-bold px-2.5 py-1.5 outline-none text-blueberry dark:text-white [color-scheme:light] dark:[color-scheme:dark]">
+            </CustomSelect>
+            <CustomSelect value={breakdownPeriodKey} onChange={(e) => setBreakdownPeriodKey(e.target.value)} className="" triggerClassName="bg-ice-cream dark:bg-night-sky rounded-full text-xs font-bold px-2.5 py-1.5 outline-none text-blueberry dark:text-white [color-scheme:light] dark:[color-scheme:dark]">
               {breakdownPeriodOptions.map((p) => <option key={p.key} value={p.key}>{`Kỳ ${Number(p.key.split('-')[1])}`}</option>)}
-            </select>
+            </CustomSelect>
           </>
         )}
       </div>
@@ -3059,13 +3169,13 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
   function TotalsPeriodSelect({ month, year, onMonthChange, onYearChange }) {
     return (
       <div className="flex items-center gap-1.5">
-        <select value={month} onChange={(e) => onMonthChange(e.target.value)} className="bg-ice-cream dark:bg-night-sky rounded-full text-xs font-bold px-2.5 py-1.5 outline-none text-blueberry dark:text-white [color-scheme:light] dark:[color-scheme:dark]">
+        <CustomSelect value={month} onChange={(e) => onMonthChange(e.target.value)} className="" triggerClassName="bg-ice-cream dark:bg-night-sky rounded-full text-xs font-bold px-2.5 py-1.5 outline-none text-blueberry dark:text-white [color-scheme:light] dark:[color-scheme:dark]">
           <option value="all">Cả năm</option>
           {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => <option key={m} value={m}>{`Th${m}`}</option>)}
-        </select>
-        <select value={year} onChange={(e) => onYearChange(Number(e.target.value))} className="bg-ice-cream dark:bg-night-sky rounded-full text-xs font-bold px-2.5 py-1.5 outline-none text-blueberry dark:text-white [color-scheme:light] dark:[color-scheme:dark]">
+        </CustomSelect>
+        <CustomSelect value={year} onChange={(e) => onYearChange(Number(e.target.value))} className="" triggerClassName="bg-ice-cream dark:bg-night-sky rounded-full text-xs font-bold px-2.5 py-1.5 outline-none text-blueberry dark:text-white [color-scheme:light] dark:[color-scheme:dark]">
           {totalsYearOptions.map((y) => <option key={y} value={y}>{y}</option>)}
-        </select>
+        </CustomSelect>
       </div>
     );
   }
@@ -3493,11 +3603,11 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
               <div className="flex items-center justify-between mb-4 gap-2">
                 <h3 className="text-blueberry dark:text-white font-extrabold">Hoạt động gần đây</h3>
                 <div className="flex items-center gap-2 flex-shrink-0">
-                  <select value={recentTxFilter} onChange={(e) => setRecentTxFilter(e.target.value)} className="frost-inset rounded-full text-xs font-bold px-3 py-1.5 outline-none text-blueberry dark:text-white [color-scheme:light] dark:[color-scheme:dark]">
+                  <CustomSelect value={recentTxFilter} onChange={(e) => setRecentTxFilter(e.target.value)} className="" triggerClassName="frost-inset rounded-full text-xs font-bold px-3 py-1.5 outline-none text-blueberry dark:text-white [color-scheme:light] dark:[color-scheme:dark]">
                     <option value="7d">Tuần</option>
                     <option value="month">Tháng</option>
                     <option value="year">Năm</option>
-                  </select>
+                  </CustomSelect>
                   <button onClick={() => setScreen('report')} title="Xem chi tiết" className="w-7 h-7 rounded-full flex items-center justify-center text-turquoise hover:bg-turquoise/10 transition flex-shrink-0">
                     <Eye size={15} />
                   </button>
@@ -4589,14 +4699,42 @@ function Accounts({ setScreen, accounts, transactions, onOpenAccount, reload, on
           </div>
           <div className="mt-6 bg-white dark:bg-[#1e1e32] rounded-[2.5rem] min-h-[70vh] px-5 pt-6 pb-6 shadow-soft">
             {accounts.length === 0 ? <p className="text-steel dark:text-light-grey text-sm text-center py-10">Chưa có ví nào. Bấm + để thêm ví đầu tiên.</p> : (
-              <div className="flex flex-col gap-3 scrollbar-hide">
-                {accounts.map((acc) => (
-                  <button key={acc.id} onClick={() => onOpenAccount(acc.id, 'accounts')} className="flex items-center gap-3 bg-ice-cream dark:bg-night-sky rounded-2xl p-4 text-left hover:bg-turquoise/5 transition">
-                    <EmojiCircle emoji={acc.icon} size={44} bg="#E3D6FF" />
-                    <div className="flex-1 min-w-0"><p className="text-blueberry dark:text-white font-bold text-sm">{acc.name}</p><p className="text-steel dark:text-light-grey text-xs font-semibold capitalize">{ACCOUNT_TYPES.find((t) => t.value === acc.type)?.label || acc.type}</p></div>
-                    <p className="text-blueberry dark:text-white font-bold">{formatMoney(accountBalance(acc, transactions))}</p>
-                  </button>
-                ))}
+              <div className="flex flex-col gap-4 scrollbar-hide">
+                {accounts.map((acc) => {
+                  const maskedDigits = String(acc.id || '').replace(/[^0-9a-zA-Z]/g, '').slice(-4).toUpperCase().padStart(4, '0');
+                  return (
+                    <button
+                      key={acc.id}
+                      onClick={() => onOpenAccount(acc.id, 'accounts')}
+                      style={{ background: accountCardGradient(acc.type) }}
+                      className="w-full text-left rounded-[1.75rem] p-5 relative overflow-hidden shadow-lg shadow-black/10"
+                    >
+                      <div className="pointer-events-none absolute -top-10 -right-10 w-32 h-32 rounded-full bg-white/15" />
+                      <div className="pointer-events-none absolute -bottom-14 -left-8 w-32 h-32 rounded-full bg-black/10" />
+
+                      <div className="relative flex items-start justify-between">
+                        <div className="flex items-center gap-2">
+                          <div className="w-9 h-6 rounded-md bg-white/35 border border-white/40" />
+                          <EmojiCircle emoji={acc.icon} size={30} bg="rgba(255,255,255,0.16)" />
+                        </div>
+                        <Wifi size={20} className="text-white/85 rotate-90" />
+                      </div>
+
+                      <p className="relative text-white/90 font-bold text-base sm:text-lg tracking-[0.2em] mt-5">•••• •••• •••• {maskedDigits}</p>
+
+                      <div className="relative flex items-end justify-between mt-4 gap-2">
+                        <div className="min-w-0">
+                          <p className="text-white/70 text-[10px] font-semibold uppercase truncate">{acc.name}</p>
+                          <p className="text-white font-extrabold text-xl mt-0.5 truncate">{formatMoney(accountBalance(acc, transactions))}</p>
+                        </div>
+                        <div className="text-right flex-shrink-0">
+                          <p className="text-white/60 text-[9px] font-semibold uppercase">Loại ví</p>
+                          <p className="text-white/90 text-xs font-bold whitespace-nowrap">{ACCOUNT_TYPES.find((t) => t.value === acc.type)?.label || acc.type}</p>
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
               </div>
             )}
           </div>
@@ -4621,18 +4759,41 @@ function Accounts({ setScreen, accounts, transactions, onOpenAccount, reload, on
           <p className="text-steel dark:text-light-grey text-sm text-center py-16">Chưa có ví nào. Bấm "Thêm ví mới" để bắt đầu.</p>
         ) : (
           <div className="relative grid grid-cols-3 gap-5 mt-6">
-            {accounts.map((acc) => (
- <button key={acc.id} onClick={() => onOpenAccount(acc.id, 'accounts')} className="text-left frost-card rounded-3xl p-5 hover:shadow-card transition">
-                <div className="flex items-center gap-3 mb-4">
-                  <EmojiCircle emoji={acc.icon} size={44} active activeColor="#0DBACC" />
-                  <div className="min-w-0">
-                    <p className="text-blueberry dark:text-white font-bold truncate">{acc.name}</p>
-                    <p className="text-steel dark:text-light-grey text-xs">{ACCOUNT_TYPES.find((t) => t.value === acc.type)?.label || acc.type}</p>
+            {accounts.map((acc) => {
+              const maskedDigits = String(acc.id || '').replace(/[^0-9a-zA-Z]/g, '').slice(-4).toUpperCase().padStart(4, '0');
+              return (
+                <button
+                  key={acc.id}
+                  onClick={() => onOpenAccount(acc.id, 'accounts')}
+                  style={{ background: accountCardGradient(acc.type) }}
+                  className="text-left rounded-[1.75rem] p-5 relative overflow-hidden shadow-lg shadow-black/10 hover:shadow-card transition"
+                >
+                  <div className="pointer-events-none absolute -top-10 -right-10 w-32 h-32 rounded-full bg-white/15" />
+                  <div className="pointer-events-none absolute -bottom-14 -left-8 w-32 h-32 rounded-full bg-black/10" />
+
+                  <div className="relative flex items-start justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className="w-9 h-6 rounded-md bg-white/35 border border-white/40" />
+                      <EmojiCircle emoji={acc.icon} size={30} bg="rgba(255,255,255,0.16)" />
+                    </div>
+                    <Wifi size={20} className="text-white/85 rotate-90" />
                   </div>
-                </div>
-                <p className="text-blueberry dark:text-white text-xl font-bold">{formatMoney(accountBalance(acc, transactions))}</p>
-              </button>
-            ))}
+
+                  <p className="relative text-white/90 font-bold text-base tracking-[0.2em] mt-5">•••• •••• •••• {maskedDigits}</p>
+
+                  <div className="relative flex items-end justify-between mt-4 gap-2">
+                    <div className="min-w-0">
+                      <p className="text-white/70 text-[10px] font-semibold uppercase truncate">{acc.name}</p>
+                      <p className="text-white font-extrabold text-xl mt-0.5 truncate">{formatMoney(accountBalance(acc, transactions))}</p>
+                    </div>
+                    <div className="text-right flex-shrink-0">
+                      <p className="text-white/60 text-[9px] font-semibold uppercase">Loại ví</p>
+                      <p className="text-white/90 text-xs font-bold whitespace-nowrap">{ACCOUNT_TYPES.find((t) => t.value === acc.type)?.label || acc.type}</p>
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
           </div>
         )}
       </div>
@@ -5624,12 +5785,12 @@ function CategorySection({ categories, reload, softDelete, spendingPoolByPeriod,
           <p className="text-blueberry dark:text-white font-bold text-sm mb-1">Thu nhập được chi theo kỳ</p>
           <p className="text-steel dark:text-light-grey text-xs mb-3">Chọn kỳ, rồi nhập số tiền được phép chi trong kỳ đó. Nếu chưa cài đặt, kỳ sẽ mặc định lấy bằng tổng thu nhập tính vào Thu nhập được chi.</p>
           <div className="flex flex-col sm:flex-row gap-2 mb-2">
-            <select value={poolYear} onChange={(e) => setPoolYear(Number(e.target.value))} className="bg-white dark:bg-[#2a2a44] rounded-xl px-3 py-2.5 text-sm outline-none dark:text-white text-blueberry [color-scheme:light] dark:[color-scheme:dark]">
+            <CustomSelect value={poolYear} onChange={(e) => setPoolYear(Number(e.target.value))} className="" triggerClassName="bg-white dark:bg-[#2a2a44] rounded-xl px-3 py-2.5 text-sm outline-none dark:text-white text-blueberry [color-scheme:light] dark:[color-scheme:dark]">
               {[nowYear - 1, nowYear, nowYear + 1].map((y) => <option key={y} value={y}>{y}</option>)}
-            </select>
-            <select value={poolPeriodKey} onChange={(e) => setPoolPeriodKey(e.target.value)} className="flex-1 bg-white dark:bg-[#2a2a44] rounded-xl px-3 py-2.5 text-sm outline-none dark:text-white text-blueberry [color-scheme:light] dark:[color-scheme:dark]">
+            </CustomSelect>
+            <CustomSelect value={poolPeriodKey} onChange={(e) => setPoolPeriodKey(e.target.value)} className="" triggerClassName="flex-1 bg-white dark:bg-[#2a2a44] rounded-xl px-3 py-2.5 text-sm outline-none dark:text-white text-blueberry [color-scheme:light] dark:[color-scheme:dark]">
               {poolPeriods.map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
-            </select>
+            </CustomSelect>
           </div>
           <div className="flex items-center gap-2">
             <MoneyInput value={poolAmountInput} onChange={setPoolAmountInput} placeholder="Số tiền được phép chi" className="flex-1 bg-white dark:bg-[#2a2a44] rounded-xl px-4 py-2.5 text-sm outline-none dark:text-white text-blueberry" />
@@ -5956,10 +6117,10 @@ function TxLedgerModal({ title, txs, categories, accounts, allTx, spendingPoolBy
             <span className="text-steel dark:text-light-grey text-xs">→</span>
             <DateField value={dateTo} onChange={setDateTo} showIcon={false} clearable={false} align="right" className="bg-transparent text-xs font-semibold text-blueberry dark:text-white" />
           </div>
-          <select value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value)} className="frost-inset rounded-full text-xs font-semibold px-3 py-2 outline-none text-blueberry dark:text-white [color-scheme:light] dark:[color-scheme:dark]">
+          <CustomSelect value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value)} className="" triggerClassName="frost-inset rounded-full text-xs font-semibold px-3 py-2 outline-none text-blueberry dark:text-white [color-scheme:light] dark:[color-scheme:dark]">
             <option value="all">Tất cả nguồn</option>
             {sourceOptions.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
-          </select>
+          </CustomSelect>
           {hasActiveFilter && (
             <button onClick={() => { setDateFrom(''); setDateTo(''); setSourceFilter('all'); }} className="text-xs font-bold text-steel dark:text-light-grey hover:text-blueberry dark:hover:text-white underline">
               Xoá lọc
@@ -6460,7 +6621,7 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
             <button onClick={() => setScreen('dashboard')} className="w-9 h-9 rounded-full bg-white/30 backdrop-blur flex items-center justify-center"><X size={18} className="text-white" /></button>
           </div>
           <div className="px-5 mt-2">
-            <select value={timeType} onChange={(e) => setTimeType(e.target.value)} className="w-full bg-white/20 backdrop-blur rounded-xl px-4 py-2 text-sm text-white outline-none [color-scheme:light] dark:[color-scheme:dark]">
+            <CustomSelect value={timeType} onChange={(e) => setTimeType(e.target.value)} className="" triggerClassName="w-full bg-white/20 backdrop-blur rounded-xl px-4 py-2 text-sm text-white outline-none [color-scheme:light] dark:[color-scheme:dark]">
               <option value="day">Ngày</option>
               <option value="week">Tuần</option>
               <option value="month">Tháng</option>
@@ -6468,30 +6629,30 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
               <option value="6month">6 tháng</option>
               <option value="year">Năm</option>
               <option value="custom">Tùy chỉnh</option>
-            </select>
+            </CustomSelect>
             {timeType === 'day' && <DateField value={selectedDay} onChange={setSelectedDay} className="w-full justify-between mt-2 bg-white/20 backdrop-blur rounded-xl px-4 py-2 text-sm text-white" />}
             {timeType === 'week' && <DateField value={selectedWeek} onChange={setSelectedWeek} className="w-full justify-between mt-2 bg-white/20 backdrop-blur rounded-xl px-4 py-2 text-sm text-white" />}
             {timeType === 'month' && (
               <div className="flex gap-2 mt-2">
-                <select value={selectedMonth} onChange={(e) => setSelectedMonth(Number(e.target.value))} className="flex-1 bg-white/20 backdrop-blur rounded-xl px-4 py-2 text-sm text-white outline-none [color-scheme:light] dark:[color-scheme:dark]">
+                <CustomSelect value={selectedMonth} onChange={(e) => setSelectedMonth(Number(e.target.value))} className="" triggerClassName="flex-1 bg-white/20 backdrop-blur rounded-xl px-4 py-2 text-sm text-white outline-none [color-scheme:light] dark:[color-scheme:dark]">
                   {Array.from({length:12}, (_,i) => i+1).map(m => <option key={m} value={m}>{m}</option>)}
-                </select>
+                </CustomSelect>
                 <input type="number" value={selectedYear} onChange={(e) => setSelectedYear(Number(e.target.value))} className="w-20 bg-white/20 backdrop-blur rounded-xl px-4 py-2 text-sm text-white outline-none" />
               </div>
             )}
             {timeType === 'quarter' && (
               <div className="flex gap-2 mt-2">
-                <select value={selectedQuarter} onChange={(e) => setSelectedQuarter(Number(e.target.value))} className="flex-1 bg-white/20 backdrop-blur rounded-xl px-4 py-2 text-sm text-white outline-none [color-scheme:light] dark:[color-scheme:dark]">
+                <CustomSelect value={selectedQuarter} onChange={(e) => setSelectedQuarter(Number(e.target.value))} className="" triggerClassName="flex-1 bg-white/20 backdrop-blur rounded-xl px-4 py-2 text-sm text-white outline-none [color-scheme:light] dark:[color-scheme:dark]">
                   <option value={1}>Q1</option><option value={2}>Q2</option><option value={3}>Q3</option><option value={4}>Q4</option>
-                </select>
+                </CustomSelect>
                 <input type="number" value={selectedYear} onChange={(e) => setSelectedYear(Number(e.target.value))} className="w-20 bg-white/20 backdrop-blur rounded-xl px-4 py-2 text-sm text-white outline-none" />
               </div>
             )}
             {timeType === '6month' && (
               <div className="flex gap-2 mt-2">
-                <select value={selectedHalf} onChange={(e) => setSelectedHalf(Number(e.target.value))} className="flex-1 bg-white/20 backdrop-blur rounded-xl px-4 py-2 text-sm text-white outline-none [color-scheme:light] dark:[color-scheme:dark]">
+                <CustomSelect value={selectedHalf} onChange={(e) => setSelectedHalf(Number(e.target.value))} className="" triggerClassName="flex-1 bg-white/20 backdrop-blur rounded-xl px-4 py-2 text-sm text-white outline-none [color-scheme:light] dark:[color-scheme:dark]">
                   <option value={1}>H1</option><option value={2}>H2</option>
-                </select>
+                </CustomSelect>
                 <input type="number" value={selectedYear} onChange={(e) => setSelectedYear(Number(e.target.value))} className="w-20 bg-white/20 backdrop-blur rounded-xl px-4 py-2 text-sm text-white outline-none" />
               </div>
             )}
@@ -6582,7 +6743,7 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
         <div className="relative flex items-center justify-between mb-6 flex-wrap gap-4">
           <h1 className="text-blueberry dark:text-white text-2xl font-extrabold">Báo cáo &amp; Phân tích</h1>
           <div className="flex items-center gap-2 flex-wrap">
-            <select value={timeType} onChange={(e) => setTimeType(e.target.value)} className="frost-inset rounded-full text-sm font-bold px-4 py-2 outline-none text-blueberry dark:text-white [color-scheme:light] dark:[color-scheme:dark]">
+            <CustomSelect value={timeType} onChange={(e) => setTimeType(e.target.value)} className="" triggerClassName="frost-inset rounded-full text-sm font-bold px-4 py-2 outline-none text-blueberry dark:text-white [color-scheme:light] dark:[color-scheme:dark]">
               <option value="day">Ngày</option>
               <option value="week">Tuần</option>
               <option value="month">Tháng</option>
@@ -6590,30 +6751,30 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
               <option value="6month">6 tháng</option>
               <option value="year">Năm</option>
               <option value="custom">Tùy chỉnh</option>
-            </select>
+            </CustomSelect>
             {timeType === 'day' && <DateField value={selectedDay} onChange={setSelectedDay} className="frost-inset rounded-full text-sm font-bold px-4 py-2 text-blueberry dark:text-white" />}
             {timeType === 'week' && <DateField value={selectedWeek} onChange={setSelectedWeek} className="frost-inset rounded-full text-sm font-bold px-4 py-2 text-blueberry dark:text-white" />}
             {timeType === 'month' && (
               <>
-                <select value={selectedMonth} onChange={(e) => setSelectedMonth(Number(e.target.value))} className="frost-inset rounded-full text-sm font-bold px-4 py-2 outline-none text-blueberry dark:text-white [color-scheme:light] dark:[color-scheme:dark]">
+                <CustomSelect value={selectedMonth} onChange={(e) => setSelectedMonth(Number(e.target.value))} className="" triggerClassName="frost-inset rounded-full text-sm font-bold px-4 py-2 outline-none text-blueberry dark:text-white [color-scheme:light] dark:[color-scheme:dark]">
                   {Array.from({length:12}, (_,i) => i+1).map(m => <option key={m} value={m}>{m}</option>)}
-                </select>
+                </CustomSelect>
                 <input type="number" value={selectedYear} onChange={(e) => setSelectedYear(Number(e.target.value))} className="frost-inset rounded-full text-sm font-bold px-4 py-2 outline-none text-blueberry dark:text-white w-24" />
               </>
             )}
             {timeType === 'quarter' && (
               <>
-                <select value={selectedQuarter} onChange={(e) => setSelectedQuarter(Number(e.target.value))} className="frost-inset rounded-full text-sm font-bold px-4 py-2 outline-none text-blueberry dark:text-white [color-scheme:light] dark:[color-scheme:dark]">
+                <CustomSelect value={selectedQuarter} onChange={(e) => setSelectedQuarter(Number(e.target.value))} className="" triggerClassName="frost-inset rounded-full text-sm font-bold px-4 py-2 outline-none text-blueberry dark:text-white [color-scheme:light] dark:[color-scheme:dark]">
                   <option value={1}>Q1</option><option value={2}>Q2</option><option value={3}>Q3</option><option value={4}>Q4</option>
-                </select>
+                </CustomSelect>
                 <input type="number" value={selectedYear} onChange={(e) => setSelectedYear(Number(e.target.value))} className="frost-inset rounded-full text-sm font-bold px-4 py-2 outline-none text-blueberry dark:text-white w-24" />
               </>
             )}
             {timeType === '6month' && (
               <>
-                <select value={selectedHalf} onChange={(e) => setSelectedHalf(Number(e.target.value))} className="frost-inset rounded-full text-sm font-bold px-4 py-2 outline-none text-blueberry dark:text-white [color-scheme:light] dark:[color-scheme:dark]">
+                <CustomSelect value={selectedHalf} onChange={(e) => setSelectedHalf(Number(e.target.value))} className="" triggerClassName="frost-inset rounded-full text-sm font-bold px-4 py-2 outline-none text-blueberry dark:text-white [color-scheme:light] dark:[color-scheme:dark]">
                   <option value={1}>H1</option><option value={2}>H2</option>
-                </select>
+                </CustomSelect>
                 <input type="number" value={selectedYear} onChange={(e) => setSelectedYear(Number(e.target.value))} className="frost-inset rounded-full text-sm font-bold px-4 py-2 outline-none text-blueberry dark:text-white w-24" />
               </>
             )}
