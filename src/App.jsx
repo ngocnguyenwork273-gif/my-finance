@@ -1440,18 +1440,25 @@ function CustomSelect({ value, onChange, children, className = '', triggerClassN
       {open && (
         <>
           <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
-          <div className={`absolute z-40 mt-1 ${align === 'right' ? 'right-0' : 'left-0'} min-w-full max-h-64 overflow-y-auto frost-card rounded-2xl shadow-card py-1`}>
-            {options.map((o) => (
-              <button
-                key={o.value}
-                type="button"
-                disabled={o.disabled}
-                onClick={() => { onChange({ target: { value: o.value } }); setOpen(false); }}
-                className={`w-full text-left px-4 py-2.5 text-sm whitespace-nowrap hover:bg-ice-cream dark:hover:bg-night-sky/40 transition disabled:opacity-40 ${String(o.value) === String(value) ? 'text-turquoise font-bold' : 'text-blueberry dark:text-white'}`}
-              >
-                {o.label}
-              </button>
-            ))}
+          <div className={`absolute z-40 mt-1 ${align === 'right' ? 'right-0' : 'left-0'} min-w-full frost-card rounded-2xl shadow-card overflow-hidden`}>
+            {/* Blob màu mờ cố định (không cuộn theo list) — cho hiệu ứng kính lỏng
+                rõ ràng ngay cả khi nền phía sau phẳng/không có gì để blur. */}
+            <div className="pointer-events-none absolute -top-8 -left-8 w-28 h-28 rounded-full bg-turquoise/25 blur-2xl" />
+            <div className="pointer-events-none absolute -bottom-8 -right-8 w-28 h-28 rounded-full bg-lavender/25 blur-2xl" />
+            <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/80 dark:via-white/25 to-transparent" />
+            <div className="relative max-h-64 overflow-y-auto overflow-x-hidden scrollbar-hide py-1">
+              {options.map((o) => (
+                <button
+                  key={o.value}
+                  type="button"
+                  disabled={o.disabled}
+                  onClick={() => { onChange({ target: { value: o.value } }); setOpen(false); }}
+                  className={`w-full text-left px-4 py-2.5 text-sm whitespace-nowrap hover:bg-white/40 dark:hover:bg-white/10 transition disabled:opacity-40 ${String(o.value) === String(value) ? 'text-turquoise font-bold' : 'text-blueberry dark:text-white'}`}
+                >
+                  {o.label}
+                </button>
+              ))}
+            </div>
           </div>
         </>
       )}
@@ -1625,20 +1632,23 @@ function AvatarMenu({ avatarUrl, displayName, openSettings, variant = 'desktop' 
       {open && (
         <>
           <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
-          <div className={`absolute ${isDesktop ? 'top-12' : 'top-14'} right-0 bg-white/95 dark:bg-[#1e1e32]/95 backdrop-blur-xl backdrop-saturate-150 rounded-2xl shadow-card border border-white/60 dark:border-[rgba(255,255,255,0.10)] py-1.5 w-56 z-40 overflow-hidden`}>
+          <div className={`absolute ${isDesktop ? 'top-12' : 'top-14'} right-0 bg-white/78 dark:bg-[#1e1e32]/70 backdrop-blur-xl backdrop-saturate-150 rounded-2xl shadow-card border border-white/60 dark:border-[rgba(255,255,255,0.10)] py-1.5 w-56 z-40 overflow-hidden relative`}>
+            <div className="pointer-events-none absolute -top-8 -right-8 w-24 h-24 rounded-full bg-turquoise/20 blur-2xl" />
+            <div className="pointer-events-none absolute -bottom-8 -left-8 w-24 h-24 rounded-full bg-lavender/20 blur-2xl" />
+            <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/80 dark:via-white/25 to-transparent" />
             {items.map(({ key, label, icon: Icon }) => (
               <button
                 key={key}
                 onClick={() => go(key)}
-                className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-blueberry dark:text-white hover:bg-ice-cream dark:hover:bg-night-sky/30"
+                className="relative w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-blueberry dark:text-white hover:bg-white/40 dark:hover:bg-white/10"
               >
                 <Icon size={15} className="text-steel dark:text-light-grey" /> {label}
               </button>
             ))}
-            <div className="h-px bg-light-grey/20 dark:bg-light-grey/10 my-1.5" />
+            <div className="relative h-px bg-light-grey/20 dark:bg-light-grey/10 my-1.5" />
             <button
               onClick={handleLogout}
-              className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-cotton-candy hover:bg-cotton-candy-light dark:hover:bg-night-sky/30"
+              className="relative w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-cotton-candy hover:bg-cotton-candy-light/60 dark:hover:bg-white/10"
             >
               <LogOut size={15} /> Đăng xuất
             </button>
@@ -2581,7 +2591,7 @@ function EditFundForm({ category, onClose, onSaved, isNew, initialAmount, firstA
 
   return (
     <div className="fixed inset-0 bg-black/40 flex items-end md:items-center md:justify-center z-30" onClick={onClose}>
-      <div className="bg-white dark:bg-[#1e1e32] w-full md:max-w-md rounded-t-3xl md:rounded-3xl p-5 max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+      <div className="bg-white dark:bg-[#1e1e32] w-full md:max-w-md rounded-t-3xl md:rounded-3xl p-5 max-h-[85vh] overflow-y-auto scrollbar-hide" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-4">
           <h3 className="font-bold text-blueberry dark:text-white">{isNew ? 'Tạo quỹ mới' : 'Sửa quỹ'}</h3>
           <button onClick={onClose}><X size={18} className="text-steel dark:text-light-grey" /></button>
@@ -2807,7 +2817,7 @@ function EditGoalForm({ goal, onClose, onSaved, isNew, softDelete, categories = 
 
   return (
     <div className="fixed inset-0 bg-black/40 flex items-end md:items-center md:justify-center z-30" onClick={onClose}>
-      <div className="bg-white dark:bg-[#1e1e32] w-full md:max-w-md rounded-t-3xl md:rounded-3xl p-5 max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+      <div className="bg-white dark:bg-[#1e1e32] w-full md:max-w-md rounded-t-3xl md:rounded-3xl p-5 max-h-[85vh] overflow-y-auto scrollbar-hide" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-4">
           <h3 className="font-bold text-blueberry dark:text-white">{isNew ? 'Mục tiêu mới' : 'Sửa mục tiêu'}</h3>
           <button onClick={onClose}><X size={18} className="text-steel dark:text-light-grey" /></button>
@@ -3537,11 +3547,14 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
                     {showWalletPopover && (
                       <>
                         <div className="fixed inset-0 z-30" onClick={() => setShowWalletPopover(false)} />
-                        <div className="absolute top-9 right-0 bg-white dark:bg-[#1e1e32] rounded-2xl shadow-card border-0 dark:border dark:border-[rgba(189,189,203,0.1)] py-1.5 w-56 z-40 max-h-72 overflow-y-auto">
+                        <div className="absolute top-9 right-0 bg-white/85 dark:bg-[#1e1e32]/75 backdrop-blur-xl backdrop-saturate-150 rounded-2xl shadow-card border-0 dark:border dark:border-[rgba(189,189,203,0.1)] py-1.5 w-56 z-40 max-h-72 overflow-y-auto overflow-x-hidden scrollbar-hide relative isolate">
+                          <div className="pointer-events-none absolute -top-8 -right-8 w-24 h-24 rounded-full bg-turquoise/20 blur-2xl -z-10" />
+                          <div className="pointer-events-none absolute -bottom-8 -left-8 w-24 h-24 rounded-full bg-lavender/20 blur-2xl -z-10" />
+                          <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/80 dark:via-white/25 to-transparent -z-10" />
                           {accounts.length === 0 ? (
                             <p className="text-steel dark:text-light-grey text-xs text-center py-4 px-4">Chưa có ví nào.</p>
                           ) : accounts.map((acc, idx) => (
-                            <button key={acc.id} onClick={() => { setShowWalletPopover(false); goToWalletIndex(idx); }} className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-blueberry dark:text-white hover:bg-ice-cream dark:hover:bg-night-sky/30 text-left">
+                            <button key={acc.id} onClick={() => { setShowWalletPopover(false); goToWalletIndex(idx); }} className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-blueberry dark:text-white hover:bg-white/40 dark:hover:bg-white/10 text-left">
                               <EmojiCircle emoji={acc.icon} size={26} bg="#F7F7F8" />
                               <span className="flex-1 min-w-0 truncate font-semibold">{acc.name}</span>
                               <span className="text-steel dark:text-light-grey text-xs flex-shrink-0">{formatMoney(accountBalance(acc, transactions))}</span>
@@ -5850,7 +5863,7 @@ function CategorySection({ categories, reload, softDelete, spendingPoolByPeriod,
 
       {editing && (
         <div className="fixed inset-0 bg-black/40 flex items-end z-20" onClick={() => setEditing(null)}>
-          <div className="bg-white dark:bg-[#1e1e32] w-full rounded-t-3xl p-5 max-w-sm mx-auto max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+          <div className="bg-white dark:bg-[#1e1e32] w-full rounded-t-3xl p-5 max-w-sm mx-auto max-h-[85vh] overflow-y-auto scrollbar-hide" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-4"><h3 className="font-bold text-blueberry dark:text-white">{editing === 'new' ? 'Danh mục mới' : 'Sửa danh mục'}</h3><button onClick={() => setEditing(null)}><X size={18} className="text-steel dark:text-light-grey" /></button></div>
             <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Tên danh mục" className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none mb-3 dark:text-white dark:placeholder:text-light-grey text-blueberry" />
             <input value={form.icon} onChange={(e) => setForm({ ...form, icon: e.target.value })} placeholder="Emoji (vd: 🍜)" className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none mb-3 dark:text-white dark:placeholder:text-light-grey text-blueberry" />
@@ -5920,8 +5933,11 @@ function HoverDetailCard({ className, children, detail, align = 'left' }) {
       {children}
       <div
         onClick={(e) => e.stopPropagation()}
-        className={`absolute ${align === 'right' ? 'right-0' : 'left-0'} top-[calc(100%+8px)] z-40 w-72 max-w-[85vw] bg-white dark:bg-[#1e1e32] border-0 dark:border dark:border-[rgba(189,189,203,0.1)] rounded-2xl shadow-card p-4 max-h-72 overflow-y-auto scrollbar-hide transition-all duration-150 origin-top ${open ? 'opacity-100 scale-100 translate-y-0 pointer-events-auto' : 'opacity-0 scale-95 -translate-y-1 pointer-events-none'}`}
+        className={`absolute ${align === 'right' ? 'right-0' : 'left-0'} top-[calc(100%+8px)] z-40 w-72 max-w-[85vw] bg-white/85 dark:bg-[#1e1e32]/75 backdrop-blur-xl backdrop-saturate-150 border-0 dark:border dark:border-[rgba(189,189,203,0.1)] rounded-2xl shadow-card p-4 max-h-72 overflow-y-auto overflow-x-hidden scrollbar-hide transition-all duration-150 origin-top relative isolate ${open ? 'opacity-100 scale-100 translate-y-0 pointer-events-auto' : 'opacity-0 scale-95 -translate-y-1 pointer-events-none'}`}
       >
+        <div className="pointer-events-none absolute -top-8 -left-8 w-24 h-24 rounded-full bg-turquoise/20 blur-2xl -z-10" />
+        <div className="pointer-events-none absolute -bottom-8 -right-8 w-24 h-24 rounded-full bg-lavender/20 blur-2xl -z-10" />
+        <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/80 dark:via-white/25 to-transparent -z-10" />
         {detail}
       </div>
     </div>
@@ -6128,7 +6144,7 @@ function TxLedgerModal({ title, txs, categories, accounts, allTx, spendingPoolBy
           )}
         </div>
 
-        <div className="overflow-auto flex-1 -mx-2 px-2">
+        <div className="overflow-auto flex-1 -mx-2 px-2 scrollbar-hide">
           {sorted.length === 0 ? (
             <p className="text-steel dark:text-light-grey text-sm text-center py-10">Không có giao dịch nào khớp bộ lọc.</p>
           ) : (
@@ -7143,7 +7159,7 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
 
         {showDrilldown && drilldownCategory && (
           <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={() => setShowDrilldown(false)}>
- <div className="frost-card w-full max-w-md rounded-3xl p-6 max-h-[80vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+ <div className="frost-card w-full max-w-md rounded-3xl p-6 max-h-[80vh] overflow-y-auto scrollbar-hide" onClick={(e) => e.stopPropagation()}>
               <div className="flex justify-between items-center mb-4">
                 <h3 className="font-bold text-blueberry dark:text-white">Chi tiết "{drilldownCategory.name}"</h3>
                 <button onClick={() => setShowDrilldown(false)}><X size={18} className="text-steel dark:text-light-grey" /></button>
