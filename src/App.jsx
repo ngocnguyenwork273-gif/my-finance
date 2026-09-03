@@ -1889,7 +1889,7 @@ function BottomNavMobile({ screen, setScreen, onAddClick, theme, toggleTheme, op
 
   function handleAdd() {
     setManageOpen(false);
-    setQuickMenuOpen(true);
+    setQuickMenuOpen((v) => !v);
   }
 
   function handleProfile() {
@@ -2708,17 +2708,18 @@ function EditFundForm({ category, onClose, onSaved, isNew, initialAmount, firstA
       const { error } = await supabase.from('categories').update(payload).eq('id', category.id);
       if (error) { setSaving(false); alert('Lỗi: ' + error.message); return; }
       const newInitial = form.initial_allocation ? Number(form.initial_allocation) : 0;
-      const dateChanged = firstAllocation && firstAllocation.is_initial === true && initialDate !== (firstAllocation.date || new Date(firstAllocation.created_at).toISOString().slice(0, 10));
-      // FIX: chỉ cập nhật amount nếu firstAllocation THỰC SỰ đã được đánh dấu is_initial.
-      // Nếu firstAllocation chỉ là kết quả fallback "giao dịch sớm nhất" (dữ liệu cũ,
-      // chưa có cờ is_initial) thì KHÔNG được ghi đè amount của nó — vì đó có thể là
-      // một lần nạp quỹ bình thường, không phải khoản "ban đầu". Thay vào đó tạo mới
-      // một giao dịch is_initial riêng để làm đại diện chính xác cho "nạp ban đầu".
-      if (firstAllocation && firstAllocation.is_initial === true) {
-        if (newInitial > 0 && (newInitial !== Number(initialAmount || 0) || dateChanged)) {
-          await supabase.from('transactions').update({ amount: newInitial, date: initialDate }).eq('id', firstAllocation.id);
+      const dateChanged = firstAllocation && initialDate !== (firstAllocation.date || new Date(firstAllocation.created_at).toISOString().slice(0, 10));
+      // FIX: luôn cập nhật (update) vào ĐÚNG 1 dòng "ban đầu" khi sửa số tiền — kể cả
+      // khi dòng đó chỉ là kết quả fallback "giao dịch sớm nhất" (dữ liệu cũ, chưa có
+      // cờ is_initial). Trước đây trong trường hợp này code lại INSERT thêm 1 dòng mới,
+      // khiến quỹ bị cộng dồn sai (VD: dòng cũ 2tr + dòng mới 1tr = 3tr thay vì đúng 1tr).
+      // Giờ luôn update thẳng vào dòng cũ và tự gắn cờ is_initial=true cho nó để lần sau
+      // không còn bị coi là "fallback" nữa.
+      if (firstAllocation) {
+        if (newInitial > 0 && (newInitial !== Number(initialAmount || 0) || dateChanged || firstAllocation.is_initial !== true)) {
+          await supabase.from('transactions').update({ amount: newInitial, date: initialDate, is_initial: true }).eq('id', firstAllocation.id);
         }
-      } else if (newInitial !== Number(initialAmount || 0) && newInitial > 0) {
+      } else if (newInitial > 0) {
         await supabase.from('transactions').insert({
           category_id: category.id, type: 'allocation', amount: newInitial,
           note: 'Nạp quỹ lần đầu', date: initialDate,
