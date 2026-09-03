@@ -663,6 +663,33 @@ function formatMoneySigned(n) {
   return (n < 0 ? '-' : '') + Math.abs(n).toLocaleString('en-US') + 'đ';
 }
 
+// ==============================================================================
+// XOÁ GIAO DỊCH TRONG CÁC DÒNG LỊCH SỬ (dùng chung cho mọi màn hình có hiển thị
+// lịch sử giao dịch — Trang chủ, Chi tiết quỹ, Chi tiết ví, Báo cáo...).
+// Xoá ở đây LUÔN LÀ soft-delete qua softDelete('transactions', ...): giao dịch
+// chỉ bị ẩn khỏi ứng dụng (deleted_at được set) và được ghi log restorable vào
+// system_logs, để người dùng có thể khôi phục trong 30 ngày ở Cài đặt > Lịch sử
+// hệ thống — KHÔNG xoá cứng khỏi database.
+// ==============================================================================
+function txDeleteDescription(tx, categories) {
+  const cat = (categories || []).find((c) => c.id === tx.category_id);
+  const label = cat?.name || (tx.type === 'income' ? 'Thu nhập' : tx.type === 'allocation' ? 'Nạp quỹ' : tx.type === 'adjustment' ? 'Cập nhật số dư' : 'Chi tiêu');
+  return `Xoá giao dịch "${label}" ${formatMoney(tx.amount)}`;
+}
+
+function TxDeleteButton({ onClick, className = '', size = 14 }) {
+  return (
+    <button
+      type="button"
+      onClick={(e) => { e.stopPropagation(); onClick(e); }}
+      title="Xoá giao dịch"
+      className={`w-7 h-7 rounded-full hover:bg-cotton-candy-light dark:hover:bg-cotton-candy/10 flex items-center justify-center text-steel dark:text-light-grey hover:text-cotton-candy flex-shrink-0 transition ${className}`}
+    >
+      <Trash2 size={size} />
+    </button>
+  );
+}
+
 // Supabase Storage object key không chấp nhận dấu tiếng Việt, khoảng trắng, ký tự đặc biệt.
 // Chuẩn hoá tên file trước khi upload để tránh lỗi "Invalid key".
 function sanitizeFileName(name) {
@@ -741,17 +768,16 @@ function allocationInterestEligibleDate(depositDate) {
   return eligible;
 }
 
-// FIX: xác định giao dịch "nạp ban đầu" của 1 quỹ dựa vào cờ is_initial (được set khi
-// tạo quỹ hoặc khi sửa "Số tiền nạp ban đầu" trong form chỉnh sửa quỹ), KHÔNG suy luận
-// bằng "giao dịch allocation có ngày sớm nhất" như trước — vì cách cũ có thể nổi bật/ghi đè
-// nhầm lên một lần nạp quỹ bình thường chỉ vì nó tình cờ có ngày sớm hơn.
-// Dữ liệu cũ (tạo trước khi có cột is_initial) sẽ tạm thời fallback về "sớm nhất" cho tới
-// khi người dùng mở form chỉnh sửa quỹ và lưu lại — lúc đó 1 giao dịch is_initial mới sẽ được tạo.
+// FIX: xác định giao dịch "nạp ban đầu" của 1 quỹ CHỈ dựa vào cờ is_initial (được set khi
+// tạo quỹ hoặc khi nhập/sửa "Số tiền nạp quỹ lần đầu" trong form chỉnh sửa quỹ).
+// KHÔNG fallback về "giao dịch allocation có ngày sớm nhất" nữa — cách cũ khiến 1 lần nạp
+// quỹ bình thường (qua nút Nạp quỹ) bị nhầm hiển thị thành "Nạp quỹ ban đầu" chỉ vì nó
+// tình cờ là khoản nạp đầu tiên theo thời gian, dù người dùng chưa hề khai báo số tiền ban
+// đầu ở form Sửa quỹ. Nếu quỹ chưa từng khai báo "Số tiền nạp quỹ lần đầu" thì đơn giản là
+// KHÔNG có dòng "ban đầu" nào cả — mọi khoản nạp/rút đều hiển thị là Nạp quỹ/Rút quỹ bình thường.
 function findInitialAllocation(transactions, categoryId) {
   const allocations = transactions.filter((t) => t.category_id === categoryId && t.type === 'allocation');
-  const marked = allocations.find((t) => t.is_initial === true);
-  if (marked) return marked;
-  return allocations.sort((a, b) => new Date(a.date || a.created_at) - new Date(b.date || b.created_at))[0] || null;
+  return allocations.find((t) => t.is_initial === true) || null;
 }
 
 function fundBalance(categoryId, transactions) {
@@ -1507,15 +1533,48 @@ function evalMoneyExpression(str) {
   return null;
 }
 
+// Thêm dấu phẩy ngăn cách hàng nghìn vào TỪNG phần số trong chuỗi (chuỗi có thể
+// là biểu thức toán như "1000+2000" — MoneyInput cho phép gõ +-*/() để tính nhanh).
+// Phần thập phân sau dấu "." KHÔNG bị chèn dấu phẩy.
+function formatWithThousands(text) {
+  if (!text) return '';
+  return text.split(/([+\-*/()])/).map((part) => {
+    if (/^[+\-*/()]$/.test(part)) return part;
+    return part.replace(/\d+/g, (digits, offset, str) => {
+      // Nếu ngay trước cụm số này là dấu "." thì đây là phần thập phân -> giữ nguyên
+      if (str[offset - 1] === '.') return digits;
+      return digits.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+    });
+  }).join('');
+}
+
+// Đếm số ký tự "thật" (không tính dấu phẩy hiển thị) đứng trước vị trí index trong str.
+function countRealCharsBefore(str, index) {
+  let count = 0;
+  for (let i = 0; i < index && i < str.length; i++) { if (str[i] !== ',') count++; }
+  return count;
+}
+// Tìm vị trí trong str sao cho có đúng "count" ký tự thật đứng trước nó.
+function indexAfterRealCharCount(str, count) {
+  if (count <= 0) return 0;
+  let seen = 0;
+  for (let i = 0; i < str.length; i++) {
+    if (str[i] !== ',') { seen++; if (seen === count) return i + 1; }
+  }
+  return str.length;
+}
+
 function MoneyInput({ value, onChange, placeholder, className }) {
   const [focused, setFocused] = useState(false);
-  const [rawText, setRawText] = useState('');
+  const [rawText, setRawText] = useState(''); // luôn KHÔNG có dấu phẩy — dùng để tính toán
   const inputRef = useRef(null);
+  const pendingCursor = useRef(null); // số ký tự thật trước con trỏ, để khôi phục vị trí sau khi format lại
 
   function handleFocus() { setFocused(true); setRawText(value ? String(value) : ''); }
 
   function handleChange(e) {
     const typed = e.target.value;
+    const cursorPos = e.target.selectionStart ?? typed.length;
     if (typed.includes('=')) {
       // người dùng gõ dấu "=" -> tính ngay, không đợi rời ô
       const expr = typed.replace('=', '');
@@ -1527,7 +1586,10 @@ function MoneyInput({ value, onChange, placeholder, className }) {
       inputRef.current?.blur();
       return;
     }
-    // vẫn cho gõ số + các phép toán, không chặn ký tự toán tử như trước
+    // Ghi nhớ số ký tự thật trước con trỏ (loại bỏ dấu phẩy hiển thị) để canh lại
+    // vị trí con trỏ sau khi định dạng lại có thêm/bớt dấu phẩy.
+    pendingCursor.current = countRealCharsBefore(typed, cursorPos);
+    // vẫn cho gõ số + các phép toán, không chặn ký tự toán tử như trước; bỏ dấu phẩy hiển thị
     setRawText(typed.replace(/[^0-9+\-*/.() ]/g, ''));
   }
 
@@ -1539,7 +1601,16 @@ function MoneyInput({ value, onChange, placeholder, className }) {
   function handleBlur() { setFocused(false); commit(); }
   function handleKeyDown(e) { if (e.key === 'Enter') { e.currentTarget.blur(); } }
 
-  const displayValue = focused ? rawText : (value ? Number(value).toLocaleString('en-US') : '');
+  // Luôn hiện dấu phẩy ngăn cách hàng nghìn — cả khi đang gõ lẫn khi đã rời ô.
+  const displayValue = focused ? formatWithThousands(rawText) : (value ? Number(value).toLocaleString('en-US') : '');
+
+  useEffect(() => {
+    if (focused && inputRef.current && pendingCursor.current != null) {
+      const pos = indexAfterRealCharCount(inputRef.current.value, pendingCursor.current);
+      inputRef.current.setSelectionRange(pos, pos);
+      pendingCursor.current = null;
+    }
+  }, [displayValue, focused]);
 
   return (
     <input ref={inputRef} type="text" inputMode="text" value={displayValue}
@@ -2783,16 +2854,23 @@ function EditFundForm({ category, onClose, onSaved, isNew, initialAmount, firstA
   );
 }
 
-function QuickAllocateWithdrawForm({ category, mode, onClose, onSaved }) {
-  const [amount, setAmount] = useState('');
-  const [note, setNote] = useState('');
+function QuickAllocateWithdrawForm({ category, mode, transaction, onClose, onSaved }) {
+  const isEditing = !!transaction;
+  const [amount, setAmount] = useState(isEditing ? String(transaction.amount) : '');
+  const [note, setNote] = useState(isEditing ? stripPeriodTag(transaction.note || '') : '');
   const [saving, setSaving] = useState(false);
-  const [selectedYear, setSelectedYear] = useState(Number(currentPeriodKey().split('-')[0]));
-  const [selectedPeriod, setSelectedPeriod] = useState(currentPeriodKey());
+  const initialPeriod = isEditing ? (parsePeriodTag(transaction.note) || currentPeriodKey()) : currentPeriodKey();
+  const [selectedYear, setSelectedYear] = useState(Number(initialPeriod.split('-')[0]));
+  const [selectedPeriod, setSelectedPeriod] = useState(initialPeriod);
   // FIX: cho phép chỉnh sửa cả ngày lẫn giờ:phút nhập (trước đây chỉ chỉnh được ngày,
   // giờ:phút luôn tự động lấy giờ hiện tại lúc lưu). Đồng bộ pattern datetime-local
   // đang dùng ở AddTransaction / EditTransaction — mặc định = giờ hiện tại, cho sửa tự do.
-  const [dateTime, setDateTime] = useState(nowForInput());
+  const [dateTime, setDateTime] = useState(() => {
+    if (!isEditing) return nowForInput();
+    const d = new Date(transaction.created_at || transaction.date);
+    d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+    return d.toISOString().slice(0, 16);
+  });
   const yearNow = new Date().getFullYear();
   const years = Array.from({ length: 5 }, (_, i) => yearNow - 2 + i);
   const periods = buildPeriods(selectedYear);
@@ -2811,10 +2889,15 @@ function QuickAllocateWithdrawForm({ category, mode, onClose, onSaved }) {
     if (mode === 'allocation' && selectedPeriod) {
       noteToSave = tagPeriodNote(selectedPeriod, note);
     }
-    const { error } = await supabase.from('transactions').insert({
-      category_id: category.id, type: mode, amount: Number(amount), note: noteToSave,
-      date: dateTime.slice(0, 10), created_at: new Date(dateTime).toISOString(),
-    });
+    const { error } = isEditing
+      ? await supabase.from('transactions').update({
+          amount: Number(amount), note: noteToSave,
+          date: dateTime.slice(0, 10), created_at: new Date(dateTime).toISOString(),
+        }).eq('id', transaction.id)
+      : await supabase.from('transactions').insert({
+          category_id: category.id, type: mode, amount: Number(amount), note: noteToSave,
+          date: dateTime.slice(0, 10), created_at: new Date(dateTime).toISOString(),
+        });
     setSaving(false);
     if (error) { alert('Lỗi: ' + error.message); return; }
     onSaved(); onClose();
@@ -2824,7 +2907,11 @@ function QuickAllocateWithdrawForm({ category, mode, onClose, onSaved }) {
     <div className="fixed inset-0 bg-black/40 flex items-end md:items-center md:justify-center z-30" onClick={onClose}>
       <div className="bg-white dark:bg-[#1e1e32] w-full md:max-w-sm rounded-t-3xl md:rounded-3xl p-5" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-4">
-          <h3 className="font-bold text-blueberry dark:text-white">{mode === 'allocation' ? `Nạp vào ${category.name}` : `Rút từ ${category.name}`}</h3>
+          <h3 className="font-bold text-blueberry dark:text-white">
+            {isEditing
+              ? (mode === 'allocation' ? `Sửa khoản nạp — ${category.name}` : `Sửa khoản rút — ${category.name}`)
+              : (mode === 'allocation' ? `Nạp vào ${category.name}` : `Rút từ ${category.name}`)}
+          </h3>
           <button onClick={onClose}><X size={18} className="text-steel dark:text-light-grey" /></button>
         </div>
         <MoneyInput value={amount} onChange={setAmount} placeholder="Số tiền" className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-lg font-bold outline-none mb-3 dark:text-white dark:placeholder:text-light-grey text-blueberry" />
@@ -2845,7 +2932,7 @@ function QuickAllocateWithdrawForm({ category, mode, onClose, onSaved }) {
         )}
 
         <button onClick={handleSave} disabled={saving} className={`w-full text-white rounded-xl py-3 font-bold flex items-center justify-center gap-2 disabled:opacity-60 shadow-md ${mode === 'allocation' ? 'bg-gradient-primary shadow-turquoise/30' : 'bg-cotton-candy shadow-cotton-candy/30'}`}>
-          {saving ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />} {mode === 'allocation' ? 'Nạp quỹ' : 'Rút quỹ'}
+          {saving ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />} {isEditing ? 'Lưu thay đổi' : (mode === 'allocation' ? 'Nạp quỹ' : 'Rút quỹ')}
         </button>
       </div>
     </div>
@@ -3029,7 +3116,13 @@ function EditGoalForm({ goal, onClose, onSaved, isNew, softDelete, categories = 
 /* ==============================================================================
    08. DASHBOARD
    ============================================================================== */
-function Dashboard({ setScreen, transactions, categories, accounts, goals, loading, displayName, avatarUrl, onAddClick, theme, toggleTheme, onOpenFund, onOpenAccount, reload, openSettings, sidebarCollapsed, toggleSidebar, spendingPoolByPeriod, saveSpendingPoolForPeriod }) {
+function Dashboard({ setScreen, transactions, categories, accounts, goals, loading, displayName, avatarUrl, onAddClick, theme, toggleTheme, onOpenFund, onOpenAccount, reload, softDelete, openSettings, sidebarCollapsed, toggleSidebar, spendingPoolByPeriod, saveSpendingPoolForPeriod }) {
+  async function handleDeleteTx(tx) {
+    if (!confirm('Xóa giao dịch này? Bạn có thể khôi phục trong 30 ngày ở mục Lịch sử.')) return;
+    const { error } = await softDelete('transactions', tx.id, txDeleteDescription(tx, categories), 'delete_transaction');
+    if (error) { alert('Lỗi: ' + error.message); return; }
+    reload();
+  }
   const [search, setSearch] = useState('');
   const [editingTx, setEditingTx] = useState(null);
   const [recentTxFilter, setRecentTxFilter] = useState('7d');
@@ -3737,6 +3830,7 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
                                 <p className="text-steel dark:text-light-grey text-xs">{stripPeriodTag(tx.note) || new Date(tx.created_at || tx.date).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}</p>
                               </div>
                               <p className={`font-bold text-sm flex-shrink-0 ${tx.type === 'income' ? 'text-turquoise' : 'text-blueberry dark:text-white'}`}>{tx.type === 'income' ? '+' : '-'}{formatMoney(tx.amount)}</p>
+                              <TxDeleteButton onClick={() => handleDeleteTx(tx)} />
                             </div>
                           );
                         })}
@@ -3971,6 +4065,7 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
                                   )}
                                 </div>
                                 <p className={`font-bold text-sm flex-shrink-0 ${tx.type === 'income' ? 'text-turquoise' : 'text-blueberry dark:text-white'}`}>{tx.type === 'income' ? '+' : '-'}{formatMoney(tx.amount)}</p>
+                                <TxDeleteButton onClick={() => handleDeleteTx(tx)} />
                               </div>
                             );
                           })}
@@ -4120,6 +4215,7 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
           allTx={transactions}
           spendingPoolByPeriod={spendingPoolByPeriod}
           onClose={() => setLedgerModal(null)}
+          onDeleteTx={handleDeleteTx}
         />
       )}
 
@@ -4522,11 +4618,21 @@ function FundDetail({ category, transactions, categories, accounts, onBack, relo
   const [filter, setFilter] = useState('all');
   const [showEdit, setShowEdit] = useState(false);
   const [quickMode, setQuickMode] = useState(null);
-  const [editingTx, setEditingTx] = useState(null);
+  // FIX: sửa 1 dòng nạp/rút quỹ (không phải "ban đầu") ngay từ Lịch sử -> mở đúng popup
+  // Nạp/Rút quỹ (QuickAllocateWithdrawForm) ở chế độ sửa, KHÔNG mở form Sửa giao dịch chung
+  // chung như trước (dễ gây nhầm lẫn vì form đó có nhiều lựa chọn không liên quan tới quỹ).
+  const [editingQuickTx, setEditingQuickTx] = useState(null);
   // FIX: bộ lọc khoảng thời gian cho Lịch sử quỹ (áp dụng cho cả bản mobile lẫn desktop)
   const [historyDateFrom, setHistoryDateFrom] = useState('');
   const [historyDateTo, setHistoryDateTo] = useState('');
   const hasHistoryDateFilter = historyDateFrom || historyDateTo;
+
+  async function handleDeleteTx(tx) {
+    if (!confirm('Xóa giao dịch này? Bạn có thể khôi phục trong 30 ngày ở mục Lịch sử.')) return;
+    const { error } = await softDelete('transactions', tx.id, txDeleteDescription(tx, categories), 'delete_transaction');
+    if (error) { alert('Lỗi: ' + error.message); return; }
+    reload();
+  }
 
   // Lấy tất cả giao dịch nạp/rút, sắp xếp theo thời gian tăng dần
   const allHistory = transactions
@@ -4771,11 +4877,13 @@ function FundDetail({ category, transactions, categories, accounts, onBack, relo
                         {!isProfit && (
                           // Khoản "Nạp quỹ lần đầu" (isInitial) bấm bút chì -> mở popup chỉnh sửa
                           // THÔNG TIN QUỸ (vì số tiền ban đầu được sửa chung trong form đó);
-                          // các khoản nạp/rút khác -> mở form sửa GIAO DỊCH bình thường.
-                          <button onClick={() => (isInitial ? setShowEdit(true) : setEditingTx(item))} className="w-7 h-7 rounded-full hover:bg-ice-cream dark:hover:bg-night-sky/30 flex items-center justify-center text-steel dark:text-light-grey flex-shrink-0">
+                          // các khoản nạp/rút khác -> mở đúng popup Nạp quỹ/Rút quỹ (tuỳ item.type)
+                          // ở chế độ sửa, KHÔNG mở form Sửa giao dịch chung chung.
+                          <button onClick={() => (isInitial ? setShowEdit(true) : setEditingQuickTx(item))} className="w-7 h-7 rounded-full hover:bg-ice-cream dark:hover:bg-night-sky/30 flex items-center justify-center text-steel dark:text-light-grey flex-shrink-0">
                             <Pencil size={14} />
                           </button>
                         )}
+                        {!isProfit && <TxDeleteButton onClick={() => handleDeleteTx(item)} />}
                       </div>
                     </Fragment>
                   );
@@ -4927,11 +5035,13 @@ function FundDetail({ category, transactions, categories, accounts, onBack, relo
                         </div>
                         <p className={`font-bold text-sm flex-shrink-0 ${item.type === 'expense' ? 'text-cotton-candy' : 'text-turquoise'}`}>{item.type === 'expense' ? '-' : '+'}{formatMoney(item.amount)}</p>
                         {!item.isProfit && (
-                          // Xem giải thích ở bản mobile: khoản nạp ban đầu -> mở sửa thông tin quỹ
-                          <button onClick={() => (isInitial ? setShowEdit(true) : setEditingTx(item))} className="w-7 h-7 rounded-full hover:bg-ice-cream dark:hover:bg-night-sky/30 flex items-center justify-center text-steel dark:text-light-grey flex-shrink-0">
+                          // Xem giải thích ở bản mobile: khoản nạp ban đầu -> mở sửa thông tin quỹ,
+                          // các khoản khác -> mở popup Nạp/Rút quỹ ở chế độ sửa.
+                          <button onClick={() => (isInitial ? setShowEdit(true) : setEditingQuickTx(item))} className="w-7 h-7 rounded-full hover:bg-ice-cream dark:hover:bg-night-sky/30 flex items-center justify-center text-steel dark:text-light-grey flex-shrink-0">
                             <Pencil size={14} />
                           </button>
                         )}
+                        {!item.isProfit && <TxDeleteButton onClick={() => handleDeleteTx(item)} />}
                       </div>
                     );
                   })}
@@ -4955,15 +5065,13 @@ function FundDetail({ category, transactions, categories, accounts, onBack, relo
 
       {showEdit && <EditFundForm category={category} onClose={() => setShowEdit(false)} onSaved={reload} isNew={false} initialAmount={initialAmount} firstAllocation={firstAllocation} />}
       {quickMode && <QuickAllocateWithdrawForm category={category} mode={quickMode} onClose={() => setQuickMode(null)} onSaved={reload} />}
-      {editingTx && (
-        <EditTransaction
-          transaction={editingTx}
-          onClose={() => setEditingTx(null)}
-          accounts={accounts || []}
-          categories={categories || []}
-          transactions={transactions}
-          onSaved={() => { reload(); setEditingTx(null); }}
-          spendingPoolByPeriod={spendingPoolByPeriod}
+      {editingQuickTx && (
+        <QuickAllocateWithdrawForm
+          category={category}
+          mode={editingQuickTx.type}
+          transaction={editingQuickTx}
+          onClose={() => setEditingQuickTx(null)}
+          onSaved={reload}
         />
       )}
     </>
@@ -5122,6 +5230,13 @@ function AccountDetail({ account, transactions, categories, accounts, onBack, re
     reload(); onBack();
   }
 
+  async function handleDeleteTx(tx) {
+    if (!confirm('Xóa giao dịch này? Bạn có thể khôi phục trong 30 ngày ở mục Lịch sử.')) return;
+    const { error } = await softDelete('transactions', tx.id, txDeleteDescription(tx, categories), 'delete_transaction');
+    if (error) { alert('Lỗi: ' + error.message); return; }
+    reload();
+  }
+
   return (
     <>
       <div className="md:hidden min-h-[100dvh] pb-28 relative" style={{ background: 'linear-gradient(180deg,#0DBACC,#74ACEF,#C1DDFF)' }}>
@@ -5181,6 +5296,7 @@ function AccountDetail({ account, transactions, categories, accounts, onBack, re
                         <Pencil size={14} />
                       </button>
                     )}
+                    <TxDeleteButton onClick={() => handleDeleteTx(tx)} />
                   </div>
                 );
               })}
@@ -5243,6 +5359,7 @@ function AccountDetail({ account, transactions, categories, accounts, onBack, re
                             <Pencil size={14} />
                           </button>
                         )}
+                        <TxDeleteButton onClick={() => handleDeleteTx(tx)} />
                       </div>
                     );
                   })}
@@ -5711,6 +5828,7 @@ function Settings({ setScreen, categories, accounts, reload, softDelete, user, o
     delete_goal: { icon: Target, color: 'text-cotton-candy bg-cotton-candy-light dark:bg-cotton-candy/10' },
     delete_category: { icon: LayoutGrid, color: 'text-cotton-candy bg-cotton-candy-light dark:bg-cotton-candy/10' },
     delete_account: { icon: Wallet, color: 'text-cotton-candy bg-cotton-candy-light dark:bg-cotton-candy/10' },
+    delete_transaction: { icon: Trash2, color: 'text-cotton-candy bg-cotton-candy-light dark:bg-cotton-candy/10' },
   };
 
   const [restoreTarget, setRestoreTarget] = useState(null);
@@ -6347,7 +6465,7 @@ function poolIncomeCumulativeAfterTx(tx, allTx, categories) {
 // "Xem chi tiết" trong popup hover của các thẻ tổng kết (Thu nhập / Thu nhập được chi /
 // Thu nhập đặc biệt / Chi tiêu). Hiển thị: nội dung chi, ghi chú, ngày, nguồn trừ,
 // số dư nguồn sau giao dịch, số tiền.
-function TxLedgerRow({ tx, categories, accounts, allTx, spendingPoolByPeriod }) {
+function TxLedgerRow({ tx, categories, accounts, allTx, spendingPoolByPeriod, onDeleteTx }) {
   const txDate = new Date(tx.date || tx.created_at);
   const source = txSourceInfo(tx, categories, accounts);
 
@@ -6381,11 +6499,16 @@ function TxLedgerRow({ tx, categories, accounts, allTx, spendingPoolByPeriod }) 
       <td className={`py-2.5 pr-3 text-sm font-bold text-right whitespace-nowrap ${isOutflow ? 'text-cotton-candy' : 'text-turquoise'}`}>
         {isOutflow ? '-' : '+'}{formatMoney(tx.amount)}
       </td>
+      {onDeleteTx && (
+        <td className="py-2.5 pr-3 text-right whitespace-nowrap">
+          <TxDeleteButton onClick={() => onDeleteTx(tx)} />
+        </td>
+      )}
     </tr>
   );
 }
 
-function TxLedgerModal({ title, txs, categories, accounts, allTx, spendingPoolByPeriod, onClose }) {
+function TxLedgerModal({ title, txs, categories, accounts, allTx, spendingPoolByPeriod, onClose, onDeleteTx }) {
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [sourceFilter, setSourceFilter] = useState('all');
@@ -6449,12 +6572,13 @@ function TxLedgerModal({ title, txs, categories, accounts, allTx, spendingPoolBy
                   <th className="py-2.5 pr-3">Nguồn</th>
                   <th className="py-2.5 pr-3">Số dư nguồn sau GD</th>
                   <th className="py-2.5 pr-3">Ghi chú</th>
-                  <th className="py-2.5 pr-3 text-right rounded-r-lg">Số tiền</th>
+                  <th className={`py-2.5 pr-3 text-right ${onDeleteTx ? '' : 'rounded-r-lg'}`}>Số tiền</th>
+                  {onDeleteTx && <th className="py-2.5 pr-3 rounded-r-lg"></th>}
                 </tr>
               </thead>
               <tbody>
                 {sorted.map((tx) => (
-                  <TxLedgerRow key={tx.id} tx={tx} categories={categories} accounts={accounts} allTx={allTx} spendingPoolByPeriod={spendingPoolByPeriod} />
+                  <TxLedgerRow key={tx.id} tx={tx} categories={categories} accounts={accounts} allTx={allTx} spendingPoolByPeriod={spendingPoolByPeriod} onDeleteTx={onDeleteTx} />
                 ))}
               </tbody>
             </table>
@@ -6502,8 +6626,15 @@ function AssetBreakdownDetail({ wallets, funds, gold, total }) {
 /* ==============================================================================
    16. REPORT COMPONENT
    ============================================================================== */
-function Report({ setScreen, transactions, categories, accounts, goals, onAddClick, displayName, avatarUrl, theme, toggleTheme, openSettings, sidebarCollapsed, toggleSidebar, spendingPoolByPeriod, saveSpendingPoolForPeriod, reload }) {
+function Report({ setScreen, transactions, categories, accounts, goals, onAddClick, displayName, avatarUrl, theme, toggleTheme, openSettings, sidebarCollapsed, toggleSidebar, spendingPoolByPeriod, saveSpendingPoolForPeriod, reload, softDelete }) {
   const [editingTx, setEditingTx] = useState(null);
+
+  async function handleDeleteTx(tx) {
+    if (!confirm('Xóa giao dịch này? Bạn có thể khôi phục trong 30 ngày ở mục Lịch sử.')) return;
+    const { error } = await softDelete('transactions', tx.id, txDeleteDescription(tx, categories), 'delete_transaction');
+    if (error) { alert('Lỗi: ' + error.message); return; }
+    reload && reload();
+  }
   // Time range state
   // FIX: dùng kỳ tài chính hiện tại (21 -> 20) làm mặc định, KHÔNG dùng tháng lịch thường.
   // Lý do: từ ngày 21 trở đi, giao dịch đã thuộc về kỳ tài chính của tháng SAU (xem dateToPeriodKey),
@@ -6631,6 +6762,7 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
           </div>
         </div>
         <p className={`font-bold text-sm flex-shrink-0 ${tx.type === 'expense' ? 'text-cotton-candy' : 'text-turquoise'}`}>{tx.type === 'expense' ? '-' : '+'}{formatMoney(tx.amount)}</p>
+        <TxDeleteButton onClick={() => handleDeleteTx(tx)} />
       </div>
     );
   }
@@ -7483,6 +7615,7 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
           allTx={transactions}
           spendingPoolByPeriod={spendingPoolByPeriod}
           onClose={() => setLedgerModal(null)}
+          onDeleteTx={handleDeleteTx}
         />
       )}
       {editingTx && (
@@ -7686,9 +7819,9 @@ function MainApp({ user, theme, toggleTheme }) {
     if (screen === 'goals') return <Goals setScreen={setScreen} goals={goals} loadingGoals={loadingGoals} reload={loadAll} softDelete={softDelete} onAddClick={() => setShowAdd(true)} displayName={displayName} avatarUrl={avatarUrl} theme={theme} toggleTheme={toggleTheme} openSettings={goToSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} categories={categories} transactions={transactions} />;
     if (screen === 'accounts') return <Accounts setScreen={setScreen} accounts={accounts} transactions={transactions} onOpenAccount={openAccount} reload={loadAll} onAddClick={() => setShowAdd(true)} displayName={displayName} avatarUrl={avatarUrl} theme={theme} toggleTheme={toggleTheme} openSettings={goToSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} />;
     if (screen === 'settings') return <Settings setScreen={setScreen} categories={categories} accounts={accounts} reload={loadAll} softDelete={softDelete} user={currentUser} onProfileUpdated={refreshUser} onAddClick={() => setShowAdd(true)} theme={theme} toggleTheme={toggleTheme} initialSection={settingsSection} openSettings={goToSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} onResetData={resetAllData} resettingData={resettingData} logs={logs} logActivity={logActivity} restoreLog={restoreLog} spendingPoolByPeriod={spendingPoolByPeriod} saveSpendingPoolForPeriod={saveSpendingPoolForPeriod} />;
-    if (screen === 'report') return <Report setScreen={setScreen} transactions={transactions} categories={categories} accounts={accounts} goals={goals} onAddClick={() => setShowAdd(true)} displayName={displayName} avatarUrl={avatarUrl} theme={theme} toggleTheme={toggleTheme} openSettings={goToSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} spendingPoolByPeriod={spendingPoolByPeriod} saveSpendingPoolForPeriod={saveSpendingPoolForPeriod} reload={loadAll} />;
+    if (screen === 'report') return <Report setScreen={setScreen} transactions={transactions} categories={categories} accounts={accounts} goals={goals} onAddClick={() => setShowAdd(true)} displayName={displayName} avatarUrl={avatarUrl} theme={theme} toggleTheme={toggleTheme} openSettings={goToSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} spendingPoolByPeriod={spendingPoolByPeriod} saveSpendingPoolForPeriod={saveSpendingPoolForPeriod} reload={loadAll} softDelete={softDelete} />;
     // Dashboard default
-    return <Dashboard setScreen={setScreen} transactions={transactions} categories={categories} accounts={accounts} goals={goals} loading={loading} displayName={displayName} avatarUrl={avatarUrl} onAddClick={() => setShowAdd(true)} theme={theme} toggleTheme={toggleTheme} onOpenFund={openFund} onOpenAccount={openAccount} reload={loadAll} openSettings={goToSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} spendingPoolByPeriod={spendingPoolByPeriod} saveSpendingPoolForPeriod={saveSpendingPoolForPeriod} />;
+    return <Dashboard setScreen={setScreen} transactions={transactions} categories={categories} accounts={accounts} goals={goals} loading={loading} displayName={displayName} avatarUrl={avatarUrl} onAddClick={() => setShowAdd(true)} theme={theme} toggleTheme={toggleTheme} onOpenFund={openFund} onOpenAccount={openAccount} reload={loadAll} softDelete={softDelete} openSettings={goToSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} spendingPoolByPeriod={spendingPoolByPeriod} saveSpendingPoolForPeriod={saveSpendingPoolForPeriod} />;
   }
 
   // Layout wrapper — true flex-row App Shell (Sidebar is a real flex item,
