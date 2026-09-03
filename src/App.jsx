@@ -1101,6 +1101,113 @@ function periodKeyToRange(periodKey) {
   return { start, end };
 }
 
+// Danh sách năm cố định cho các dropdown lọc "Năm" trong Dashboard: 2025 -> 2035.
+const YEAR_OPTIONS = Array.from({ length: 11 }, (_, i) => 2025 + i);
+const PERIOD_WEEK_DAY_LABELS = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'];
+
+// Sinh danh sách bucket thời gian dùng chung cho các chart lọc theo Tuần/Tháng/Năm.
+// - week: khoảng ngày tuỳ chọn (weekStart -> weekEnd), mỗi bucket là 1 ngày.
+// - year: 12 tháng của năm được chọn.
+// - month: chia kỳ tài chính (21 -> 20) hiện tại thành 5 khoảng.
+function computePeriodBuckets({ period, year, periodKey, weekStart, weekEnd }) {
+  if (period === 'week') {
+    const start = new Date(weekStart || new Date()); start.setHours(0, 0, 0, 0);
+    const end = new Date(weekEnd || weekStart || new Date()); end.setHours(23, 59, 59, 999);
+    if (end < start) {
+      const dayEnd = new Date(start); dayEnd.setHours(23, 59, 59, 999);
+      return [{ label: `${String(start.getDate()).padStart(2, '0')}/${String(start.getMonth() + 1).padStart(2, '0')}`, start, end: dayEnd }];
+    }
+    const totalDays = Math.min(62, Math.round((end - start) / 86400000) + 1);
+    return Array.from({ length: totalDays }, (_, i) => {
+      const dayStart = new Date(start); dayStart.setDate(dayStart.getDate() + i);
+      const dayEnd = new Date(dayStart); dayEnd.setHours(23, 59, 59, 999);
+      return { label: `${String(dayStart.getDate()).padStart(2, '0')}/${String(dayStart.getMonth() + 1).padStart(2, '0')}`, start: dayStart, end: dayEnd };
+    });
+  }
+  if (period === 'year') {
+    return Array.from({ length: 12 }, (_, i) => ({
+      label: `Th${i + 1}`,
+      start: new Date(year, i, 1, 0, 0, 0),
+      end: new Date(year, i + 1, 0, 23, 59, 59),
+    }));
+  }
+  const { start: periodStart, end: periodEnd } = periodKeyToRange(periodKey);
+  const totalDays = Math.round((periodEnd - periodStart) / 86400000) + 1;
+  const chunks = 5;
+  const base = Math.floor(totalDays / chunks) || 1;
+  const cursor = new Date(periodStart);
+  const buckets = [];
+  for (let i = 0; i < chunks; i++) {
+    const daysInChunk = i === chunks - 1 ? totalDays - base * (chunks - 1) : base;
+    const start = new Date(cursor);
+    const end = new Date(cursor); end.setDate(end.getDate() + daysInChunk - 1); end.setHours(23, 59, 59, 999);
+    buckets.push({ label: `${start.getDate()}-${end.getDate()}`, start, end });
+    cursor.setDate(cursor.getDate() + daysInChunk);
+  }
+  return buckets;
+}
+function periodBucketMatch(t, b, bi, buckets, period, year) {
+  if (period === 'year') {
+    const [py, pm] = transactionPeriodKey(t).split('-').map(Number);
+    return py === year && pm === bi + 1;
+  }
+  const d = new Date(t.date || t.created_at);
+  if (period === 'week') return d >= b.start && d <= b.end;
+  // month (kỳ 21->20): giao dịch ngoài khoảng hiển thị dồn vào bucket đầu/cuối
+  if (d < buckets[0].start) return bi === 0;
+  if (d > buckets[buckets.length - 1].end) return bi === buckets.length - 1;
+  return d >= b.start && d <= b.end;
+}
+// Chuỗi số liệu theo từng danh mục, cho 1 card lọc thời gian độc lập.
+function buildCategorySeriesFor(transactions, cats, txType, buckets, period, periodKey, year) {
+  const isPeriodMode = period === 'month';
+  return cats
+    .map((c) => {
+      let catTx = transactions.filter((t) => t.category_id === c.id && t.type === txType);
+      if (isPeriodMode) catTx = catTx.filter((t) => transactionPeriodKey(t) === periodKey);
+      const values = buckets.map((b, bi) => catTx.filter((t) => periodBucketMatch(t, b, bi, buckets, period, year)).reduce((s, t) => s + Number(t.amount), 0));
+      return { ...c, values, total: values.reduce((s, v) => s + v, 0) };
+    })
+    .filter((c) => c.total > 0)
+    .sort((a, b) => b.total - a.total);
+}
+// Tổng theo bucket (không chia theo danh mục) — dùng cho đường xu hướng thu nhập.
+function bucketTotalsFor(transactions, txType, buckets, period, periodKey, year) {
+  const isPeriodMode = period === 'month';
+  let txs = transactions.filter((t) => t.type === txType);
+  if (isPeriodMode) txs = txs.filter((t) => transactionPeriodKey(t) === periodKey);
+  return buckets.map((b, bi) => txs.filter((t) => periodBucketMatch(t, b, bi, buckets, period, year)).reduce((s, t) => s + Number(t.amount), 0));
+}
+// Giao dịch thô đang được lọc bởi 1 bộ lọc thời gian độc lập (dùng cho modal "Xem chi tiết").
+function filteredTxsForCard(transactions, filter, buckets, txType) {
+  let txs = transactions.filter((t) => t.type === txType);
+  if (filter.period === 'month') {
+    txs = txs.filter((t) => transactionPeriodKey(t) === filter.periodKey);
+  } else if (filter.period === 'year') {
+    txs = txs.filter((t) => Number(transactionPeriodKey(t).split('-')[0]) === filter.year);
+  } else {
+    const rangeStart = buckets[0].start, rangeEnd = buckets[buckets.length - 1].end;
+    txs = txs.filter((t) => { const d = new Date(t.date || t.created_at); return d >= rangeStart && d <= rangeEnd; });
+  }
+  return txs;
+}
+function labelForCardFilter(filter) {
+  if (filter.period === 'month') return `Tháng ${Number(filter.periodKey.split('-')[1])} (${buildPeriods(filter.year).find((p) => p.key === filter.periodKey)?.label.match(/\(([^)]+)\)/)?.[1] || ''})`;
+  if (filter.period === 'year') return `Năm ${filter.year}`;
+  const dmy = (iso) => { const [y, m, d] = String(iso).split('-'); return `${d}/${m}/${y}`; };
+  return `${dmy(filter.weekStart)} - ${dmy(filter.weekEnd)}`;
+}
+// Bộ lọc thời gian (Tuần/Tháng/Năm) độc lập cho 1 card cụ thể trong Dashboard — mỗi
+// lần gọi tạo ra 1 state riêng, không chia sẻ với card khác hay với bộ lọc chung.
+function useCardPeriod(defaultPeriod = 'month') {
+  const [period, setPeriod] = useState(defaultPeriod);
+  const [year, setYear] = useState(new Date().getFullYear());
+  const [periodKey, setPeriodKey] = useState(currentPeriodKey());
+  const [weekStart, setWeekStart] = useState(() => { const d = new Date(); d.setDate(d.getDate() - 6); return d.toISOString().slice(0, 10); });
+  const [weekEnd, setWeekEnd] = useState(() => new Date().toISOString().slice(0, 10));
+  return { period, setPeriod, year, setYear, periodKey, setPeriodKey, weekStart, setWeekStart, weekEnd, setWeekEnd };
+}
+
 // Gộp nhiều "kỳ tài chính" (21 → 20) liên tiếp thành 1 khoảng — dùng cho filter
 // Quý / 6 tháng / Năm của Report để KHÔNG phá vỡ financial period (không dùng
 // tháng lịch đơn giản 1 → cuối tháng).
@@ -2927,6 +3034,12 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
   const [recentTxFilter, setRecentTxFilter] = useState('7d');
   const [showAddWidget, setShowAddWidget] = useState(false);
   const [showWalletPopover, setShowWalletPopover] = useState(false);
+  // Bật/tắt khi rê chuột vào khối "Tổng quan tài sản" — dùng để nâng z-index của CẢ khối
+  // này lên trên các card anh em (Ví, Thu/chi theo danh mục,...) mỗi khi 1 trong 3 popup
+  // hover bên trong (Tiền ví/Tiền quỹ/Tổng cộng) đang mở, để popup không bị các card khác
+  // đè lên/che mất (bản thân mỗi frost-card có isolation:isolate nên z-index nâng ở BÊN
+  // TRONG không tự thoát ra ngoài được, phải nâng luôn z-index của card cha chứa nó).
+  const [assetOverviewHovered, setAssetOverviewHovered] = useState(false);
   const [showAddWallet, setShowAddWallet] = useState(false);
   const [incomeTotalsMonth, setIncomeTotalsMonth] = useState('all');
   const [incomeTotalsYear, setIncomeTotalsYear] = useState(new Date().getFullYear());
@@ -2979,11 +3092,88 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
   useEffect(() => {
     setWalletActiveIndex((cur) => Math.max(0, Math.min(accounts.length - 1, cur)));
   }, [accounts.length]);
-  const [breakdownPeriod, setBreakdownPeriod] = useState('month');
-  const [breakdownYear, setBreakdownYear] = useState(new Date().getFullYear());
-  const [breakdownPeriodKey, setBreakdownPeriodKey] = useState(currentPeriodKey());
-  const breakdownYearOptions = Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - 2 + i);
-  const breakdownPeriodOptions = buildPeriods(breakdownYear);
+  // Mỗi card có bộ lọc thời gian (Tuần/Tháng/Năm) RIÊNG — đổi ở 1 card chỉ đổi dữ
+  // liệu của card đó, không ảnh hưởng các card khác.
+  const mobileComboFilter = useCardPeriod('month');
+  const incomeCardFilter = useCardPeriod('month');
+  const expenseCardFilter = useCardPeriod('month');
+  const costFilter = useCardPeriod('month');
+  const allCardFilters = [mobileComboFilter, incomeCardFilter, expenseCardFilter, costFilter];
+
+  // WIDGET LỌC THỜI GIAN CHUNG CHO CẢ DASHBOARD (nút cạnh "Thêm widget") — chọn 1 lần
+  // ở đây sẽ đồng bộ TẤT CẢ chart có bộ lọc thời gian riêng (Biến động, Thu/chi theo
+  // danh mục, Hoạt động gần đây, Tổng thu nhập/chi tiêu, Phân tích chi phí) về cùng 1
+  // mốc. Chọn lọc riêng ở từng card thì chỉ card đó đổi.
+  const [globalPeriod, setGlobalPeriod] = useState('month');
+  const [globalYear, setGlobalYear] = useState(new Date().getFullYear());
+  const [globalPeriodKey, setGlobalPeriodKey] = useState(currentPeriodKey());
+  const [globalWeekStart, setGlobalWeekStart] = useState(() => { const d = new Date(); d.setDate(d.getDate() - 6); return d.toISOString().slice(0, 10); });
+  const [globalWeekEnd, setGlobalWeekEnd] = useState(() => new Date().toISOString().slice(0, 10));
+  function applyGlobalPeriod(val) {
+    setGlobalPeriod(val);
+    const y = new Date().getFullYear();
+    const m = new Date().getMonth() + 1;
+    const pk = currentPeriodKey();
+    allCardFilters.forEach((f) => {
+      f.setPeriod(val);
+      if (val === 'year') f.setYear(y);
+      if (val === 'month') { f.setYear(y); f.setPeriodKey(pk); }
+      if (val === 'week') { f.setWeekStart(globalWeekStart); f.setWeekEnd(globalWeekEnd); }
+    });
+    if (val === 'week') {
+      setRecentTxFilter('7d');
+    } else if (val === 'month') {
+      setGlobalYear(y);
+      setGlobalPeriodKey(pk);
+      setRecentTxFilter('month');
+      setIncomeTotalsMonth(m);
+      setIncomeTotalsYear(y);
+      setExpenseTotalsMonth(m);
+      setExpenseTotalsYear(y);
+    } else if (val === 'year') {
+      setGlobalYear(y);
+      setRecentTxFilter('year');
+      setIncomeTotalsMonth('all');
+      setIncomeTotalsYear(y);
+      setExpenseTotalsMonth('all');
+      setExpenseTotalsYear(y);
+    }
+  }
+  function GlobalPeriodWidget({ className = '', wrapClassName = '', inactiveClass = 'text-steel dark:text-light-grey' }) {
+    return (
+      <div className={`flex items-center gap-1.5 flex-wrap justify-end ${className}`}>
+        <div className={`flex backdrop-blur-md rounded-full p-0.5 flex-shrink-0 ${wrapClassName || 'bg-white/50 dark:bg-white/10'}`}>
+          {[{ k: 'week', l: 'Tuần' }, { k: 'month', l: 'Tháng' }, { k: 'year', l: 'Năm' }].map((p) => (
+            <button
+              key={p.k}
+              onClick={() => applyGlobalPeriod(p.k)}
+              title="Áp dụng cho tất cả chart trong Dashboard"
+              className={`px-3 py-1.5 rounded-full text-xs font-bold transition ${globalPeriod === p.k ? 'bg-turquoise text-white shadow' : inactiveClass}`}
+            >
+              {p.l}
+            </button>
+          ))}
+        </div>
+        {globalPeriod === 'week' && (
+          <div className="flex items-center gap-1.5">
+            <DateField value={globalWeekStart} max={globalWeekEnd} showIcon={false} clearable={false}
+              onChange={(v) => { setGlobalWeekStart(v); allCardFilters.forEach((f) => f.setWeekStart(v)); }}
+              className="bg-white/50 dark:bg-white/10 rounded-full text-xs font-bold px-2.5 py-1.5 text-blueberry dark:text-white" />
+            <span className="text-steel dark:text-light-grey text-xs">-</span>
+            <DateField value={globalWeekEnd} align="right" max={new Date().toISOString().slice(0, 10)} showIcon={false} clearable={false}
+              onChange={(v) => { setGlobalWeekEnd(v); allCardFilters.forEach((f) => f.setWeekEnd(v)); }}
+              className="bg-white/50 dark:bg-white/10 rounded-full text-xs font-bold px-2.5 py-1.5 text-blueberry dark:text-white" />
+          </div>
+        )}
+        {globalPeriod === 'year' && (
+          <CustomSelect value={globalYear} onChange={(e) => { const y = Number(e.target.value); setGlobalYear(y); allCardFilters.forEach((f) => f.setYear(y)); }}
+            triggerClassName="bg-white/50 dark:bg-white/10 rounded-full text-xs font-bold px-2.5 py-1.5 outline-none text-blueberry dark:text-white [color-scheme:light] dark:[color-scheme:dark]">
+            {YEAR_OPTIONS.map((y) => <option key={y} value={y}>{y}</option>)}
+          </CustomSelect>
+        )}
+      </div>
+    );
+  }
   const fundCategories = categories.filter((c) => c.is_fund);
   const expenseCats = categories.filter((c) => c.type === 'expense');
   const incomeCats = categories.filter((c) => c.type === 'income');
@@ -2994,106 +3184,62 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
   const palette = ['#0DBACC', '#74ACEF', '#F18AB5', '#9F7FE0', '#B4F1F1', '#C1DDFF', '#FFCDDB', '#E3D6FF'];
   const weekDayLabels = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'];
 
-  const breakdownBuckets = (() => {
-    if (breakdownPeriod === 'week') {
-      const todayEnd = new Date(); todayEnd.setHours(23, 59, 59, 999);
-      return Array.from({ length: 7 }, (_, i) => {
-        const end = new Date(todayEnd); end.setDate(end.getDate() - (6 - i));
-        const start = new Date(end); start.setHours(0, 0, 0, 0);
-        return { label: weekDayLabels[start.getDay()], start, end };
-      });
-    }
-    if (breakdownPeriod === 'year') {
-      return Array.from({ length: 12 }, (_, i) => ({
-        label: `Th${i + 1}`,
-        start: new Date(breakdownYear, i, 1, 0, 0, 0),
-        end: new Date(breakdownYear, i + 1, 0, 23, 59, 59),
-      }));
-    }
-    const { start: periodStart, end: periodEnd } = periodKeyToRange(breakdownPeriodKey);
-    const totalDays = Math.round((periodEnd - periodStart) / 86400000) + 1;
-    const chunks = 5;
-    const base = Math.floor(totalDays / chunks) || 1;
-    const cursor = new Date(periodStart);
-    const buckets = [];
-    for (let i = 0; i < chunks; i++) {
-      const daysInChunk = i === chunks - 1 ? totalDays - base * (chunks - 1) : base;
-      const start = new Date(cursor);
-      const end = new Date(cursor); end.setDate(end.getDate() + daysInChunk - 1); end.setHours(23, 59, 59, 999);
-      buckets.push({ label: `${start.getDate()}-${end.getDate()}`, start, end });
-      cursor.setDate(cursor.getDate() + daysInChunk);
-    }
-    return buckets;
-  })();
+  // Buckets + chuỗi số liệu cho từng card — mỗi card dùng bộ lọc thời gian độc lập
+  // của riêng nó (mobileComboFilter / incomeCardFilter / expenseCardFilter / costFilter).
+  const mobileBuckets = computePeriodBuckets(mobileComboFilter);
+  const mobileIncomeSeries = buildCategorySeriesFor(transactions, incomeCats, 'income', mobileBuckets, mobileComboFilter.period, mobileComboFilter.periodKey, mobileComboFilter.year);
+  const mobileExpenseSeries = buildCategorySeriesFor(transactions, expenseCats, 'expense', mobileBuckets, mobileComboFilter.period, mobileComboFilter.periodKey, mobileComboFilter.year);
+  const mobileMaxIncome = Math.max(...mobileIncomeSeries.flatMap((c) => c.values), 1);
+  const mobileMaxExpense = Math.max(...mobileExpenseSeries.flatMap((c) => c.values), 1);
 
-  function buildCategorySeries(cats, txType) {
-    const isPeriodMode = breakdownPeriod === 'month';
-    const isYearMode = breakdownPeriod === 'year';
-    return cats
-      .map((c) => {
-        let catTx = transactions.filter((t) => t.category_id === c.id && t.type === txType);
-        if (isPeriodMode) catTx = catTx.filter((t) => transactionPeriodKey(t) === breakdownPeriodKey);
-        const values = breakdownBuckets.map((b, bi) => catTx.filter((t) => {
-          if (isYearMode) {
-            const [py, pm] = transactionPeriodKey(t).split('-').map(Number);
-            return py === breakdownYear && pm === bi + 1;
-          }
-          const d = new Date(t.date || t.created_at);
-          if (!isPeriodMode) return d >= b.start && d <= b.end;
-          if (d < breakdownBuckets[0].start) return bi === 0;
-          if (d > breakdownBuckets[breakdownBuckets.length - 1].end) return bi === breakdownBuckets.length - 1;
-          return d >= b.start && d <= b.end;
-        }).reduce((s, t) => s + Number(t.amount), 0));
-        return { ...c, values, total: values.reduce((s, v) => s + v, 0) };
-      })
-      .filter((c) => c.total > 0)
-      .sort((a, b) => b.total - a.total);
-  }
-  const incomeSeries = buildCategorySeries(incomeCats, 'income');
-  const expenseSeries = buildCategorySeries(expenseCats, 'expense');
-  const maxIncomeBucketVal = Math.max(...incomeSeries.flatMap((c) => c.values), 1);
-  const maxExpenseBucketVal = Math.max(...expenseSeries.flatMap((c) => c.values), 1);
+  const incomeCardBuckets = computePeriodBuckets(incomeCardFilter);
+  const incomeCardSeries = buildCategorySeriesFor(transactions, incomeCats, 'income', incomeCardBuckets, incomeCardFilter.period, incomeCardFilter.periodKey, incomeCardFilter.year);
+  const incomeCardMax = Math.max(...incomeCardSeries.flatMap((c) => c.values), 1);
+
+  const expenseCardBuckets = computePeriodBuckets(expenseCardFilter);
+  const expenseCardSeries = buildCategorySeriesFor(transactions, expenseCats, 'expense', expenseCardBuckets, expenseCardFilter.period, expenseCardFilter.periodKey, expenseCardFilter.year);
+  const expenseCardMax = Math.max(...expenseCardSeries.flatMap((c) => c.values), 1);
+
+  // Card "Phân tích chi phí" — cột là từng loại chi tiêu (mỗi loại 1 màu), đường là
+  // xu hướng thu nhập tổng, cùng lọc theo costFilter (Tuần/Tháng/Năm) riêng của card.
+  const costBuckets = computePeriodBuckets(costFilter);
+  const costExpenseSeries = buildCategorySeriesFor(transactions, expenseCats, 'expense', costBuckets, costFilter.period, costFilter.periodKey, costFilter.year);
+  const costIncomeTotals = bucketTotalsFor(transactions, 'income', costBuckets, costFilter.period, costFilter.periodKey, costFilter.year);
+  const costMaxVal = Math.max(...costExpenseSeries.flatMap((c) => c.values), ...costIncomeTotals, 1);
 
   // Ledger modal ("Xem chi tiết") cho 2 card "Thu nhập/Chi tiêu theo danh mục" — cùng
   // TxLedgerModal đang dùng ở màn Báo cáo, lấy đúng danh sách giao dịch thô đang được
-  // lọc theo bộ lọc Tuần/Tháng/Năm (breakdownPeriod) hiện tại của 2 chart này.
+  // lọc theo bộ lọc thời gian riêng của từng card.
   const [ledgerModal, setLedgerModal] = useState(null); // { title, txs } | null
-  function breakdownFilteredTxs(txType) {
-    let txs = transactions.filter((t) => t.type === txType);
-    if (breakdownPeriod === 'month') {
-      txs = txs.filter((t) => transactionPeriodKey(t) === breakdownPeriodKey);
-    } else if (breakdownPeriod === 'year') {
-      txs = txs.filter((t) => Number(transactionPeriodKey(t).split('-')[0]) === breakdownYear);
-    } else {
-      const rangeStart = breakdownBuckets[0].start, rangeEnd = breakdownBuckets[breakdownBuckets.length - 1].end;
-      txs = txs.filter((t) => { const d = new Date(t.date || t.created_at); return d >= rangeStart && d <= rangeEnd; });
-    }
-    return txs;
-  }
-  const breakdownLabel = breakdownPeriod === 'month'
-    ? `Kỳ ${Number(breakdownPeriodKey.split('-')[1])}/${breakdownYear}`
-    : breakdownPeriod === 'year' ? `Năm ${breakdownYear}` : '7 ngày gần đây';
 
-  function PeriodControls() {
+  function PeriodControlsFor({ filter }) {
+    const periodOptions = buildPeriods(filter.year);
     return (
       <div className="flex items-center gap-2 flex-wrap justify-end">
         <div className="flex bg-ice-cream dark:bg-night-sky rounded-full p-0.5">
           {[{ k: 'week', l: 'Tuần' }, { k: 'month', l: 'Tháng' }, { k: 'year', l: 'Năm' }].map((p) => (
-            <button key={p.k} onClick={() => setBreakdownPeriod(p.k)} className={`px-2.5 py-1 rounded-full text-xs font-bold ${breakdownPeriod === p.k ? 'bg-white dark:bg-[#2a2a44] shadow text-turquoise' : 'text-steel dark:text-light-grey'}`}>{p.l}</button>
+            <button key={p.k} onClick={() => filter.setPeriod(p.k)} className={`px-2.5 py-1 rounded-full text-xs font-bold ${filter.period === p.k ? 'bg-white dark:bg-[#2a2a44] shadow text-turquoise' : 'text-steel dark:text-light-grey'}`}>{p.l}</button>
           ))}
         </div>
-        {breakdownPeriod === 'year' && (
-          <CustomSelect value={breakdownYear} onChange={(e) => setBreakdownYear(Number(e.target.value))} className="" triggerClassName="bg-ice-cream dark:bg-night-sky rounded-full text-xs font-bold px-2.5 py-1.5 outline-none text-blueberry dark:text-white [color-scheme:light] dark:[color-scheme:dark]">
-            {breakdownYearOptions.map((y) => <option key={y} value={y}>{y}</option>)}
+        {filter.period === 'week' && (
+          <div className="flex items-center gap-1.5">
+            <DateField value={filter.weekStart} onChange={filter.setWeekStart} max={filter.weekEnd} showIcon={false} clearable={false} className="bg-ice-cream dark:bg-night-sky rounded-full text-xs font-bold px-2.5 py-1.5 text-blueberry dark:text-white" />
+            <span className="text-steel dark:text-light-grey text-xs">-</span>
+            <DateField value={filter.weekEnd} onChange={filter.setWeekEnd} align="right" max={new Date().toISOString().slice(0, 10)} showIcon={false} clearable={false} className="bg-ice-cream dark:bg-night-sky rounded-full text-xs font-bold px-2.5 py-1.5 text-blueberry dark:text-white" />
+          </div>
+        )}
+        {filter.period === 'year' && (
+          <CustomSelect value={filter.year} onChange={(e) => filter.setYear(Number(e.target.value))} className="" triggerClassName="bg-ice-cream dark:bg-night-sky rounded-full text-xs font-bold px-2.5 py-1.5 outline-none text-blueberry dark:text-white [color-scheme:light] dark:[color-scheme:dark]">
+            {YEAR_OPTIONS.map((y) => <option key={y} value={y}>{y}</option>)}
           </CustomSelect>
         )}
-        {breakdownPeriod === 'month' && (
+        {filter.period === 'month' && (
           <>
-            <CustomSelect value={breakdownYear} onChange={(e) => { const y = Number(e.target.value); setBreakdownYear(y); setBreakdownPeriodKey(`${y}-${breakdownPeriodKey.split('-')[1]}`); }} className="" triggerClassName="bg-ice-cream dark:bg-night-sky rounded-full text-xs font-bold px-2.5 py-1.5 outline-none text-blueberry dark:text-white [color-scheme:light] dark:[color-scheme:dark]">
-              {breakdownYearOptions.map((y) => <option key={y} value={y}>{y}</option>)}
+            <CustomSelect value={filter.year} onChange={(e) => { const y = Number(e.target.value); filter.setYear(y); filter.setPeriodKey(`${y}-${filter.periodKey.split('-')[1]}`); }} className="" triggerClassName="bg-ice-cream dark:bg-night-sky rounded-full text-xs font-bold px-2.5 py-1.5 outline-none text-blueberry dark:text-white [color-scheme:light] dark:[color-scheme:dark]">
+              {YEAR_OPTIONS.map((y) => <option key={y} value={y}>{y}</option>)}
             </CustomSelect>
-            <CustomSelect value={breakdownPeriodKey} onChange={(e) => setBreakdownPeriodKey(e.target.value)} className="" triggerClassName="bg-ice-cream dark:bg-night-sky rounded-full text-xs font-bold px-2.5 py-1.5 outline-none text-blueberry dark:text-white [color-scheme:light] dark:[color-scheme:dark]">
-              {breakdownPeriodOptions.map((p) => <option key={p.key} value={p.key}>{`Kỳ ${Number(p.key.split('-')[1])}`}</option>)}
+            <CustomSelect value={filter.periodKey} onChange={(e) => filter.setPeriodKey(e.target.value)} className="" triggerClassName="bg-ice-cream dark:bg-night-sky rounded-full text-xs font-bold px-2.5 py-1.5 outline-none text-blueberry dark:text-white [color-scheme:light] dark:[color-scheme:dark] max-w-[190px]">
+              {periodOptions.map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
             </CustomSelect>
           </>
         )}
@@ -3101,12 +3247,12 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
     );
   }
 
-  function CategoryBarChart({ series, maxVal }) {
+  function CategoryBarChart({ series, maxVal, buckets }) {
     if (series.length === 0) return null;
     return (
       <div>
         <div className="flex items-end gap-3 overflow-x-auto pb-1 scrollbar-hide" style={{ height: 130 }}>
-          {breakdownBuckets.map((b, bi) => (
+          {buckets.map((b, bi) => (
             <div key={bi} className="flex flex-col items-center justify-end h-full flex-shrink-0" style={{ minWidth: series.length * 9 + 10 }}>
               <div className="flex items-end gap-1 h-full">
                 {series.map((c, i) => {
@@ -3131,9 +3277,77 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
     );
   }
 
+  // Biểu đồ kết hợp cột + đường cho card "Phân tích chi phí": mỗi loại chi tiêu là 1
+  // cột màu riêng theo từng mốc thời gian, đường liền là xu hướng tổng thu nhập. Rê
+  // chuột vào cột hoặc điểm trên đường để xem số liệu (dùng <title> — tooltip mặc định
+  // của trình duyệt).
+  function IncomeExpenseComboChart({ buckets, series, incomeTotals, maxVal }) {
+    if (buckets.length === 0) return null;
+    const bucketW = 52;
+    const chartH = 128;
+    const vbWidth = Math.max(buckets.length * bucketW, 200);
+    const barW = 7, barGap = 3;
+    const groupCenterX = (bi) => bi * bucketW + bucketW / 2;
+    const valueY = (v) => chartH - (v / maxVal) * chartH;
+    const linePoints = incomeTotals.map((v, bi) => `${groupCenterX(bi)},${valueY(v)}`).join(' ');
+    return (
+      <div>
+        <div className="relative" style={{ height: chartH + 28 }}>
+          <svg width="100%" height={chartH} viewBox={`0 0 ${vbWidth} ${chartH}`} preserveAspectRatio="none" className="absolute top-0 left-0 w-full" style={{ height: chartH }}>
+            {series.map((c, i) => buckets.map((b, bi) => {
+              const v = c.values[bi];
+              if (!v) return null;
+              const groupWidth = series.length * barW + (series.length - 1) * barGap;
+              const startX = groupCenterX(bi) - groupWidth / 2;
+              const x = startX + i * (barW + barGap);
+              const y = valueY(v);
+              return (
+                <rect key={`${c.id}-${bi}`} x={x} y={y} width={barW} height={Math.max(chartH - y, v > 0 ? 2 : 0)} rx={1.5} fill={palette[i % palette.length]}>
+                  <title>{`${c.name} (${b.label}): ${formatMoney(v)}`}</title>
+                </rect>
+              );
+            }))}
+            <polyline points={linePoints} fill="none" stroke="#0DBACC" strokeWidth="2" vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeLinejoin="round" />
+            {incomeTotals.map((v, bi) => (
+              <circle key={bi} cx={groupCenterX(bi)} cy={valueY(v)} r="3.2" fill="#0DBACC" stroke="white" strokeWidth="1.2">
+                <title>{`Thu nhập (${buckets[bi].label}): ${formatMoney(v)}`}</title>
+              </circle>
+            ))}
+          </svg>
+          <div className="absolute left-0 right-0" style={{ top: chartH + 6, width: '100%' }}>
+            <div className="relative" style={{ height: 16 }}>
+              {buckets.map((b, bi) => (
+                <span key={bi} className="absolute text-[10px] text-steel dark:text-light-grey whitespace-nowrap" style={{ left: `${(groupCenterX(bi) / vbWidth) * 100}%`, transform: 'translateX(-50%)' }}>{b.label}</span>
+              ))}
+            </div>
+          </div>
+        </div>
+        <div className="flex items-center gap-4 mt-3 text-xs flex-wrap">
+          <span className="flex items-center gap-1.5 text-steel dark:text-light-grey font-semibold"><span className="w-3 h-0.5 rounded-full bg-turquoise inline-block" />Xu hướng thu nhập</span>
+        </div>
+        <div className="flex flex-col gap-1.5 mt-3">
+          {series.map((c, i) => (
+            <div key={c.id} className="flex items-center gap-2">
+              <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: palette[i % palette.length] }} />
+              <span className="text-blueberry dark:text-white text-xs truncate flex-1 min-w-0 font-semibold">{c.name}</span>
+              <span className="text-blueberry dark:text-white text-xs font-bold flex-shrink-0">{formatMoney(c.total)}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
   const totalFunds = fundCategories.reduce((s, c) => s + fundBalanceWithProfit(c, transactions), 0);
   const totalAccounts = accounts.reduce((s, a) => s + accountBalance(a, transactions), 0);
   const totalAssets = totalFunds + totalAccounts;
+
+  // Danh sách chi tiết cho popup hover ở khối "Tổng quan tài sản" — cùng cách tính với
+  // "báo cáo" (Report) để số liệu khớp nhau, chỉ khác là lấy số dư HIỆN TẠI thay vì
+  // số dư cuối kỳ đã chọn.
+  const overviewWalletItems = accounts.filter((a) => a.type !== 'gold').map((a) => ({ key: a.id, name: a.name, amount: accountBalance(a, transactions) }));
+  const overviewGoldItems = accounts.filter((a) => a.type === 'gold').map((a) => ({ key: a.id, name: a.name, amount: accountBalance(a, transactions) }));
+  const overviewFundItems = fundCategories.map((c) => ({ key: c.id, name: c.name, amount: fundBalanceWithProfit(c, transactions) }));
 
   const now = new Date();
   const curPeriodKey = currentPeriodKey(now);
@@ -3179,6 +3393,32 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
   const last7Start = Math.max(0, todayOffset - 6);
   const last7 = Array.from({ length: todayOffset - last7Start + 1 }, (_, i) => last7Start + i);
   const last7Date = (offset) => { const d = new Date(curPeriodStart); d.setDate(d.getDate() + offset); return d; };
+
+  // Buckets cho chart "Biến động" ở Tổng quan tài sản — đi theo globalPeriod (Tuần/Tháng/Năm)
+  // của widget lọc chung, thay vì luôn cố định 7 ngày gần nhất.
+  const trendBuckets = (() => {
+    if (globalPeriod === 'year') {
+      return Array.from({ length: 12 }, (_, i) => {
+        const inc = transactions.filter((t) => t.type === 'income' && new Date(t.date || t.created_at).getFullYear() === globalYear && new Date(t.date || t.created_at).getMonth() === i).reduce((s, t) => s + Number(t.amount), 0);
+        const exp = transactions.filter((t) => t.type === 'expense' && new Date(t.date || t.created_at).getFullYear() === globalYear && new Date(t.date || t.created_at).getMonth() === i).reduce((s, t) => s + Number(t.amount), 0);
+        return { label: `Th${i + 1}`, inc, exp };
+      });
+    }
+    if (globalPeriod === 'month') {
+      return Array.from({ length: daysInMonth }, (_, i) => ({ label: String(last7Date(i).getDate()), inc: dailyIncome[i] || 0, exp: dailySpend[i] || 0 }));
+    }
+    // week: theo khoảng ngày -> ngày người dùng chọn (globalWeekStart -> globalWeekEnd),
+    // không còn cố định 7 ngày gần nhất.
+    const wBuckets = computePeriodBuckets({ period: 'week', weekStart: globalWeekStart, weekEnd: globalWeekEnd });
+    return wBuckets.map((b) => ({
+      label: b.label,
+      inc: transactions.filter((t) => t.type === 'income' && new Date(t.date || t.created_at) >= b.start && new Date(t.date || t.created_at) <= b.end).reduce((s, t) => s + Number(t.amount), 0),
+      exp: transactions.filter((t) => t.type === 'expense' && new Date(t.date || t.created_at) >= b.start && new Date(t.date || t.created_at) <= b.end).reduce((s, t) => s + Number(t.amount), 0),
+    }));
+  })();
+  const maxTrend = Math.max(...trendBuckets.map((b) => Math.max(b.inc, b.exp)), 1);
+  const fmtDMY = (iso) => { const [y, m, d] = String(iso).split('-'); return `${d}/${m}`; };
+  const trendTitle = globalPeriod === 'year' ? `Biến động theo tháng (Năm ${globalYear})` : globalPeriod === 'month' ? 'Biến động theo ngày (kỳ hiện tại)' : `Biến động theo ngày (${fmtDMY(globalWeekStart)} - ${fmtDMY(globalWeekEnd)})`;
 
   const totalMonthlyLimit = categories.filter((c) => c.type === 'expense' && c.monthly_limit).reduce((s, c) => s + Number(c.monthly_limit), 0);
   const limitPct = totalMonthlyLimit > 0 ? (expenseThisMonth / totalMonthlyLimit) * 100 : 0;
@@ -3346,6 +3586,9 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
             <AvatarMenu avatarUrl={avatarUrl} displayName={displayName} openSettings={openSettings || (() => setScreen('settings'))} variant="mobile" />
           </div>
           <div className="px-5 mt-4">
+            <GlobalPeriodWidget wrapClassName="bg-white/15" inactiveClass="text-white/70" />
+          </div>
+          <div className="px-5 mt-4">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <p className="text-white/70 text-xs font-semibold">Tổng tài sản</p>
@@ -3455,15 +3698,15 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
             <div className="mt-6">
               <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
                 <h2 className="text-blueberry dark:text-white font-extrabold text-lg">Thu/chi theo danh mục</h2>
-                <PeriodControls />
+                <PeriodControlsFor filter={mobileComboFilter} />
               </div>
               <p className="text-steel dark:text-light-grey text-xs font-bold mb-2">Thu nhập</p>
-              {incomeSeries.length === 0 ? <p className="text-steel dark:text-light-grey text-xs mb-4">Chưa có thu nhập trong khoảng này.</p> : (
-                <div className="mb-5"><CategoryBarChart series={incomeSeries} maxVal={maxIncomeBucketVal} /></div>
+              {mobileIncomeSeries.length === 0 ? <p className="text-steel dark:text-light-grey text-xs mb-4">Chưa có thu nhập trong khoảng này.</p> : (
+                <div className="mb-5"><CategoryBarChart series={mobileIncomeSeries} maxVal={mobileMaxIncome} buckets={mobileBuckets} /></div>
               )}
               <p className="text-steel dark:text-light-grey text-xs font-bold mb-2">Chi tiêu</p>
-              {expenseSeries.length === 0 ? <p className="text-steel dark:text-light-grey text-xs">Chưa có chi tiêu trong khoảng này.</p> : (
-                <CategoryBarChart series={expenseSeries} maxVal={maxExpenseBucketVal} />
+              {mobileExpenseSeries.length === 0 ? <p className="text-steel dark:text-light-grey text-xs">Chưa có chi tiêu trong khoảng này.</p> : (
+                <CategoryBarChart series={mobileExpenseSeries} maxVal={mobileMaxExpense} buckets={mobileBuckets} />
               )}
             </div>
 
@@ -3511,9 +3754,12 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
         <div className="frost-blob z-0 w-80 h-80 bg-lavender-light/70 dark:bg-lavender/22 top-64 -left-10" />
         <div className="relative flex items-center justify-between mb-6">
           <h1 className="text-blueberry dark:text-white text-2xl font-extrabold">Dashboard</h1>
-          <button onClick={() => setShowAddWidget(true)} className="bg-gradient-primary text-white rounded-full pl-3 pr-4 py-2 text-sm font-bold flex items-center gap-1.5 shadow-md shadow-turquoise/30">
-            <Plus size={15} /> Thêm widget
-          </button>
+          <div className="flex items-center gap-2">
+            <GlobalPeriodWidget />
+            <button onClick={() => setShowAddWidget(true)} className="bg-gradient-primary text-white rounded-full pl-3 pr-4 py-2 text-sm font-bold flex items-center gap-1.5 shadow-md shadow-turquoise/30">
+              <Plus size={15} /> Thêm widget
+            </button>
+          </div>
         </div>
         <div
           className="relative grid gap-6"
@@ -3522,47 +3768,48 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
             gridTemplateAreas: `
               "chart chart right"
               "incexp incexp right"
-              "cost health goal"
+              "cost cost goal"
             `,
           }}
         >
-          <div style={{ gridArea: 'chart' }} className="frost-card rounded-3xl p-6">
+          <div
+            style={{ gridArea: 'chart' }}
+            onMouseEnter={() => setAssetOverviewHovered(true)}
+            onMouseLeave={() => setAssetOverviewHovered(false)}
+            className={`frost-card rounded-3xl p-6 relative ${assetOverviewHovered ? 'z-50' : 'z-0'}`}
+          >
             <p className="text-blueberry dark:text-white font-extrabold mb-4">Tổng quan tài sản</p>
             <div className="grid grid-cols-3 gap-4 mb-6">
-              <div>
+              <HoverDetailCard detail={<BreakdownDetailList title="Tiền ví" items={[...overviewWalletItems, ...overviewGoldItems]} total={totalAccounts} colorClass="text-blueberry dark:text-white" />}>
                 <p className="text-steel dark:text-light-grey text-xs font-semibold mb-1">Tiền ví</p>
                 <p className="text-xl font-bold text-blueberry dark:text-white">{formatMoney(totalAccounts)}</p>
-              </div>
-              <div>
+              </HoverDetailCard>
+              <HoverDetailCard detail={<BreakdownDetailList title="Tiền quỹ" items={overviewFundItems} total={totalFunds} colorClass="text-blueberry dark:text-white" />}>
                 <p className="text-steel dark:text-light-grey text-xs font-semibold mb-1">Tiền quỹ</p>
                 <p className="text-xl font-bold text-blueberry dark:text-white">{formatMoney(totalFunds)}</p>
-              </div>
-              <div>
+              </HoverDetailCard>
+              <HoverDetailCard align="right" detail={<AssetBreakdownDetail wallets={overviewWalletItems} funds={overviewFundItems} gold={overviewGoldItems} total={totalAssets} />}>
                 <p className="text-steel dark:text-light-grey text-xs font-semibold mb-1">Tổng cộng</p>
                 <p className="text-xl font-bold text-turquoise">{formatMoney(totalAssets)}</p>
-              </div>
+              </HoverDetailCard>
             </div>
             <div className="flex items-center justify-between mb-1">
-              <p className="text-steel dark:text-light-grey text-xs font-semibold">Biến động theo ngày (7 ngày gần nhất)</p>
+              <p className="text-steel dark:text-light-grey text-xs font-semibold">{trendTitle}</p>
               <div className="flex items-center gap-4 text-xs">
                 <span className="flex items-center gap-1.5 text-steel dark:text-light-grey font-semibold"><span className="w-2.5 h-2.5 rounded-full bg-turquoise" />Thu nhập</span>
                 <span className="flex items-center gap-1.5 text-steel dark:text-light-grey font-semibold"><span className="w-2.5 h-2.5 rounded-full bg-cotton-candy" />Chi tiêu</span>
               </div>
             </div>
-            <div className="flex items-end gap-3 mt-4 h-32">
-              {last7.map((offset, i) => {
-                const inc = dailyIncome[offset] || 0;
-                const exp = dailySpend[offset] || 0;
-                return (
-                  <div key={i} className="flex-1 flex flex-col items-center gap-1 h-full justify-end">
-                    <div className="w-full flex items-end gap-1 h-full">
-                      <div className="flex-1 bg-turquoise rounded-t-lg" style={{ height: `${(inc / maxDaily) * 100}%`, minHeight: inc > 0 ? 4 : 0 }} />
-                      <div className="flex-1 bg-cotton-candy rounded-t-lg" style={{ height: `${(exp / maxDaily) * 100}%`, minHeight: exp > 0 ? 4 : 0 }} />
-                    </div>
-                    <span className="text-[11px] text-steel dark:text-light-grey">{weekDayLabels[last7Date(offset).getDay()]}</span>
+            <div className="flex items-end gap-3 mt-4 h-32 overflow-x-auto scrollbar-hide">
+              {trendBuckets.map((b, i) => (
+                <div key={i} className="flex-1 flex flex-col items-center gap-1 h-full justify-end" style={{ minWidth: trendBuckets.length > 12 ? 22 : undefined }}>
+                  <div className="w-full flex items-end gap-1 h-full">
+                    <div className="flex-1 bg-turquoise rounded-t-lg" style={{ height: `${(b.inc / maxTrend) * 100}%`, minHeight: b.inc > 0 ? 4 : 0 }} />
+                    <div className="flex-1 bg-cotton-candy rounded-t-lg" style={{ height: `${(b.exp / maxTrend) * 100}%`, minHeight: b.exp > 0 ? 4 : 0 }} />
                   </div>
-                );
-              })}
+                  <span className="text-[11px] text-steel dark:text-light-grey whitespace-nowrap">{b.label}</span>
+                </div>
+              ))}
             </div>
           </div>
 
@@ -3673,8 +3920,23 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
                     <option value="month">Tháng</option>
                     <option value="year">Năm</option>
                   </CustomSelect>
-                  <button onClick={() => setScreen('report')} title="Xem chi tiết" className="w-7 h-7 rounded-full flex items-center justify-center text-turquoise hover:bg-turquoise/10 transition flex-shrink-0">
-                    <Eye size={15} />
+                  <button
+                    onClick={() => {
+                      setScreen('report');
+                      // Nhảy thẳng tới khối "Hoạt động gần đây" trong màn Báo cáo, không cần
+                      // người dùng tự cuộn lên tìm — đợi 1 nhịp để Report render xong rồi mới
+                      // scrollIntoView (bản mobile/desktop của Report cùng tồn tại trong DOM,
+                      // chỉ khác CSS ẩn/hiện, nên tìm khối đang thực sự hiển thị mà cuộn tới).
+                      setTimeout(() => {
+                        const targets = document.querySelectorAll('[data-report-anchor="recent-activity"]');
+                        const visible = Array.from(targets).find((el) => el.offsetParent !== null);
+                        (visible || targets[0])?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                      }, 100);
+                    }}
+                    title="Xem chi tiết"
+                    className="w-7 h-7 rounded-full flex items-center justify-center text-turquoise hover:bg-turquoise/10 transition flex-shrink-0"
+                  >
+                    <ChevronRight size={16} />
                   </button>
                 </div>
               </div>
@@ -3786,43 +4048,13 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
           </div>
 
           <div style={{ gridArea: 'cost' }} className="frost-card rounded-3xl p-6">
-            <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
               <h3 className="text-blueberry dark:text-white font-extrabold">Phân tích chi phí</h3>
+              <PeriodControlsFor filter={costFilter} />
             </div>
-            {spentByCat.length === 0 ? <p className="text-steel dark:text-light-grey text-sm text-center py-6">Chưa có chi tiêu nào.</p> : (
-              <div className="flex flex-col items-center gap-4">
-                <svg width="120" height="120" viewBox="0 0 150 150" className="-rotate-90 flex-shrink-0">
-                  {spentByCat.map((cat, i) => {
-                    const pct = cat.amount / total; const dash = pct * circumference; const offset = cumulative; cumulative += dash;
-                    return <circle key={cat.id} cx="75" cy="75" r={radius} fill="none" stroke={palette[i % palette.length]} strokeWidth="14" strokeDasharray={`${dash} ${circumference - dash}`} strokeDashoffset={-offset} strokeLinecap="round" />;
-                  })}
-                </svg>
-                <div className="flex flex-col gap-2 text-sm w-full">
-                  {spentByCat.slice(0, 4).map((cat, i) => {
-                    const pct = Math.round((cat.amount / total) * 100);
-                    return (
-                      <div key={cat.id} className="flex items-center gap-2">
-                        <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: palette[i % palette.length] }} />
-                        <span className="text-blueberry dark:text-white truncate font-semibold">{cat.name}</span>
-                        <span className="text-steel dark:text-light-grey text-xs ml-auto">{pct}%</span>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
+            {costExpenseSeries.length === 0 ? <p className="text-steel dark:text-light-grey text-sm text-center py-6">Chưa có chi tiêu nào trong khoảng này.</p> : (
+              <IncomeExpenseComboChart buckets={costBuckets} series={costExpenseSeries} incomeTotals={costIncomeTotals} maxVal={costMaxVal} />
             )}
-          </div>
-
-          <div style={{ gridArea: 'health' }} className="frost-card rounded-3xl p-6 flex flex-col items-center">
-            <h3 className="text-blueberry dark:text-white font-extrabold self-start mb-1">Sức khỏe tài chính</h3>
-            <p className="text-steel dark:text-light-grey text-xs self-start mb-4 font-semibold">Tỷ lệ tiết kiệm</p>
-            <svg width="100" height="100" viewBox="0 0 120 120" className="-rotate-90">
-              <circle cx="60" cy="60" r="50" fill="none" stroke="#E3D6FF" className="dark:stroke-light-grey/20" strokeWidth="12" />
-              <circle cx="60" cy="60" r="50" fill="none" stroke="#0DBACC" strokeWidth="12" strokeLinecap="round"
-                strokeDasharray={`${(savingsRate / 100) * 2 * Math.PI * 50} ${2 * Math.PI * 50}`} />
-            </svg>
-            <p className="text-xl font-bold text-blueberry dark:text-white -mt-14">{Math.round(savingsRate)}%</p>
-            <p className="text-steel dark:text-light-grey text-xs mt-14">Dựa trên tháng này</p>
           </div>
 
           <div style={{ gridArea: 'goal' }} className="frost-card rounded-3xl p-6">
@@ -3854,12 +4086,12 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
             <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
               <h3 className="text-blueberry dark:text-white font-extrabold">Thu nhập theo danh mục</h3>
               <div className="flex items-center gap-2 flex-wrap justify-end">
-                <PeriodControls />
-                <button onClick={() => setLedgerModal({ title: `Thu nhập theo danh mục — ${breakdownLabel}`, txs: breakdownFilteredTxs('income') })} className="text-xs font-bold text-turquoise hover:underline whitespace-nowrap">Xem chi tiết</button>
+                <PeriodControlsFor filter={incomeCardFilter} />
+                <button onClick={() => setLedgerModal({ title: `Thu nhập theo danh mục — ${labelForCardFilter(incomeCardFilter)}`, txs: filteredTxsForCard(transactions, incomeCardFilter, incomeCardBuckets, 'income') })} className="text-xs font-bold text-turquoise hover:underline whitespace-nowrap">Xem chi tiết</button>
               </div>
             </div>
-            {incomeSeries.length === 0 ? <p className="text-steel dark:text-light-grey text-sm text-center py-6">Chưa có thu nhập trong khoảng này.</p> : (
-              <CategoryBarChart series={incomeSeries} maxVal={maxIncomeBucketVal} />
+            {incomeCardSeries.length === 0 ? <p className="text-steel dark:text-light-grey text-sm text-center py-6">Chưa có thu nhập trong khoảng này.</p> : (
+              <CategoryBarChart series={incomeCardSeries} maxVal={incomeCardMax} buckets={incomeCardBuckets} />
             )}
           </div>
 
@@ -3867,12 +4099,12 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
             <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
               <h3 className="text-blueberry dark:text-white font-extrabold">Chi tiêu theo danh mục</h3>
               <div className="flex items-center gap-2 flex-wrap justify-end">
-                <PeriodControls />
-                <button onClick={() => setLedgerModal({ title: `Chi tiêu theo danh mục — ${breakdownLabel}`, txs: breakdownFilteredTxs('expense') })} className="text-xs font-bold text-cotton-candy hover:underline whitespace-nowrap">Xem chi tiết</button>
+                <PeriodControlsFor filter={expenseCardFilter} />
+                <button onClick={() => setLedgerModal({ title: `Chi tiêu theo danh mục — ${labelForCardFilter(expenseCardFilter)}`, txs: filteredTxsForCard(transactions, expenseCardFilter, expenseCardBuckets, 'expense') })} className="text-xs font-bold text-cotton-candy hover:underline whitespace-nowrap">Xem chi tiết</button>
               </div>
             </div>
-            {expenseSeries.length === 0 ? <p className="text-steel dark:text-light-grey text-sm text-center py-6">Chưa có chi tiêu trong khoảng này.</p> : (
-              <CategoryBarChart series={expenseSeries} maxVal={maxExpenseBucketVal} />
+            {expenseCardSeries.length === 0 ? <p className="text-steel dark:text-light-grey text-sm text-center py-6">Chưa có chi tiêu trong khoảng này.</p> : (
+              <CategoryBarChart series={expenseCardSeries} maxVal={expenseCardMax} buckets={expenseCardBuckets} />
             )}
           </div>
         </div>
@@ -6793,7 +7025,7 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
             ))}
           </div>
 
-          <div className="px-5 mt-4 bg-white dark:bg-[#1e1e32] rounded-3xl shadow-soft p-4">
+          <div data-report-anchor="recent-activity" className="px-5 mt-4 bg-white dark:bg-[#1e1e32] rounded-3xl shadow-soft p-4">
             <h2 className="text-blueberry dark:text-white font-extrabold text-base mb-3">Hoạt động gần đây</h2>
             {allPeriodTxsSorted.length === 0 ? (
               <p className="text-steel dark:text-light-grey text-sm text-center py-4">Không có giao dịch nào trong khoảng thời gian này.</p>
@@ -7196,7 +7428,7 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
           )}
         </div>
 
- <div className="frost-card rounded-3xl p-6 mb-6">
+ <div data-report-anchor="recent-activity" className="frost-card rounded-3xl p-6 mb-6">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-blueberry dark:text-white font-extrabold text-lg">Hoạt động gần đây</h2>
             <span className="text-steel dark:text-light-grey text-xs font-semibold">{periodLabel} · {allPeriodTxsSorted.length} giao dịch</span>
@@ -7306,7 +7538,7 @@ function MainApp({ user, theme, toggleTheme }) {
   async function saveSpendingPoolForPeriod(periodKey, amount) {
     const { error } = await supabase
       .from('period_spending_pool')
-      .upsert({ period_key: periodKey, amount: Number(amount) }, { onConflict: 'period_key' });
+      .upsert({ period_key: periodKey, amount: Number(amount) }, { onConflict: 'user_id,period_key' });
     if (error) { alert('Lỗi lưu Thu nhập được chi: ' + error.message); return false; }
     setSpendingPoolByPeriod((prev) => ({ ...prev, [periodKey]: Number(amount) }));
     return true;
