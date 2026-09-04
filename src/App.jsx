@@ -3518,6 +3518,39 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
     );
   }
 
+  // Biểu đồ cột Thu nhập/Chi tiêu cho card "Tổng quan tài sản" — rê chuột vào từng cột
+  // (xanh = thu nhập, hồng = chi tiêu) để xem số liệu cụ thể theo mốc thời gian, thay vì
+  // chỉ thấy độ cao cột không rõ giá trị.
+  function TrendBarChart({ buckets, maxVal }) {
+    const { tip, wrapRef, showTip, hideTip } = useChartTooltip();
+    return (
+      <div ref={wrapRef} className="relative">
+        <ChartTooltip tip={tip} />
+        <div className="flex items-end gap-3 mt-4 h-32 overflow-x-auto scrollbar-hide">
+          {buckets.map((b, i) => (
+            <div key={i} className="flex-1 flex flex-col items-center gap-1 h-full justify-end" style={{ minWidth: buckets.length > 12 ? 22 : undefined }}>
+              <div className="w-full flex items-end gap-1 h-full">
+                <div
+                  className="flex-1 bg-turquoise rounded-t-lg cursor-default"
+                  style={{ height: `${(b.inc / maxVal) * 100}%`, minHeight: b.inc > 0 ? 4 : 0 }}
+                  onMouseMove={(e) => showTip(e, { label: `Thu nhập (${b.label})`, value: formatMoney(b.inc) })}
+                  onMouseLeave={hideTip}
+                />
+                <div
+                  className="flex-1 bg-cotton-candy rounded-t-lg cursor-default"
+                  style={{ height: `${(b.exp / maxVal) * 100}%`, minHeight: b.exp > 0 ? 4 : 0 }}
+                  onMouseMove={(e) => showTip(e, { label: `Chi tiêu (${b.label})`, value: formatMoney(b.exp) })}
+                  onMouseLeave={hideTip}
+                />
+              </div>
+              <span className="text-[11px] text-steel dark:text-light-grey whitespace-nowrap">{b.label}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
   // Biểu đồ kết hợp cột + đường cho card "Phân tích chi phí": mỗi loại chi tiêu là 1
   // cột màu riêng theo từng mốc thời gian, đường liền là xu hướng tổng thu nhập. Rê
   // chuột vào cột hoặc điểm trên đường để xem tên, số liệu và % (tooltip riêng, thay
@@ -4038,7 +4071,7 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
             style={{ gridArea: 'chart' }}
             onMouseEnter={() => setAssetOverviewHovered(true)}
             onMouseLeave={() => setAssetOverviewHovered(false)}
-            className={`frost-card rounded-3xl p-6 relative ${assetOverviewHovered ? 'z-50' : 'z-0'}`}
+            className={`frost-card rounded-3xl p-6 relative ${assetOverviewHovered ? 'z-[5]' : 'z-0'}`}
           >
             <p className="text-blueberry dark:text-white font-extrabold mb-4">Tổng quan tài sản</p>
             <div className="grid grid-cols-3 gap-4 mb-6">
@@ -4062,17 +4095,7 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
                 <span className="flex items-center gap-1.5 text-steel dark:text-light-grey font-semibold"><span className="w-2.5 h-2.5 rounded-full bg-cotton-candy" />Chi tiêu</span>
               </div>
             </div>
-            <div className="flex items-end gap-3 mt-4 h-32 overflow-x-auto scrollbar-hide">
-              {trendBuckets.map((b, i) => (
-                <div key={i} className="flex-1 flex flex-col items-center gap-1 h-full justify-end" style={{ minWidth: trendBuckets.length > 12 ? 22 : undefined }}>
-                  <div className="w-full flex items-end gap-1 h-full">
-                    <div className="flex-1 bg-turquoise rounded-t-lg" style={{ height: `${(b.inc / maxTrend) * 100}%`, minHeight: b.inc > 0 ? 4 : 0 }} />
-                    <div className="flex-1 bg-cotton-candy rounded-t-lg" style={{ height: `${(b.exp / maxTrend) * 100}%`, minHeight: b.exp > 0 ? 4 : 0 }} />
-                  </div>
-                  <span className="text-[11px] text-steel dark:text-light-grey whitespace-nowrap">{b.label}</span>
-                </div>
-              ))}
-            </div>
+            <TrendBarChart buckets={trendBuckets} maxVal={maxTrend} />
           </div>
 
           <div style={{ gridArea: 'right' }} className="flex flex-col gap-6">
@@ -6509,7 +6532,7 @@ function HoverDetailCard({ className, children, detail, align = 'left' }) {
       // không lộ ra ngoài) — điều này vô tình "nhốt" popup bên dưới vào riêng 1 stacking
       // context của card. Khi popup đang mở, ta nâng hẳn z-index của CHÍNH card cha lên
       // trên các card anh em (và các khối phía dưới) để popup thoát ra hiển thị đúng.
-      className={`relative ${open ? 'z-50' : 'z-0'} ${className || ''}`}
+      className={`relative ${open ? 'z-[5]' : 'z-0'} ${className || ''}`}
       onMouseEnter={() => { if (hasHover) setOpen(true); }}
       onMouseLeave={() => { if (hasHover) setOpen(false); }}
       onClick={() => { if (!hasHover) setOpen((v) => !v); }}
@@ -6804,9 +6827,97 @@ function AssetBreakdownDetail({ wallets, funds, gold, total }) {
   );
 }
 
+// Popup chi tiết cho thẻ "Còn lại": Thu nhập được chi còn lại của kỳ + số dư cuối kỳ
+// của TỪNG quỹ và TỪNG ví (không phải chỉ tổng), bất kể quỹ/ví đó có phát sinh giao
+// dịch trong kỳ hay không.
+function RemainingBreakdownDetail({ pool, funds, wallets, total }) {
+  const Section = ({ label, items }) => (items.length === 0 ? null : (
+    <div className="mb-3 last:mb-0">
+      <p className="text-[10px] font-bold text-steel dark:text-light-grey uppercase tracking-wide mb-1.5">{label}</p>
+      <div className="flex flex-col gap-1.5">
+        {items.map((it) => (
+          <div key={it.key} className="flex items-center justify-between gap-3">
+            <span className="text-blueberry dark:text-white text-sm font-semibold truncate">{it.name}</span>
+            <span className="text-sm font-bold text-blueberry dark:text-white flex-shrink-0">{formatMoney(it.amount)}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  ));
+  return (
+    <div>
+      <p className="text-[11px] font-bold text-steel dark:text-light-grey mb-2 uppercase tracking-wide">Còn lại</p>
+      <div className="mb-3">
+        <p className="text-[10px] font-bold text-steel dark:text-light-grey uppercase tracking-wide mb-1.5">Thu nhập được chi</p>
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-blueberry dark:text-white text-sm font-semibold truncate">Còn lại trong kỳ</span>
+          <span className={`text-sm font-bold flex-shrink-0 ${pool >= 0 ? 'text-turquoise' : 'text-cotton-candy'}`}>{formatMoneySigned(pool)}</span>
+        </div>
+      </div>
+      <Section label="Quỹ" items={funds} />
+      <Section label="Ví" items={wallets} />
+      <div className="flex items-center justify-between border-t border-light-grey/30 dark:border-[rgba(189,189,203,0.15)] pt-2 mt-1">
+        <span className="text-sm font-bold text-blueberry dark:text-white">Tổng còn lại</span>
+        <span className="text-sm font-bold text-blueberry dark:text-white">{formatMoney(total)}</span>
+      </div>
+    </div>
+  );
+}
+
 /* ==============================================================================
    16. REPORT COMPONENT
    ============================================================================== */
+// Biểu đồ cột chồng (Thu nhập / Góp quỹ / Chi tiêu) cho card "Xu hướng theo tháng" ở
+// trang Báo cáo — rê chuột vào từng lớp màu để xem tên và số liệu cụ thể.
+function MonthlyTrendChart({ trendData }) {
+  const { tip, wrapRef, showTip, hideTip } = useChartTooltip();
+  const max = Math.max(...trendData.map((t) => t.income), 1);
+  return (
+    <div ref={wrapRef} className="relative">
+      <ChartTooltip tip={tip} />
+      <div className="h-48 flex items-end gap-2">
+        {trendData.map((d, i) => {
+          const heightInc = (d.income / max) * 100;
+          const heightAlloc = (d.allocation / max) * 100;
+          const heightExp = (d.expenseFromIncome / max) * 100;
+          return (
+            <div key={i} className="flex-1 flex flex-col items-center">
+              <div className="w-full flex flex-col items-center justify-end h-full relative">
+                <div className="absolute bottom-0 w-full flex flex-col items-end" style={{ height: `${heightInc}%` }}>
+                  <div
+                    className="w-full bg-turquoise/30 rounded-t-sm cursor-default"
+                    style={{ height: `${heightExp}%` }}
+                    onMouseMove={(e) => showTip(e, { label: `Chi tiêu (${d.label})`, value: formatMoney(d.expenseFromIncome) })}
+                    onMouseLeave={hideTip}
+                  />
+                  <div
+                    className="w-full bg-turquoise/60 rounded-t-sm cursor-default"
+                    style={{ height: `${heightAlloc}%` }}
+                    onMouseMove={(e) => showTip(e, { label: `Góp quỹ (${d.label})`, value: formatMoney(d.allocation) })}
+                    onMouseLeave={hideTip}
+                  />
+                  <div
+                    className="w-full bg-turquoise rounded-t-sm cursor-default"
+                    style={{ height: `${Math.max(0, heightInc - heightAlloc - heightExp)}%` }}
+                    onMouseMove={(e) => showTip(e, { label: `Thu nhập (${d.label})`, value: formatMoney(d.income) })}
+                    onMouseLeave={hideTip}
+                  />
+                </div>
+              </div>
+              <span className="text-[10px] text-steel dark:text-light-grey mt-1">{d.label}</span>
+            </div>
+          );
+        })}
+      </div>
+      <div className="flex gap-4 mt-2 text-xs">
+        <span className="flex items-center gap-1"><span className="w-3 h-3 bg-turquoise rounded" /> Thu nhập</span>
+        <span className="flex items-center gap-1"><span className="w-3 h-3 bg-turquoise/60 rounded" /> Góp quỹ</span>
+        <span className="flex items-center gap-1"><span className="w-3 h-3 bg-turquoise/30 rounded" /> Chi tiêu</span>
+      </div>
+    </div>
+  );
+}
+
 function Report({ setScreen, transactions, categories, accounts, goals, onAddClick, displayName, avatarUrl, theme, toggleTheme, openSettings, sidebarCollapsed, toggleSidebar, spendingPoolByPeriod, saveSpendingPoolForPeriod, reload, softDelete }) {
   const [editingTx, setEditingTx] = useState(null);
 
@@ -7054,6 +7165,8 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
   const incomeDetailItems = incomeBreakdown.map(c => ({ key: c.id, name: c.name, amount: c.amount }));
   const poolIncomeDetailItems = incomeBreakdown.filter(c => c.include_in_spending_pool !== false).map(c => ({ key: c.id, name: c.name, amount: c.amount }));
   const specialIncomeDetailItems = incomeBreakdown.filter(c => c.include_in_spending_pool === false).map(c => ({ key: c.id, name: c.name, amount: c.amount }));
+  // Các mục cấu thành "Còn lại" của kỳ — luôn liệt kê đủ cả 3 mục (Thu nhập được chi,
+  // Nạp quỹ, Chi tiêu) dù mục đó có phát sinh biến động (giao dịch) trong kỳ hay không.
   const expenseFundWithdrawn = fundCats.map(c => ({
     key: c.id,
     name: c.name,
@@ -7066,6 +7179,11 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
   const assetWalletItems = accounts.filter(a => a.type !== 'gold').map(a => ({ key: a.id, name: a.name, amount: accountBalanceAtDate(a, transactions, end) }));
   const assetGoldItems = accounts.filter(a => a.type === 'gold').map(a => ({ key: a.id, name: a.name, amount: accountBalanceAtDate(a, transactions, end) }));
   const assetFundItems = fundCats.map(c => ({ key: c.id, name: c.name, amount: fundBalanceAtDate(c, transactions, end) }));
+  // "Còn lại" của kỳ = Thu nhập được chi còn lại + số dư cuối kỳ của TỪNG quỹ + TỪNG ví
+  // (không gộp tổng), liệt kê đủ mọi quỹ/ví hiện có, dù kỳ đó quỹ/ví đó có biến động số dư hay không.
+  const remainingWalletTotal = assetWalletItems.reduce((s, w) => s + w.amount, 0);
+  const remainingFundTotal = assetFundItems.reduce((s, f) => s + f.amount, 0);
+  const totalRemainingAll = remaining + remainingFundTotal + remainingWalletTotal;
 
   // Fund data
   const fundData = fundCats.map(c => {
@@ -7296,16 +7414,16 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
                 <span className="text-steel dark:text-light-grey">Tài sản (cuối kỳ)</span><span className="font-bold text-blueberry dark:text-white">{formatMoney(totalAssetsEnd)}</span>
               </HoverDetailCard>
               <HoverDetailCard className="flex justify-between items-center py-1" detail={<BreakdownDetailList title="Tổng thu nhập" items={incomeDetailItems} total={income} colorClass="text-turquoise" onViewDetail={() => setLedgerModal({ title: `Thu nhập — ${periodLabel}`, txs: incomeLedgerTxs })} />}>
-                <span className="text-steel dark:text-light-grey">Thu nhập</span><span className="font-bold text-turquoise">{formatMoney(income)}</span>
+                <span className="text-steel dark:text-light-grey">Thu nhập{specialIncome > 0 && <span className="block text-[10px] text-lavender font-semibold">Trong đó, đặc biệt: {formatMoney(specialIncome)}</span>}</span><span className="font-bold text-turquoise">{formatMoney(income)}</span>
               </HoverDetailCard>
               <HoverDetailCard className="flex justify-between items-center py-1" detail={<BreakdownDetailList title="Thu nhập được chi" items={poolIncomeDetailItems} total={spendingPool} colorClass="text-baby-blue" onViewDetail={() => setLedgerModal({ title: `Thu nhập được chi — ${periodLabel}`, txs: poolIncomeLedgerTxs })} />}>
                 <span className="text-steel dark:text-light-grey">Thu nhập được chi</span><span className="font-bold text-baby-blue">{formatMoney(spendingPool)}</span>
               </HoverDetailCard>
-              <HoverDetailCard className="flex justify-between items-center py-1" detail={<BreakdownDetailList title="Thu nhập đặc biệt" items={specialIncomeDetailItems} total={specialIncome} colorClass="text-lavender" onViewDetail={() => setLedgerModal({ title: `Thu nhập đặc biệt — ${periodLabel}`, txs: specialIncomeLedgerTxs })} />}>
-                <span className="text-steel dark:text-light-grey">Thu nhập đặc biệt</span><span className="font-bold text-lavender">{formatMoney(specialIncome)}</span>
-              </HoverDetailCard>
               <HoverDetailCard className="flex justify-between items-center py-1" detail={<BreakdownDetailList title="Chi tiêu" items={expenseDetailItems} total={totalActualExpense} colorClass="text-cotton-candy" onViewDetail={() => setLedgerModal({ title: `Chi tiêu — ${periodLabel}`, txs: expenseLedgerTxs })} />}>
                 <span className="text-steel dark:text-light-grey">Chi tiêu</span><span className="font-bold text-cotton-candy">{formatMoney(totalActualExpense)}</span>
+              </HoverDetailCard>
+              <HoverDetailCard className="flex justify-between items-center py-1" detail={<RemainingBreakdownDetail pool={remaining} funds={assetFundItems} wallets={assetWalletItems} total={totalRemainingAll} />}>
+                <span className="text-steel dark:text-light-grey">Còn lại</span><span className={`font-bold ${remaining >= 0 ? 'text-turquoise' : 'text-cotton-candy'}`}>{formatMoneySigned(remaining)}</span>
               </HoverDetailCard>
             </div>
           </div>
@@ -7414,11 +7532,10 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
 
  <div className="frost-card rounded-3xl p-6 mb-6">
           <h2 className="text-blueberry dark:text-white font-extrabold text-lg mb-2">Tổng kết {periodLabel}</h2>
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <div><p className="text-steel dark:text-light-grey text-sm">Thu nhập</p><p className="text-xl font-bold text-turquoise">{formatMoney(income)}</p></div>
             <div><p className="text-steel dark:text-light-grey text-sm">Góp quỹ</p><p className="text-xl font-bold text-baby-blue">{formatMoney(allocation)}</p></div>
             <div><p className="text-steel dark:text-light-grey text-sm">Chi tiêu</p><p className="text-xl font-bold text-cotton-candy">{formatMoney(totalActualExpense)}</p></div>
-            <div><p className="text-steel dark:text-light-grey text-sm">Còn lại</p><p className={`text-xl font-bold ${remaining >= 0 ? 'text-turquoise' : 'text-cotton-candy'}`}>{formatMoneySigned(remaining)}</p></div>
             <div><p className="text-steel dark:text-light-grey text-sm">Tài sản cuối kỳ</p><p className="text-xl font-bold text-blueberry dark:text-white">{formatMoney(totalAssetsEnd)}</p></div>
           </div>
           {assetChange !== null && (
@@ -7442,6 +7559,9 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
           >
             <p className="text-steel dark:text-light-grey text-sm font-semibold">Thu nhập</p>
             <p className="text-turquoise text-2xl font-bold">{formatMoney(income)}</p>
+            {specialIncome > 0 && (
+              <p className="text-lavender text-[11px] font-semibold mt-1">Trong đó, đặc biệt: {formatMoney(specialIncome)}</p>
+            )}
           </HoverDetailCard>
           <HoverDetailCard
  className="frost-card rounded-3xl p-6 cursor-pointer hover:shadow-card transition"
@@ -7452,18 +7572,18 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
           </HoverDetailCard>
           <HoverDetailCard
  className="frost-card rounded-3xl p-6 cursor-pointer hover:shadow-card transition"
-            detail={<BreakdownDetailList title="Thu nhập đặc biệt" items={specialIncomeDetailItems} total={specialIncome} colorClass="text-lavender" onViewDetail={() => setLedgerModal({ title: `Thu nhập đặc biệt — ${periodLabel}`, txs: specialIncomeLedgerTxs })} />}
-          >
-            <p className="text-steel dark:text-light-grey text-sm font-semibold">Thu nhập đặc biệt</p>
-            <p className="text-lavender text-2xl font-bold">{formatMoney(specialIncome)}</p>
-          </HoverDetailCard>
-          <HoverDetailCard
- className="frost-card rounded-3xl p-6 cursor-pointer hover:shadow-card transition"
-            align="right"
             detail={<BreakdownDetailList title="Chi tiêu" items={expenseDetailItems} total={totalActualExpense} colorClass="text-cotton-candy" onViewDetail={() => setLedgerModal({ title: `Chi tiêu — ${periodLabel}`, txs: expenseLedgerTxs })} />}
           >
             <p className="text-steel dark:text-light-grey text-sm font-semibold">Chi tiêu</p>
             <p className="text-cotton-candy text-2xl font-bold">{formatMoney(totalActualExpense)}</p>
+          </HoverDetailCard>
+          <HoverDetailCard
+ className="frost-card rounded-3xl p-6 cursor-pointer hover:shadow-card transition"
+            align="right"
+            detail={<RemainingBreakdownDetail pool={remaining} funds={assetFundItems} wallets={assetWalletItems} total={totalRemainingAll} />}
+          >
+            <p className="text-steel dark:text-light-grey text-sm font-semibold">Còn lại</p>
+            <p className={`text-2xl font-bold ${remaining >= 0 ? 'text-turquoise' : 'text-cotton-candy'}`}>{formatMoneySigned(remaining)}</p>
           </HoverDetailCard>
         </div>
 
@@ -7679,31 +7799,7 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
         {(timeType === 'year' || timeType === 'quarter' || timeType === '6month') && trendData.length > 0 && (
  <div className="frost-card rounded-3xl p-6 mb-6">
             <h2 className="text-blueberry dark:text-white font-extrabold text-lg mb-4">Xu hướng theo tháng</h2>
-            <div className="h-48 flex items-end gap-2">
-              {trendData.map((d, i) => {
-                const max = Math.max(...trendData.map(t => t.income), 1);
-                const heightInc = (d.income / max) * 100;
-                const heightAlloc = (d.allocation / max) * 100;
-                const heightExp = (d.expenseFromIncome / max) * 100;
-                return (
-                  <div key={i} className="flex-1 flex flex-col items-center">
-                    <div className="w-full flex flex-col items-center justify-end h-full relative">
-                      <div className="absolute bottom-0 w-full flex flex-col items-end" style={{ height: `${heightInc}%` }}>
-                        <div className="w-full bg-turquoise/30 rounded-t-sm" style={{ height: `${heightExp}%` }} />
-                        <div className="w-full bg-turquoise/60 rounded-t-sm" style={{ height: `${heightAlloc}%` }} />
-                        <div className="w-full bg-turquoise rounded-t-sm" style={{ height: `${Math.max(0, heightInc - heightAlloc - heightExp)}%` }} />
-                      </div>
-                    </div>
-                    <span className="text-[10px] text-steel dark:text-light-grey mt-1">{d.label}</span>
-                  </div>
-                );
-              })}
-            </div>
-            <div className="flex gap-4 mt-2 text-xs">
-              <span className="flex items-center gap-1"><span className="w-3 h-3 bg-turquoise rounded" /> Thu nhập</span>
-              <span className="flex items-center gap-1"><span className="w-3 h-3 bg-turquoise/60 rounded" /> Góp quỹ</span>
-              <span className="flex items-center gap-1"><span className="w-3 h-3 bg-turquoise/30 rounded" /> Chi tiêu</span>
-            </div>
+            <MonthlyTrendChart trendData={trendData} />
           </div>
         )}
 
