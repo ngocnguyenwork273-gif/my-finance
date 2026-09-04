@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">PandaFi</string>
+    <string name="title_activity_main">PandaFi</string>
+    <string name="package_name">com.pandafi.app</string>
+    <string name="custom_url_scheme">com.pandafi.app</string>
+</resources>
