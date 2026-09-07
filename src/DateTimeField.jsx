@@ -209,6 +209,17 @@ export default function DateTimeField({
     };
   }, [open]);
 
+  // FIX: cột Giờ/Phút chỉ cuộn được bằng ngón tay (touch) trên mobile/tablet,
+  // còn lăn chuột (wheel) trên PC thì không nhúc nhích — trình duyệt desktop
+  // không tự "chuyển" sự kiện wheel thành cuộn cho khối cao 112px này một cách
+  // đáng tin cậy (đặc biệt khi cả khối nằm trong <div> render qua portal ra
+  // ngoài body). Nên tự bắt sự kiện wheel và cộng thẳng deltaY vào scrollTop —
+  // cách này chạy đúng trên mọi trình duyệt/OS mà không ảnh hưởng gì đến cuộn
+  // bằng ngón tay (touch scroll vẫn là cơ chế native của trình duyệt).
+  function handleWheelScroll(e) {
+    e.currentTarget.scrollTop += e.deltaY;
+  }
+
   const timeBtnClass = (active) =>
     `w-full text-center text-sm py-1.5 rounded-full font-bold transition ${
       active ? 'bg-turquoise text-white' : 'text-blueberry dark:text-white hover:bg-turquoise/10'
@@ -245,7 +256,12 @@ export default function DateTimeField({
           <div className="relative flex items-center gap-2 mt-2 pt-3 border-t border-white/20 dark:border-white/10">
             <ClockIcon size={14} className="text-steel dark:text-light-grey flex-shrink-0" />
             <div className="flex-1 flex items-center justify-center gap-1.5">
-              <div ref={hourListRef} className="h-28 w-14 overflow-y-auto scrollbar-hide rounded-xl bg-black/[0.03] dark:bg-white/[0.05] py-1">
+              <div
+                ref={hourListRef}
+                onWheel={handleWheelScroll}
+                style={{ overscrollBehavior: 'contain' }}
+                className="h-28 w-14 overflow-y-auto scrollbar-hide rounded-xl bg-black/[0.03] dark:bg-white/[0.05] py-1"
+              >
                 {HOURS.map((h) => (
                   <button
                     key={h} type="button" data-active={hourVal === h}
@@ -257,7 +273,12 @@ export default function DateTimeField({
                 ))}
               </div>
               <span className="text-blueberry dark:text-white font-bold">:</span>
-              <div ref={minuteListRef} className="h-28 w-14 overflow-y-auto scrollbar-hide rounded-xl bg-black/[0.03] dark:bg-white/[0.05] py-1">
+              <div
+                ref={minuteListRef}
+                onWheel={handleWheelScroll}
+                style={{ overscrollBehavior: 'contain' }}
+                className="h-28 w-14 overflow-y-auto scrollbar-hide rounded-xl bg-black/[0.03] dark:bg-white/[0.05] py-1"
+              >
                 {MINUTES.map((m) => (
                   <button
                     key={m} type="button" data-active={minuteVal === m}

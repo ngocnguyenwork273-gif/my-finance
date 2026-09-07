@@ -1,5 +1,12 @@
 {
   "appId": "com.pandafi.app",
   "appName": "PandaFi",
-  "webDir": "dist"
+  "webDir": "dist",
+  "plugins": {
+    "StatusBar": {
+      "overlaysWebView": true,
+      "style": "DARK",
+      "backgroundColor": "#00000000"
+    }
+  }
 }

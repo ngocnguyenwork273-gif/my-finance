@@ -1,7 +1,7 @@
 /* ==============================================================================
    01. IMPORTS
    ============================================================================== */
-import { useState, useEffect, useRef, Fragment, Children } from 'react';
+import { useState, useEffect, useLayoutEffect, useRef, Fragment, Children } from 'react';
 import { supabase } from './supabaseClient';
 import {
   Home, Sparkles, Plus, BarChart3, Settings as SettingsIcon, TrendingUp, TrendingDown, PiggyBank, HeartPulse,
@@ -15,6 +15,25 @@ import ReactCrop, { centerCrop, makeAspectCrop } from 'react-image-crop';
 import 'react-image-crop/dist/ReactCrop.css';
 import DateField from './DateField';
 import DateTimeField from './DateTimeField';
+// Logo app đặt sẵn trong code (src/assets/app-logo.png) — dùng chung cho MỌI tài khoản,
+// không cần upload qua Settings/Supabase Storage nữa nên nhẹ và luôn đồng bộ.
+// Copy file logo thật vào src/assets/app-logo.png (đè lên) là xong, không cần sửa gì thêm.
+import appLogoAsset from './assets/app-logo.png';
+
+// Layout app dùng <main className="overflow-y-auto"> làm vùng cuộn thật sự (cả mobile lẫn
+// desktop) chứ KHÔNG phải window/document — nên các chỗ "neo vị trí card, cuộn bù lại"
+// phải cuộn đúng phần tử này, không phải window.scrollBy (sẽ không có tác dụng gì).
+function findScrollableAncestor(el) {
+  let node = el?.parentElement;
+  while (node && node !== document.body) {
+    const style = window.getComputedStyle(node);
+    if (/(auto|scroll)/.test(style.overflowY) && node.scrollHeight > node.clientHeight) {
+      return node;
+    }
+    node = node.parentElement;
+  }
+  return document.scrollingElement || document.documentElement;
+}
 
 /* ==============================================================================
    02. CUSTOM STYLES (Fincheck palette + ẩn scrollbar)
@@ -651,17 +670,44 @@ const ACCOUNT_TYPE_STYLES = {
 };
 function accountCardGradient(type) { return ACCOUNT_TYPE_STYLES[type] || ACCOUNT_TYPE_STYLES.other; }
 
+// ==============================================================================
+// TÌM KIẾM KHÔNG DẤU + VIẾT TẮT — dùng chung cho mọi ô search trong app (giao dịch,
+// quỹ, mục tiêu...). Ví dụ: gõ "suc khoe", "sk", "khoe" đều khớp "Sức khỏe".
+// ==============================================================================
+function removeDiacritics(str) {
+  return (str || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/đ/g, 'd')
+    .replace(/Đ/g, 'D');
+}
+function normalizeSearchText(str) {
+  return removeDiacritics(str).toLowerCase().trim();
+}
+function textMatchesSearch(text, query) {
+  const q = normalizeSearchText(query);
+  if (!q) return true;
+  const t = normalizeSearchText(text);
+  if (t.includes(q)) return true;
+  // Khớp theo viết tắt chữ cái đầu mỗi từ — ví dụ "Sức khỏe" -> "sk"
+  const initials = t.split(/\s+/).filter(Boolean).map((w) => w[0]).join('');
+  return initials.includes(q);
+}
+
 /* ==============================================================================
    04. UTILITY FUNCTIONS
    ============================================================================== */
+// Làm tròn CHỈ ở bước hiển thị (Math.round) — các phép tính lãi phía trên (tính lãi
+// kép theo ngày) không làm tròn, để không bị hao hụt dần từng ngày; số hiển thị ra
+// màn hình vẫn luôn là số nguyên đồng, gọn gàng như trước.
 function formatMoney(n) {
-  return Math.abs(n).toLocaleString('en-US') + 'đ';
+  return Math.round(Math.abs(n)).toLocaleString('en-US') + 'đ';
 }
 
 // Giống formatMoney nhưng GIỮ dấu âm — dùng cho các số có thể âm (Dư sau chi...)
 // để không bị lệch với phần trăm âm hiển thị bên cạnh, gây hiểu nhầm số liệu.
 function formatMoneySigned(n) {
-  return (n < 0 ? '-' : '') + Math.abs(n).toLocaleString('en-US') + 'đ';
+  return (n < 0 ? '-' : '') + Math.round(Math.abs(n)).toLocaleString('en-US') + 'đ';
 }
 
 // ==============================================================================
@@ -741,8 +787,8 @@ function firstProfitCreditDate(depositDate) {
   const w = d.getDay();
   let offsetDays;
   if (w >= 1 && w <= 4) {
-    // Thứ 2 - Thứ 5: +2 ngày
-    offsetDays = 2;
+    // Thứ 2 - Thứ 5: +3 ngày (khớp quy tắc: nạp T2 -> bắt đầu tính lãi T4, nhận lời T5)
+    offsetDays = 3;
   } else {
     // Thứ 6 (5), Thứ 7 (6), Chủ nhật (0): dời tới Thứ 3 (2) kế tiếp
     offsetDays = (2 - w + 7) % 7;
@@ -854,9 +900,11 @@ function _computeFundBalanceWithProfit(category, transactions) {
   while (cursor <= yesterday) {
     balance += changesByDay[cursor.getTime()] || 0;
     interestBase += eligibleChangesByDay[cursor.getTime()] || 0;
-    // Lợi nhuận = Gốc sinh lời * Tỷ suất/365, làm tròn xuống
+    // Lợi nhuận = Gốc sinh lời * Tỷ suất/365 — GIỮ NGUYÊN số thập phân, không làm tròn
+    // xuống ở đây để lãi kép không bị hao hụt dần mỗi ngày; chỉ làm tròn khi HIỂN THỊ
+    // (xem formatMoney).
     if (interestBase > 0 && dailyRate > 0) {
-      const profit = Math.floor(interestBase * dailyRate);
+      const profit = interestBase * dailyRate;
       balance += profit;
       interestBase += profit;
     }
@@ -917,7 +965,7 @@ function _computeFundBalanceAtDate(category, transactions, cutoffDate) {
     balance += changesByDay[cursor.getTime()] || 0;
     interestBase += eligibleChangesByDay[cursor.getTime()] || 0;
     if (interestBase > 0 && dailyRate > 0) {
-      const profit = Math.floor(interestBase * dailyRate);
+      const profit = interestBase * dailyRate;
       balance += profit;
       interestBase += profit;
     }
@@ -979,7 +1027,7 @@ function fundTransactionsWithBalance(category, transactions) {
     });
     interestBase += eligibleChangesByDay[cursor.getTime()] || 0;
     if (interestBase > 0 && dailyRate > 0) {
-      const profit = Math.floor(interestBase * dailyRate);
+      const profit = interestBase * dailyRate;
       balance += profit;
       interestBase += profit;
     }
@@ -1027,7 +1075,7 @@ function fundDailyProfitHistory(category, transactions) {
     interestBase += eligibleChangesByDay[cursor.getTime()] || 0;
     let profit = 0;
     if (interestBase > 0 && dailyRate > 0) {
-      profit = Math.floor(interestBase * dailyRate);
+      profit = interestBase * dailyRate;
       balance += profit;
       interestBase += profit;
     }
@@ -1906,9 +1954,105 @@ function AvatarMenu({ avatarUrl, displayName, openSettings, variant = 'desktop' 
   );
 }
 
-function HeaderDesktop({ onAddClick, displayName, avatarUrl, theme, toggleTheme, openSettings }) {
+// Gom kết quả tìm kiếm từ TẤT CẢ dữ liệu trong app (ví, quỹ, danh mục, mục tiêu,
+// giao dịch) theo từ khóa — dùng chung logic khớp với textMatchesSearch (bỏ dấu +
+// khớp viết tắt) đã có sẵn trong app.
+function useGlobalSearchResults(query, { accounts, categories, transactions, goals }) {
+  const q = query.trim();
+  if (!q) return [];
+  const groups = [];
+
+  const walletHits = (accounts || [])
+    .filter((a) => textMatchesSearch(a.name, q))
+    .slice(0, 5)
+    .map((a) => ({
+      id: `wallet-${a.id}`,
+      icon: a.icon,
+      title: a.name,
+      sub: formatMoney(accountBalance(a, transactions || [])),
+      type: 'wallet',
+      payload: a,
+    }));
+  if (walletHits.length) groups.push({ key: 'wallet', label: 'Ví', items: walletHits });
+
+  const fundHits = (categories || [])
+    .filter((c) => c.is_fund && textMatchesSearch(c.name, q))
+    .slice(0, 5)
+    .map((c) => ({
+      id: `fund-${c.id}`,
+      icon: c.icon,
+      title: c.name,
+      sub: formatMoney(fundBalanceWithProfit(c, transactions || [])),
+      type: 'fund',
+      payload: c,
+    }));
+  if (fundHits.length) groups.push({ key: 'fund', label: 'Quỹ', items: fundHits });
+
+  const categoryHits = (categories || [])
+    .filter((c) => !c.is_fund && textMatchesSearch(c.name, q))
+    .slice(0, 5)
+    .map((c) => ({
+      id: `cat-${c.id}`,
+      icon: c.icon,
+      title: c.name,
+      sub: c.type === 'income' ? 'Danh mục thu' : 'Danh mục chi',
+      type: 'category',
+      payload: c,
+    }));
+  if (categoryHits.length) groups.push({ key: 'category', label: 'Danh mục', items: categoryHits });
+
+  const goalHits = (goals || [])
+    .filter((g) => textMatchesSearch(g.name, q))
+    .slice(0, 5)
+    .map((g) => ({
+      id: `goal-${g.id}`,
+      icon: '🎯',
+      title: g.name,
+      sub: `${formatMoney(g.current_amount || 0)} / ${formatMoney(g.target_amount || 0)}`,
+      type: 'goal',
+      payload: g,
+    }));
+  if (goalHits.length) groups.push({ key: 'goal', label: 'Mục tiêu', items: goalHits });
+
+  const txHits = (transactions || [])
+    .filter((t) => {
+      const cat = (categories || []).find((c) => c.id === t.category_id);
+      return textMatchesSearch(stripPeriodTag(t.note), q) || textMatchesSearch(cat?.name, q);
+    })
+    .slice(0, 5)
+    .map((t) => {
+      const cat = (categories || []).find((c) => c.id === t.category_id);
+      return {
+        id: `tx-${t.id}`,
+        icon: cat?.icon || '❔',
+        title: stripPeriodTag(t.note) || cat?.name || 'Giao dịch',
+        sub: `${t.type === 'income' ? '+' : '-'}${formatMoney(t.amount)} · ${new Date(t.date).toLocaleDateString('vi-VN')}`,
+        type: 'transaction',
+        payload: t,
+      };
+    });
+  if (txHits.length) groups.push({ key: 'transaction', label: 'Giao dịch', items: txHits });
+
+  return groups;
+}
+
+function HeaderDesktop({ onAddClick, displayName, avatarUrl, theme, toggleTheme, openSettings, accounts, categories, transactions, goals, setScreen, onOpenAccount, onOpenFund }) {
   const [search, setSearch] = useState('');
+  const [searchFocused, setSearchFocused] = useState(false);
   const isDark = theme === 'dark';
+  const searchGroups = useGlobalSearchResults(search, { accounts, categories, transactions, goals });
+  const showDropdown = searchFocused && search.trim() !== '';
+
+  function closeSearch() { setSearchFocused(false); setSearch(''); }
+
+  function goToResult(item) {
+    if (item.type === 'wallet') onOpenAccount?.(item.payload.id, 'dashboard');
+    else if (item.type === 'fund') onOpenFund?.(item.payload.id);
+    else if (item.type === 'category') openSettings?.('categories');
+    else if (item.type === 'goal') setScreen?.('goals');
+    else if (item.type === 'transaction') setScreen?.('report');
+    closeSearch();
+  }
 
   return (
     <header
@@ -1927,14 +2071,54 @@ function HeaderDesktop({ onAddClick, displayName, avatarUrl, theme, toggleTheme,
         <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/70 to-transparent dark:via-white/15" />
         <div className="absolute -top-10 right-24 w-56 h-32 rounded-full bg-turquoise-light/45 dark:bg-turquoise/20 blur-2xl" />
       </div>
-      <div className="flex items-center gap-2 bg-white/50 dark:bg-white/[0.06] backdrop-blur rounded-full px-4 py-2.5 w-72 border border-white/60 dark:border-white/10 relative z-10">
-        <Search size={16} className="text-steel dark:text-light-grey" />
-        <input
-          placeholder="Tìm kiếm nhanh"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="bg-transparent outline-none text-sm flex-1 text-blueberry dark:text-white placeholder:text-steel dark:placeholder:text-light-grey"
-        />
+      <div className="relative z-10 w-72">
+        <div className="flex items-center gap-2 bg-white/50 dark:bg-white/[0.06] backdrop-blur rounded-full px-4 py-2.5 w-full border border-white/60 dark:border-white/10">
+          <Search size={16} className="text-steel dark:text-light-grey flex-shrink-0" />
+          <input
+            placeholder="Tìm kiếm nhanh"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            onFocus={() => setSearchFocused(true)}
+            className="bg-transparent outline-none text-sm flex-1 min-w-0 text-blueberry dark:text-white placeholder:text-steel dark:placeholder:text-light-grey"
+          />
+          {search && (
+            <button onClick={() => setSearch('')} className="flex-shrink-0 text-steel dark:text-light-grey hover:text-blueberry dark:hover:text-white transition">
+              <X size={14} />
+            </button>
+          )}
+        </div>
+
+        {showDropdown && (
+          <>
+            <div className="fixed inset-0 z-30" onClick={closeSearch} />
+            <div className="absolute top-12 left-0 w-[26rem] max-w-[90vw] bg-white/85 dark:bg-[#1e1e32]/80 backdrop-blur-xl backdrop-saturate-150 rounded-2xl shadow-card border-0 dark:border dark:border-[rgba(189,189,203,0.1)] py-2 z-40 max-h-[26rem] overflow-y-auto overflow-x-hidden scrollbar-hide isolate">
+              <div className="pointer-events-none absolute -top-8 -right-8 w-24 h-24 rounded-full bg-turquoise/20 blur-2xl -z-10" />
+              <div className="pointer-events-none absolute -bottom-8 -left-8 w-24 h-24 rounded-full bg-lavender/20 blur-2xl -z-10" />
+              {searchGroups.length === 0 ? (
+                <p className="text-steel dark:text-light-grey text-sm text-center py-6 px-4">Không tìm thấy kết quả nào cho "{search}"</p>
+              ) : (
+                searchGroups.map((group) => (
+                  <div key={group.key} className="mb-1 last:mb-0">
+                    <p className="px-4 pt-2 pb-1 text-[11px] font-bold uppercase tracking-wide text-steel dark:text-light-grey">{group.label}</p>
+                    {group.items.map((item) => (
+                      <button
+                        key={item.id}
+                        onClick={() => goToResult(item)}
+                        className="w-full flex items-center gap-2.5 px-4 py-2 text-sm text-blueberry dark:text-white hover:bg-white/40 dark:hover:bg-white/10 text-left"
+                      >
+                        <EmojiCircle emoji={item.icon} size={30} bg="#F7F7F8" />
+                        <span className="flex-1 min-w-0">
+                          <span className="block truncate font-semibold">{item.title}</span>
+                          <span className="block truncate text-steel dark:text-light-grey text-xs">{item.sub}</span>
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                ))
+              )}
+            </div>
+          </>
+        )}
       </div>
       <div className="flex items-center gap-3 relative z-10">
         <button onClick={onAddClick} className="bg-gradient-primary text-white rounded-full px-4 py-2.5 text-sm font-bold flex items-center gap-2 shadow-md shadow-turquoise/30">
@@ -2003,6 +2187,12 @@ function BottomNavMobile({ screen, setScreen, onAddClick, theme, toggleTheme, op
     setQuickMenuOpen(false);
     if (openSettings) openSettings('profile');
     else setScreen('settings');
+  }
+
+  // Bấm nút "Quản lý" phải tự đóng menu Quick Action (nếu đang mở), tránh 2 menu đè lên nhau
+  function handleManageToggle() {
+    setQuickMenuOpen(false);
+    setManageOpen((v) => !v);
   }
 
   const manageItems = [
@@ -2177,7 +2367,7 @@ function BottomNavMobile({ screen, setScreen, onAddClick, theme, toggleTheme, op
 
             <div className="relative z-10 flex items-center justify-between w-full">
               <NavIcon icon={Home} label="Trang chủ" active={screen === 'dashboard'} onClick={() => go('dashboard')} />
-              <NavIcon icon={LayoutGrid} label="Quản lý" active={isManageActive || manageOpen} onClick={() => setManageOpen((v) => !v)} />
+              <NavIcon icon={LayoutGrid} label="Quản lý" active={isManageActive || manageOpen} onClick={handleManageToggle} />
 
               {/* spacer reserving space under the raised + button */}
               <span className="w-11 flex-shrink-0" aria-hidden="true" />
@@ -3240,11 +3430,16 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
     walletStep(deltaX < 0 ? 1 : -1);
   }
   function handleWalletWheel(e) {
+    // Luôn chặn scroll của cả trang ngay khi con trỏ đang ở trên chồng thẻ ví —
+    // kể cả khi delta còn nhỏ hoặc đã ở thẻ đầu/cuối. Trước đây preventDefault chỉ
+    // được gọi khi CÒN thẻ để lật, nên lúc ở biên hoặc lướt nhẹ, sự kiện wheel lọt
+    // xuống trang phía dưới khiến cả dashboard bị cuộn theo — đúng lỗi người dùng
+    // gặp. Giờ thẻ tự "nuốt" toàn bộ scroll khi hover, trang không cuộn theo nữa.
+    e.preventDefault();
     const delta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
     if (Math.abs(delta) < 12) return;
     const dir = delta > 0 ? 1 : -1;
     if ((dir === 1 && walletActiveIndex >= accounts.length - 1) || (dir === -1 && walletActiveIndex <= 0)) return;
-    e.preventDefault();
     if (walletWheelLocked.current) return;
     walletWheelLocked.current = true;
     walletStep(dir);
@@ -3805,7 +4000,7 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
   const filteredTx = transactions.filter((t) => {
     if (!search) return true;
     const cat = categories.find((c) => c.id === t.category_id);
-    return (cat?.name || '').toLowerCase().includes(search.toLowerCase()) || (t.note || '').toLowerCase().includes(search.toLowerCase());
+    return textMatchesSearch(cat?.name, search) || textMatchesSearch(t.note, search);
   });
 
   const recentTxList = (() => {
@@ -4455,7 +4650,7 @@ function Funds({ setScreen, categories, transactions, onOpenFund, reload, softDe
   const doneCount = funds.filter((c) => fundStatus(c) === 'done').length;
 
   const filteredFunds = funds.filter((c) => {
-    const matchesSearch = (c.name || '').toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesSearch = textMatchesSearch(c.name, searchTerm);
     const matchesTarget = filterTarget === 'all' || filterTarget === fundStatus(c);
     const rStyle = fundRateStyle(c);
     const matchesRate = filterRate === 'all' || filterRate === rStyle.value;
@@ -5621,7 +5816,7 @@ function Goals({ setScreen, goals, loadingGoals, reload, softDelete, onAddClick,
 
   const sortedGoals = sortGoals(goals);
   const filteredGoals = sortedGoals.filter((g) => {
-    const matchesSearch = (g.name || '').toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesSearch = textMatchesSearch(g.name, searchTerm);
     const matchesStatus = filterStatus === 'all' || (filterStatus === 'done' ? g.status === 'Hoàn thành' : g.status !== 'Hoàn thành');
     const matchesPriority = filterPriority === 'all' || g.priority_term === filterPriority;
     return matchesSearch && matchesStatus && matchesPriority;
@@ -6171,9 +6366,7 @@ function ProfileSection({ user, onUpdated, logActivity }) {
   const [firstName, setFirstName] = useState(user?.user_metadata?.first_name || '');
   const [lastName, setLastName] = useState('');
   const [avatarUrl, setAvatarUrl] = useState(user?.user_metadata?.avatar_url || '');
-  const [appLogoUrl, setAppLogoUrl] = useState(user?.user_metadata?.app_logo_url || '');
   const [uploading, setUploading] = useState(false);
-  const [uploadingLogo, setUploadingLogo] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -6187,7 +6380,6 @@ function ProfileSection({ user, onUpdated, logActivity }) {
     setFirstName(first);
     setLastName(full.replace(first, '').trim());
     setAvatarUrl(user?.user_metadata?.avatar_url || '');
-    setAppLogoUrl(user?.user_metadata?.app_logo_url || '');
   }, [user]);
 
   async function handleAvatarUpload(file) {
@@ -6210,36 +6402,6 @@ function ProfileSection({ user, onUpdated, logActivity }) {
       return;
     }
     setAvatarUrl(data.publicUrl);
-    onUpdated();
-  }
-
-  async function handleLogoUpload(file) {
-    if (!file) return;
-    setUploadingLogo(true);
-    const fileName = `logo-${user.id}-${Date.now()}-${sanitizeFileName(file.name)}`;
-    const { error: uploadError } = await supabase.storage.from('avatars').upload(fileName, file, { upsert: true });
-    if (uploadError) {
-      console.error('Logo upload failed:', uploadError);
-      alert('Không thể tải logo lên. Vui lòng thử lại.');
-      setUploadingLogo(false);
-      return;
-    }
-    const { data } = supabase.storage.from('avatars').getPublicUrl(fileName);
-    const { error } = await supabase.auth.updateUser({ data: { app_logo_url: data.publicUrl } });
-    setUploadingLogo(false);
-    if (error) {
-      console.error('Logo update failed:', error);
-      alert('Không thể cập nhật logo. Vui lòng thử lại.');
-      return;
-    }
-    setAppLogoUrl(data.publicUrl);
-    onUpdated();
-  }
-
-  async function handleRemoveLogo() {
-    const { error } = await supabase.auth.updateUser({ data: { app_logo_url: null } });
-    if (error) { console.error('Remove logo failed:', error); return; }
-    setAppLogoUrl('');
     onUpdated();
   }
 
@@ -6282,29 +6444,6 @@ function ProfileSection({ user, onUpdated, logActivity }) {
             triggerLabel="Đổi ảnh đại diện"
             onConfirm={handleAvatarUpload}
           />
-        </div>
-      </div>
-
-      <div>
-        <p className="text-blueberry dark:text-white font-bold text-sm mb-3">Logo ứng dụng</p>
-        <p className="text-steel dark:text-light-grey text-xs mb-3">Ảnh này sẽ thay cho logo mặc định ở góc trên sidebar.</p>
-        <div className="flex items-center gap-4">
-          <div className="w-16 h-16 rounded-xl overflow-hidden bg-gradient-primary flex items-center justify-center flex-shrink-0">
-            {appLogoUrl ? <img src={appLogoUrl} alt="" className="w-full h-full object-cover" /> : <Wallet size={22} className="text-white" />}
-          </div>
-          <div className="flex items-center gap-2">
-            <ImageUploader
-              aspectRatio="1:1"
-              uploading={uploadingLogo}
-              triggerLabel="Đổi logo"
-              onConfirm={handleLogoUpload}
-            />
-            {appLogoUrl && (
-              <button onClick={handleRemoveLogo} className="bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-2.5 text-sm text-steel dark:text-light-grey font-semibold hover:bg-cotton-candy/10 transition">
-                Xoá logo
-              </button>
-            )}
-          </div>
         </div>
       </div>
 
@@ -6918,8 +7057,42 @@ function MonthlyTrendChart({ trendData }) {
   );
 }
 
-function Report({ setScreen, transactions, categories, accounts, goals, onAddClick, displayName, avatarUrl, theme, toggleTheme, openSettings, sidebarCollapsed, toggleSidebar, spendingPoolByPeriod, saveSpendingPoolForPeriod, reload, softDelete }) {
+function Report({ setScreen, transactions, categories, accounts, goals, onAddClick, displayName, avatarUrl, theme, toggleTheme, openSettings, sidebarCollapsed, toggleSidebar, spendingPoolByPeriod, saveSpendingPoolForPeriod, reload, softDelete, openFund }) {
   const [editingTx, setEditingTx] = useState(null);
+  // Bộ lọc "Hoạt động gần đây": lọc theo Loại giao dịch trước (Thu nhập / Chi tiêu /
+  // Nạp quỹ / Rút quỹ / Chuyển khoản...), sau đó lọc thêm theo Danh mục cụ thể bên trong loại đó.
+  const [activityKindFilter, setActivityKindFilter] = useState('all');
+  const [activityCategoryFilter, setActivityCategoryFilter] = useState('all');
+
+  // Neo vị trí card "Hoạt động gần đây" khi đổi filter, tránh giật layout.
+  // Có 2 bản DOM (mobile + desktop) cùng tồn tại, chỉ 1 bản đang hiển thị (display khác none)
+  // tại 1 thời điểm — nên cần check offsetParent để biết đang neo theo bản nào.
+  const activityAnchorMobileRef = useRef(null);
+  const activityAnchorDesktopRef = useRef(null);
+  const activityScrollAnchorRef = useRef(null);
+
+  function getVisibleActivityAnchor() {
+    const mobile = activityAnchorMobileRef.current;
+    if (mobile && mobile.offsetParent !== null) return mobile;
+    const desktop = activityAnchorDesktopRef.current;
+    if (desktop && desktop.offsetParent !== null) return desktop;
+    return null;
+  }
+
+  function captureActivityScrollAnchor() {
+    const el = getVisibleActivityAnchor();
+    if (el) activityScrollAnchorRef.current = el.getBoundingClientRect().top;
+  }
+
+  useLayoutEffect(() => {
+    if (activityScrollAnchorRef.current == null) return;
+    const el = getVisibleActivityAnchor();
+    if (el) {
+      const delta = el.getBoundingClientRect().top - activityScrollAnchorRef.current;
+      if (delta) findScrollableAncestor(el).scrollBy(0, delta);
+    }
+    activityScrollAnchorRef.current = null;
+  }, [activityKindFilter, activityCategoryFilter]);
 
   async function handleDeleteTx(tx) {
     if (!confirm('Xóa giao dịch này? Bạn có thể khôi phục trong 30 ngày ở mục Lịch sử.')) return;
@@ -6948,6 +7121,38 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
   });
   const [customStart, setCustomStart] = useState(new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0,10));
   const [customEnd, setCustomEnd] = useState(new Date().toISOString().slice(0,10));
+
+  // Neo vị trí card "Thu nhập đã đi đâu?" khi đổi bộ chọn thời gian (Ngày/Tuần/Tháng/Quý/
+  // 6 tháng/Năm/Tùy chỉnh) — card này có vài dòng chỉ hiện có điều kiện (Tích lũy trước chi,
+  // Chi tiêu từ quỹ...) nên đổi kỳ là chiều cao card thay đổi đột ngột, gây giật trang.
+  const incomeCardMobileRef = useRef(null);
+  const incomeCardDesktopRef = useRef(null);
+  const incomeCardScrollAnchorRef = useRef(null);
+
+  function getVisibleIncomeCardAnchor() {
+    const mobile = incomeCardMobileRef.current;
+    if (mobile && mobile.offsetParent !== null) return mobile;
+    const desktop = incomeCardDesktopRef.current;
+    if (desktop && desktop.offsetParent !== null) return desktop;
+    return null;
+  }
+
+  // Gắn vào onClickCapture/onChangeCapture của cả khối chọn kỳ (mobile + desktop) — chạy
+  // ở pha capture nên luôn chạy TRƯỚC khi state đổi, không cần sửa từng ô chọn riêng lẻ.
+  function captureIncomeCardScrollAnchor() {
+    const el = getVisibleIncomeCardAnchor();
+    if (el) incomeCardScrollAnchorRef.current = el.getBoundingClientRect().top;
+  }
+
+  useLayoutEffect(() => {
+    if (incomeCardScrollAnchorRef.current == null) return;
+    const el = getVisibleIncomeCardAnchor();
+    if (el) {
+      const delta = el.getBoundingClientRect().top - incomeCardScrollAnchorRef.current;
+      if (delta) findScrollableAncestor(el).scrollBy(0, delta);
+    }
+    incomeCardScrollAnchorRef.current = null;
+  }, [timeType, selectedMonth, selectedQuarter, selectedHalf, selectedYear, selectedDay, selectedWeek, customStart, customEnd]);
 
   // Compute start/end based on type — Tháng/Quý/6 tháng/Năm đều dựa trên
   // financial period (kỳ 21 → 20) của hệ thống, không dùng tháng lịch đơn giản.
@@ -7031,8 +7236,88 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
     if (date.toDateString() === yesterday.toDateString()) return 'Hôm qua';
     return date.toLocaleDateString('vi-VN', { weekday: 'long', day: 'numeric', month: 'short', year: 'numeric' });
   }
-  const groupedPeriodTxs = groupTxsByDate(allPeriodTxsSorted);
-  const sortedPeriodTxKeys = Object.keys(groupedPeriodTxs).sort((a, b) => new Date(b) - new Date(a));
+  // (đã thay bằng groupedFilteredTxs/sortedFilteredTxKeys bên dưới, có áp thêm bộ lọc)
+
+
+  // ===== Bộ lọc "Hoạt động gần đây" theo Loại giao dịch + Danh mục =====
+  const ACTIVITY_KIND_LABELS = {
+    income: 'Thu nhập',
+    expense: 'Chi tiêu',
+    fund_withdraw: 'Rút quỹ',
+    allocation: 'Nạp quỹ',
+    transfer: 'Chuyển khoản',
+    adjustment: 'Cập nhật số dư',
+  };
+  function getTxKind(tx) {
+    const cat = categories.find((c) => c.id === tx.category_id);
+    if (tx.type === 'income') return 'income';
+    if (tx.type === 'allocation') return 'allocation';
+    if (tx.type === 'expense') return cat?.is_fund ? 'fund_withdraw' : 'expense';
+    if (tx.type === 'transfer') return 'transfer';
+    if (tx.type === 'adjustment') return 'adjustment';
+    return 'other';
+  }
+  // Chỉ liệt kê những Loại thực sự có giao dịch trong kỳ đang xem, theo đúng thứ tự cố định.
+  const activityKindsPresent = ['income', 'expense', 'fund_withdraw', 'allocation', 'transfer', 'adjustment']
+    .filter((k) => allPeriodTxsSorted.some((tx) => getTxKind(tx) === k));
+  // Danh mục cụ thể bên trong Loại đang chọn (rỗng với Chuyển khoản / Cập nhật số dư — không có danh mục).
+  const activityCategoryOptions = activityKindFilter === 'all' ? [] : (() => {
+    const seen = new Map();
+    allPeriodTxsSorted
+      .filter((tx) => getTxKind(tx) === activityKindFilter && tx.category_id)
+      .forEach((tx) => {
+        const cat = categories.find((c) => c.id === tx.category_id);
+        if (cat && !seen.has(cat.id)) seen.set(cat.id, cat);
+      });
+    return Array.from(seen.values());
+  })();
+  function handleActivityKindChange(nextKind) {
+    captureActivityScrollAnchor();
+    setActivityKindFilter(nextKind);
+    setActivityCategoryFilter('all');
+  }
+  function handleActivityCategoryChange(nextCat) {
+    captureActivityScrollAnchor();
+    setActivityCategoryFilter(nextCat);
+  }
+  const filteredActivityTxs = allPeriodTxsSorted.filter((tx) => {
+    if (activityKindFilter !== 'all' && getTxKind(tx) !== activityKindFilter) return false;
+    if (activityCategoryFilter !== 'all' && tx.category_id !== activityCategoryFilter) return false;
+    return true;
+  });
+  const groupedFilteredTxs = groupTxsByDate(filteredActivityTxs);
+  const sortedFilteredTxKeys = Object.keys(groupedFilteredTxs).sort((a, b) => new Date(b) - new Date(a));
+
+  // Component filter dùng chung cho cả bản mobile lẫn desktop của "Hoạt động gần đây".
+  function ActivityFilterBar({ compact = false }) {
+    return (
+      <div className={`flex items-center gap-2 flex-wrap ${compact ? 'mb-3' : 'mb-4'}`}>
+        <CustomSelect
+          value={activityKindFilter}
+          onChange={(e) => handleActivityKindChange(e.target.value)}
+          triggerClassName={`frost-inset rounded-full font-bold outline-none text-blueberry dark:text-white ${compact ? 'text-xs px-3 py-1.5' : 'text-sm px-4 py-2'}`}
+        >
+          <option value="all">Tất cả loại</option>
+          {activityKindsPresent.map((k) => (
+            <option key={k} value={k}>{ACTIVITY_KIND_LABELS[k]}</option>
+          ))}
+        </CustomSelect>
+        {activityCategoryOptions.length > 0 && (
+          <CustomSelect
+            value={activityCategoryFilter}
+            onChange={(e) => handleActivityCategoryChange(e.target.value)}
+            triggerClassName={`frost-inset rounded-full font-bold outline-none text-blueberry dark:text-white ${compact ? 'text-xs px-3 py-1.5' : 'text-sm px-4 py-2'}`}
+          >
+            <option value="all">Tất cả danh mục</option>
+            {activityCategoryOptions.map((c) => (
+              <option key={c.id} value={c.id}>{c.icon ? `${c.icon} ${c.name}` : c.name}</option>
+            ))}
+          </CustomSelect>
+        )}
+      </div>
+    );
+  }
+
   function TxDetailRow({ tx }) {
     const cat = categories.find((c) => c.id === tx.category_id);
     const src = getTxSource(tx);
@@ -7195,16 +7480,6 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
     return { ...c, balanceNow, contributed, withdrawn, target, progress };
   }).filter(f => f.contributed > 0 || f.withdrawn > 0 || f.balanceNow > 0).sort((a,b) => b.contributed - a.contributed);
 
-  // Lịch sử nạp/rút quỹ trong kỳ (dùng để gộp "Chi tiết đã nạp quỹ" + "Hoạt động quỹ"
-  // thành 1 mục "Hoạt động quỹ" duy nhất, có kèm lịch sử từng giao dịch nạp/rút).
-  const fundActivityEntries = periodTxs
-    .filter(t => (t.type === 'allocation' || t.type === 'expense') && fundCats.some(c => c.id === t.category_id))
-    .map(t => {
-      const fc = fundCats.find(c => c.id === t.category_id);
-      return { ...t, fundName: fc?.name || '', fundIcon: fc?.icon || '💰', amount: Number(t.amount) };
-    })
-    .sort((a, b) => new Date(b.date || b.created_at) - new Date(a.date || a.created_at));
-
   // Trends: if year, show 12 tháng (kỳ tài chính); if quarter/6month, show các tháng trong đó.
   // Luôn tính theo financial period (21 → 20), không dùng tháng lịch.
   const trendData = (() => {
@@ -7338,15 +7613,50 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
   const periodLabel = getPeriodLabel();
 
   // Stacked bar component
-  function StackedBar({ data }) {
-    const total = data.reduce((s, d) => s + d.value, 0);
-    if (total === 0) return <div className="text-center text-steel dark:text-light-grey py-2">Không có dữ liệu</div>;
-    const segments = data.map(d => ({ ...d, pct: (d.value / total) * 100 }));
+  // Donut chart dùng chung — thay cho StackedBar cũ (thanh ngang) theo yêu cầu đổi
+  // sang biểu đồ tròn, có tooltip khi hover từng phần + chú thích màu bên cạnh.
+  function DonutChart({ data, total: totalOverride }) {
+    const { tip, wrapRef, showTip, hideTip } = useChartTooltip();
+    const sumValues = data.reduce((s, d) => s + d.value, 0);
+    // Cho phép truyền total riêng (vd: Thu nhập được chi) thay vì tự cộng dồn data —
+    // để % hiển thị khớp với phần chữ bên cạnh, và khi tiêu vượt mức thì các lát cắt
+    // sẽ chồng lấn ra ngoài 100% một chút thay vì luôn khép tròn đủ 100% gây hiểu lầm.
+    const total = totalOverride != null && totalOverride > 0 ? totalOverride : sumValues;
+    if (total === 0) return <div className="text-center text-steel dark:text-light-grey py-6">Không có dữ liệu</div>;
+    let cumulative = 0;
+    const segments = data.filter((d) => d.value > 0).map((d) => {
+      const pct = (d.value / total) * 100;
+      const seg = { ...d, pct, dashoffset: -cumulative };
+      cumulative += pct;
+      return seg;
+    });
     return (
-      <div className="w-full h-8 rounded-full overflow-hidden flex">
-        {segments.map((seg, i) => (
-          <div key={i} style={{ width: `${seg.pct}%`, background: seg.color }} title={`${seg.label}: ${formatMoney(seg.value)}`} />
-        ))}
+      <div ref={wrapRef} className="relative flex items-center gap-6 flex-wrap justify-center">
+        <ChartTooltip tip={tip} />
+        <svg viewBox="0 0 42 42" className="w-36 h-36 flex-shrink-0 -rotate-90">
+          <circle cx="21" cy="21" r="15.9155" fill="none" strokeWidth="5" className="stroke-ice-cream dark:stroke-[#2b2b46]" />
+          {segments.map((seg, i) => (
+            <circle
+              key={i}
+              cx="21" cy="21" r="15.9155" fill="none"
+              stroke={seg.color} strokeWidth="5"
+              strokeDasharray={`${seg.pct} ${100 - seg.pct}`}
+              strokeDashoffset={seg.dashoffset}
+              className="cursor-default"
+              onMouseMove={(e) => showTip(e, { label: seg.label, value: formatMoney(seg.value), pct: Math.round(seg.pct) })}
+              onMouseLeave={hideTip}
+            />
+          ))}
+        </svg>
+        <div className="flex flex-col gap-2">
+          {segments.map((seg, i) => (
+            <div key={i} className="flex items-center gap-2">
+              <span className="w-3 h-3 rounded-full flex-shrink-0" style={{ background: seg.color }} />
+              <span className="text-blueberry dark:text-white text-sm font-semibold">{seg.label}</span>
+              <span className="text-steel dark:text-light-grey text-xs">{formatMoney(seg.value)} ({Math.round(seg.pct)}%)</span>
+            </div>
+          ))}
+        </div>
       </div>
     );
   }
@@ -7360,7 +7670,7 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
             <h1 className="text-white text-lg font-bold">Báo cáo</h1>
             <button onClick={() => setScreen('dashboard')} className="w-9 h-9 rounded-full bg-white/30 backdrop-blur flex items-center justify-center"><X size={18} className="text-white" /></button>
           </div>
-          <div className="px-5 mt-2">
+          <div onClickCapture={captureIncomeCardScrollAnchor} onChangeCapture={captureIncomeCardScrollAnchor} className="px-5 mt-2">
             <CustomSelect value={timeType} onChange={(e) => setTimeType(e.target.value)} className="" triggerClassName="w-full bg-white/20 backdrop-blur rounded-xl px-4 py-2 text-sm text-white outline-none [color-scheme:light] dark:[color-scheme:dark]">
               <option value="day">Ngày</option>
               <option value="week">Tuần</option>
@@ -7427,7 +7737,7 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
               </HoverDetailCard>
             </div>
           </div>
-          <div className="px-5 mt-4 bg-white dark:bg-[#1e1e32] rounded-3xl shadow-soft p-4">
+          <div ref={incomeCardMobileRef} className="px-5 mt-4 bg-white dark:bg-[#1e1e32] rounded-3xl shadow-soft p-4">
             <h2 className="text-blueberry dark:text-white font-extrabold text-base mb-1">Thu nhập đã đi đâu?</h2>
             <p className="text-steel dark:text-light-grey text-[11px] mb-3">Tổng thu nhập → Thu nhập được chi + Thu nhập đặc biệt</p>
             <div className="space-y-1">
@@ -7457,17 +7767,20 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
             ))}
           </div>
 
-          <div data-report-anchor="recent-activity" className="px-5 mt-4 bg-white dark:bg-[#1e1e32] rounded-3xl shadow-soft p-4">
+          <div data-report-anchor="recent-activity" ref={activityAnchorMobileRef} className="px-5 mt-4 bg-white dark:bg-[#1e1e32] rounded-3xl shadow-soft p-4">
             <h2 className="text-blueberry dark:text-white font-extrabold text-base mb-3">Hoạt động gần đây</h2>
-            {allPeriodTxsSorted.length === 0 ? (
-              <p className="text-steel dark:text-light-grey text-sm text-center py-4">Không có giao dịch nào trong khoảng thời gian này.</p>
+            <ActivityFilterBar compact />
+            {filteredActivityTxs.length === 0 ? (
+              <p className="text-steel dark:text-light-grey text-sm text-center py-4">
+                {allPeriodTxsSorted.length === 0 ? 'Không có giao dịch nào trong khoảng thời gian này.' : 'Không có giao dịch nào khớp bộ lọc.'}
+              </p>
             ) : (
               <div className="flex flex-col gap-3">
-                {sortedPeriodTxKeys.map((key) => (
+                {sortedFilteredTxKeys.map((key) => (
                   <div key={key}>
                     <p className="text-xs font-bold text-steel dark:text-light-grey mb-1">{formatTxDateLabel(key)}</p>
                     <div className="flex flex-col divide-y divide-[rgba(189,189,203,0.2)] dark:divide-[rgba(189,189,203,0.1)]">
-                      {groupedPeriodTxs[key].map((tx) => <TxDetailRow key={tx.id} tx={tx} />)}
+                      {groupedFilteredTxs[key].map((tx) => <TxDetailRow key={tx.id} tx={tx} />)}
                     </div>
                   </div>
                 ))}
@@ -7482,7 +7795,7 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
         <div className="frost-blob z-0 w-80 h-80 bg-lavender-light/70 dark:bg-lavender/22 top-[600px] -left-10" />
         <div className="relative flex items-center justify-between mb-6 flex-wrap gap-4">
           <h1 className="text-blueberry dark:text-white text-2xl font-extrabold">Báo cáo &amp; Phân tích</h1>
-          <div className="flex items-center gap-2 flex-wrap">
+          <div onClickCapture={captureIncomeCardScrollAnchor} onChangeCapture={captureIncomeCardScrollAnchor} className="flex items-center gap-2 flex-wrap">
             <CustomSelect value={timeType} onChange={(e) => setTimeType(e.target.value)} className="" triggerClassName="frost-inset rounded-full text-sm font-bold px-4 py-2 outline-none text-blueberry dark:text-white [color-scheme:light] dark:[color-scheme:dark]">
               <option value="day">Ngày</option>
               <option value="week">Tuần</option>
@@ -7587,7 +7900,7 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
           </HoverDetailCard>
         </div>
 
- <div className="frost-card rounded-3xl p-6 mb-6">
+ <div ref={incomeCardDesktopRef} className="frost-card rounded-3xl p-6 mb-6">
           <h2 className="text-blueberry dark:text-white font-extrabold text-lg">Thu nhập đã đi đâu?</h2>
           <p className="text-steel dark:text-light-grey text-xs font-semibold mb-4">Tổng thu nhập → Thu nhập được chi + Thu nhập đặc biệt (không tự động tăng Thu nhập được chi)</p>
           <div className="flex flex-col md:flex-row gap-6">
@@ -7633,12 +7946,12 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
               )}
             </div>
             <div className="flex-1">
-              <StackedBar data={[
+              <DonutChart total={spendingPool} data={[
                 { label: 'Nạp quỹ', value: allocation, color: '#74ACEF' },
                 { label: 'Chi tiêu', value: expenseFromIncome, color: '#F18AB5' },
                 { label: 'Dư sau chi', value: Math.max(0, remaining), color: '#0DBACC' }
               ]} />
-              {isOverSpendingPool && <p className="text-cotton-candy text-xs mt-2">⚠️ Đã sử dụng vượt quá Thu nhập được chi của kỳ này.</p>}
+              {isOverSpendingPool && <p className="text-cotton-candy text-xs mt-2 text-center">⚠️ Đã sử dụng vượt quá Thu nhập được chi của kỳ này.</p>}
             </div>
           </div>
         </div>
@@ -7663,7 +7976,7 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
             <>
               <div className="space-y-3">
                 {fundData.slice(0,5).map(f => (
-                  <button key={f.id} onClick={() => openDrilldown(f.id, f.contributed >= f.withdrawn ? 'allocation' : 'expense')} className="w-full flex items-center justify-between border-b last:border-0 py-2 text-left hover:bg-turquoise/5 transition rounded-lg px-1">
+                  <button key={f.id} onClick={() => openFund(f.id, 'report')} className="w-full flex items-center justify-between border-b last:border-0 py-2 text-left hover:bg-turquoise/5 transition rounded-lg px-1">
                     <div><p className="font-bold text-blueberry dark:text-white">{f.icon} {f.name}</p><p className="text-xs text-steel dark:text-light-grey">Số dư hiện tại: {formatMoney(f.balanceNow)}</p></div>
                     <div className="text-right">
                       {f.contributed > 0 && <p className="text-sm text-turquoise">+{formatMoney(f.contributed)} {allocation > 0 && <span className="text-xs font-semibold">({Math.round((f.contributed/allocation)*100)}%)</span>}</p>}
@@ -7672,30 +7985,12 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
                     </div>
                   </button>
                 ))}
-                {fundData.length > 5 && <p className="text-steel dark:text-light-grey text-sm">... và {fundData.length-5} quỹ khác</p>}
+                {fundData.length > 5 && (
+                  <button onClick={() => setScreen('funds')} className="text-turquoise text-sm font-semibold hover:underline">
+                    Xem thêm {fundData.length - 5} quỹ khác
+                  </button>
+                )}
               </div>
-
-              <div className="border-t border-[rgba(126,127,144,0.2)] dark:border-[rgba(189,189,203,0.15)] my-4" />
-              <p className="text-steel dark:text-light-grey text-xs font-bold mb-2">Lịch sử nạp / rút quỹ trong kỳ</p>
-              {fundActivityEntries.length === 0 ? (
-                <p className="text-steel dark:text-light-grey text-sm">Không có giao dịch nạp/rút quỹ nào trong kỳ.</p>
-              ) : (
-                <div className="space-y-1.5">
-                  {fundActivityEntries.slice(0,8).map(e => (
-                    <button key={e.id} onClick={() => openDrilldown(e.category_id, e.type)} className="w-full flex items-center justify-between py-1.5 text-left hover:bg-turquoise/5 rounded-lg px-1 transition">
-                      <div className="flex items-center gap-2 min-w-0">
-                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full flex-shrink-0 ${e.type === 'allocation' ? 'text-turquoise bg-turquoise-light/60' : 'text-cotton-candy bg-cotton-candy-light/60'}`}>{e.type === 'allocation' ? 'Nạp' : 'Rút'}</span>
-                        <span className="text-blueberry dark:text-white font-semibold truncate">{e.fundIcon} {e.fundName}</span>
-                      </div>
-                      <div className="text-right flex-shrink-0 ml-2">
-                        <p className={`text-sm font-bold ${e.type === 'allocation' ? 'text-turquoise' : 'text-cotton-candy'}`}>{e.type === 'allocation' ? '+' : '-'}{formatMoney(e.amount)}</p>
-                        <p className="text-[11px] text-steel dark:text-light-grey">{new Date(e.date || e.created_at).toLocaleDateString('vi-VN')}</p>
-                      </div>
-                    </button>
-                  ))}
-                  {fundActivityEntries.length > 8 && <p className="text-steel dark:text-light-grey text-sm mt-1">... và {fundActivityEntries.length-8} hoạt động khác</p>}
-                </div>
-              )}
             </>
           )}
         </div>
@@ -7838,20 +8133,23 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
           )}
         </div>
 
- <div data-report-anchor="recent-activity" className="frost-card rounded-3xl p-6 mb-6">
-          <div className="flex items-center justify-between mb-4">
+ <div data-report-anchor="recent-activity" ref={activityAnchorDesktopRef} className="frost-card rounded-3xl p-6 mb-6">
+          <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
             <h2 className="text-blueberry dark:text-white font-extrabold text-lg">Hoạt động gần đây</h2>
-            <span className="text-steel dark:text-light-grey text-xs font-semibold">{periodLabel} · {allPeriodTxsSorted.length} giao dịch</span>
+            <span className="text-steel dark:text-light-grey text-xs font-semibold">{periodLabel} · {filteredActivityTxs.length} giao dịch</span>
           </div>
-          {allPeriodTxsSorted.length === 0 ? (
-            <p className="text-steel dark:text-light-grey text-sm text-center py-6">Không có giao dịch nào trong khoảng thời gian này.</p>
+          <ActivityFilterBar />
+          {filteredActivityTxs.length === 0 ? (
+            <p className="text-steel dark:text-light-grey text-sm text-center py-6">
+              {allPeriodTxsSorted.length === 0 ? 'Không có giao dịch nào trong khoảng thời gian này.' : 'Không có giao dịch nào khớp bộ lọc.'}
+            </p>
           ) : (
             <div className="flex flex-col gap-4 max-h-[600px] overflow-y-auto scrollbar-hide pr-1">
-              {sortedPeriodTxKeys.map((key) => (
+              {sortedFilteredTxKeys.map((key) => (
                 <div key={key}>
                   <p className="text-xs font-bold text-steel dark:text-light-grey mb-2">{formatTxDateLabel(key)}</p>
                   <div className="flex flex-col divide-y divide-[rgba(189,189,203,0.2)] dark:divide-[rgba(189,189,203,0.1)]">
-                    {groupedPeriodTxs[key].map((tx) => <TxDetailRow key={tx.id} tx={tx} />)}
+                    {groupedFilteredTxs[key].map((tx) => <TxDetailRow key={tx.id} tx={tx} />)}
                   </div>
                 </div>
               ))}
@@ -7968,7 +8266,8 @@ function MainApp({ user, theme, toggleTheme }) {
 
   const displayName = currentUser?.user_metadata?.first_name || currentUser?.user_metadata?.full_name || currentUser?.email?.split('@')[0];
   const avatarUrl = currentUser?.user_metadata?.avatar_url;
-  const appLogoUrl = currentUser?.user_metadata?.app_logo_url;
+  // Logo lấy thẳng từ file trong code (src/assets/app-logo.png), giống nhau cho mọi tài khoản.
+  const appLogoUrl = appLogoAsset;
   const [settingsSection, setSettingsSection] = useState(() => initialNav.settingsSection || 'profile');
   function goToSettings(section) {
     const s = section || 'profile';
@@ -8096,7 +8395,7 @@ function MainApp({ user, theme, toggleTheme }) {
     if (screen === 'goals') return <Goals setScreen={setScreen} goals={goals} loadingGoals={loadingGoals} reload={loadAll} softDelete={softDelete} onAddClick={() => setShowAdd(true)} displayName={displayName} avatarUrl={avatarUrl} theme={theme} toggleTheme={toggleTheme} openSettings={goToSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} categories={categories} transactions={transactions} />;
     if (screen === 'accounts') return <Accounts setScreen={setScreen} accounts={accounts} transactions={transactions} onOpenAccount={openAccount} reload={loadAll} onAddClick={() => setShowAdd(true)} displayName={displayName} avatarUrl={avatarUrl} theme={theme} toggleTheme={toggleTheme} openSettings={goToSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} />;
     if (screen === 'settings') return <Settings setScreen={setScreen} categories={categories} accounts={accounts} reload={loadAll} softDelete={softDelete} user={currentUser} onProfileUpdated={refreshUser} onAddClick={() => setShowAdd(true)} theme={theme} toggleTheme={toggleTheme} initialSection={settingsSection} openSettings={goToSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} onResetData={resetAllData} resettingData={resettingData} logs={logs} logActivity={logActivity} restoreLog={restoreLog} spendingPoolByPeriod={spendingPoolByPeriod} saveSpendingPoolForPeriod={saveSpendingPoolForPeriod} />;
-    if (screen === 'report') return <Report setScreen={setScreen} transactions={transactions} categories={categories} accounts={accounts} goals={goals} onAddClick={() => setShowAdd(true)} displayName={displayName} avatarUrl={avatarUrl} theme={theme} toggleTheme={toggleTheme} openSettings={goToSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} spendingPoolByPeriod={spendingPoolByPeriod} saveSpendingPoolForPeriod={saveSpendingPoolForPeriod} reload={loadAll} softDelete={softDelete} />;
+    if (screen === 'report') return <Report setScreen={setScreen} transactions={transactions} categories={categories} accounts={accounts} goals={goals} onAddClick={() => setShowAdd(true)} displayName={displayName} avatarUrl={avatarUrl} theme={theme} toggleTheme={toggleTheme} openSettings={goToSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} spendingPoolByPeriod={spendingPoolByPeriod} saveSpendingPoolForPeriod={saveSpendingPoolForPeriod} reload={loadAll} softDelete={softDelete} openFund={openFund} />;
     // Dashboard default
     return <Dashboard setScreen={setScreen} transactions={transactions} categories={categories} accounts={accounts} goals={goals} loading={loading} displayName={displayName} avatarUrl={avatarUrl} onAddClick={() => setShowAdd(true)} theme={theme} toggleTheme={toggleTheme} onOpenFund={openFund} onOpenAccount={openAccount} reload={loadAll} softDelete={softDelete} openSettings={goToSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} spendingPoolByPeriod={spendingPoolByPeriod} saveSpendingPoolForPeriod={saveSpendingPoolForPeriod} />;
   }
@@ -8131,10 +8430,17 @@ function MainApp({ user, theme, toggleTheme }) {
           theme={theme}
           toggleTheme={toggleTheme}
           openSettings={goToSettings}
+          accounts={accounts}
+          categories={categories}
+          transactions={transactions}
+          goals={goals}
+          setScreen={setScreen}
+          onOpenAccount={openAccount}
+          onOpenFund={openFund}
         />
 
         {/* MainContent — width: 100%, min-width: 0 */}
-        <main className="flex-1 min-w-0 w-full overflow-y-auto overflow-x-hidden p-4 md:p-6">
+        <main className="flex-1 min-w-0 w-full overflow-y-auto overflow-x-hidden md:p-6">
           {renderScreenContent()}
         </main>
       </div>
