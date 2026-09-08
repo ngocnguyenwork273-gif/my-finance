@@ -7354,6 +7354,19 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
     const isOverLimit = (tx.note || '').startsWith('[Vượt hạn mức]');
     const noteText = stripPeriodTag(tx.note);
     const timeLabel = new Date(tx.created_at || tx.date).toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit', year: 'numeric' });
+    const txDate = new Date(tx.date || tx.created_at);
+    const sourceKeyInfo = txSourceInfo(tx, categories, accounts);
+    let balanceAfter = null;
+    if (sourceKeyInfo.key.startsWith('fund:')) {
+      balanceAfter = fundBalanceAtDate(cat, transactions, txDate);
+    } else if (sourceKeyInfo.key.startsWith('account:')) {
+      const account = accounts.find((a) => a.id === tx.account_id);
+      balanceAfter = accountBalanceAtDate(account, transactions, txDate);
+    } else if (sourceKeyInfo.key === 'pool') {
+      const isPoolDeduction = (tx.type === 'expense') || (tx.type === 'allocation' && !isInitialAllocationTx(tx));
+      if (isPoolDeduction) balanceAfter = poolBalanceAfterTx(tx, transactions, categories, spendingPoolByPeriod);
+      else if (tx.type === 'income') balanceAfter = poolIncomeCumulativeAfterTx(tx, transactions, categories);
+    }
     return (
       <div onClick={() => setEditingTx(tx)} className="flex items-center gap-3 py-3 first:pt-0 last:pb-0 cursor-pointer hover:bg-ice-cream dark:hover:bg-night-sky/30 rounded-xl -mx-2 px-2 transition">
         <EmojiCircle emoji={cat?.icon} size={40} bg={tx.type === 'expense' ? '#E3D6FF' : '#B4F1F1'} />
@@ -7368,7 +7381,10 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
             <span className="text-[11px] font-semibold text-baby-blue">{src.label}</span>
           </div>
         </div>
-        <p className={`font-bold text-sm flex-shrink-0 ${tx.type === 'expense' ? 'text-cotton-candy' : 'text-turquoise'}`}>{tx.type === 'expense' ? '-' : '+'}{formatMoney(tx.amount)}</p>
+        <div className="flex-shrink-0 text-right">
+          <p className={`font-bold text-sm ${tx.type === 'expense' ? 'text-cotton-candy' : 'text-turquoise'}`}>{tx.type === 'expense' ? '-' : '+'}{formatMoney(tx.amount)}</p>
+          {balanceAfter !== null && <p className="text-steel dark:text-light-grey text-[11px] mt-0.5 whitespace-nowrap">Số dư cuối: {formatMoney(balanceAfter)}</p>}
+        </div>
         <TxDeleteButton onClick={() => handleDeleteTx(tx)} />
       </div>
     );
