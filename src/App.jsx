@@ -57,6 +57,7 @@ const fincheckStyles = `
     --baby-blue-light: #C1DDFF;
     --cotton-candy-light: #FFCDDB;
     --lavender-light: #E3D6FF;
+    --page-bg: #EDE4FF; /* Lavender nhạt pha thêm trắng — nền pastel đồng nhất cho tất cả các trang, không dùng gradient nữa */
 
     /* Typography hierarchy (avoid pure #FFFFFF everywhere) */
     --text-primary: rgba(255,255,255,0.92);
@@ -208,6 +209,7 @@ const fincheckStyles = `
   .bg-gradient-warm { background: linear-gradient(135deg, var(--cotton-candy-light), var(--lavender-light)); }
   .bg-gradient-cool { background: linear-gradient(135deg, var(--turquoise-light), var(--baby-blue-light)); }
   .bg-gradient-hero { background: linear-gradient(135deg, var(--turquoise), var(--lavender)); }
+  .bg-page { background-color: var(--page-bg); }
 
   /* ==========================================================================
      Mobile: Frosted-glass + Neumorphism blend (pastel, layered, soft shadows)
@@ -215,13 +217,11 @@ const fincheckStyles = `
      ========================================================================== */
   .frost-card {
     position: relative;
-    background: linear-gradient(150deg, rgba(255,255,255,0.82), rgba(255,255,255,0.46));
-    backdrop-filter: blur(46px) saturate(240%);
-    -webkit-backdrop-filter: blur(46px) saturate(240%);
-    border: 1px solid rgba(255,255,255,0.95);
-    box-shadow: 22px 22px 44px rgba(48,49,80,0.20), -12px -12px 28px rgba(255,255,255,0.92),
-      0 0 0 1px rgba(13,186,204,0.08), 0 14px 32px -14px rgba(159,127,224,0.4),
-      inset 0 1px 0 rgba(255,255,255,0.95), inset 0 -1px 0 rgba(48,49,80,0.05);
+    background: rgba(255,255,255,0.92);
+    backdrop-filter: blur(16px) saturate(150%);
+    -webkit-backdrop-filter: blur(16px) saturate(150%);
+    border: 1px solid rgba(255,255,255,0.6);
+    box-shadow: 0 6px 20px rgba(48,49,80,0.08);
     isolation: isolate;
   }
   .frost-card::before {
@@ -229,39 +229,34 @@ const fincheckStyles = `
     position: absolute;
     inset: 0;
     border-radius: inherit;
-    background: linear-gradient(115deg, rgba(255,255,255,0.6) 0%, rgba(255,255,255,0.15) 22%, rgba(255,255,255,0) 45%, rgba(255,255,255,0) 70%, rgba(255,255,255,0.3) 100%);
-    background-size: 220% 220%;
-    animation: liquidSheen 12s ease-in-out infinite;
+    background: linear-gradient(115deg, rgba(255,255,255,0.22) 0%, rgba(255,255,255,0) 40%, rgba(255,255,255,0) 100%);
     pointer-events: none;
     z-index: -1;
   }
   .dark .frost-card {
-    background: linear-gradient(150deg, rgba(52,52,86,0.76), rgba(24,24,42,0.58));
-    backdrop-filter: blur(46px) saturate(240%);
-    -webkit-backdrop-filter: blur(46px) saturate(240%);
-    border: 1px solid rgba(255,255,255,0.20);
-    box-shadow: 22px 22px 44px rgba(0,0,0,0.58), -8px -8px 24px rgba(255,255,255,0.04),
-      0 0 0 1px rgba(13,186,204,0.1), 0 14px 32px -14px rgba(159,127,224,0.3),
-      inset 0 1px 0 rgba(255,255,255,0.16);
+    background: rgba(38,38,64,0.82);
+    backdrop-filter: blur(16px) saturate(150%);
+    -webkit-backdrop-filter: blur(16px) saturate(150%);
+    border: 1px solid rgba(255,255,255,0.10);
+    box-shadow: 0 6px 20px rgba(0,0,0,0.28);
   }
   .dark .frost-card::before {
-    background: linear-gradient(115deg, rgba(255,255,255,0.14) 0%, rgba(255,255,255,0.04) 22%, rgba(255,255,255,0) 45%, rgba(255,255,255,0) 70%, rgba(255,255,255,0.08) 100%);
-    background-size: 220% 220%;
+    background: linear-gradient(115deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0) 40%, rgba(255,255,255,0) 100%);
   }
   .frost-inset {
     position: relative;
-    background: rgba(255,255,255,0.42);
-    backdrop-filter: blur(20px) saturate(200%);
-    -webkit-backdrop-filter: blur(20px) saturate(200%);
-    border: 1px solid rgba(255,255,255,0.7);
-    box-shadow: inset 7px 7px 16px rgba(48,49,80,0.16), inset -7px -7px 16px rgba(255,255,255,0.95);
+    background: rgba(255,255,255,0.55);
+    backdrop-filter: blur(8px) saturate(130%);
+    -webkit-backdrop-filter: blur(8px) saturate(130%);
+    border: 1px solid rgba(255,255,255,0.5);
+    box-shadow: 0 2px 10px rgba(48,49,80,0.06);
   }
   .dark .frost-inset {
-    background: rgba(255,255,255,0.06);
-    backdrop-filter: blur(20px) saturate(200%);
-    -webkit-backdrop-filter: blur(20px) saturate(200%);
-    border: 1px solid rgba(255,255,255,0.13);
-    box-shadow: inset 7px 7px 16px rgba(0,0,0,0.45), inset -7px -7px 16px rgba(255,255,255,0.05);
+    background: rgba(255,255,255,0.05);
+    backdrop-filter: blur(8px) saturate(130%);
+    -webkit-backdrop-filter: blur(8px) saturate(130%);
+    border: 1px solid rgba(255,255,255,0.10);
+    box-shadow: 0 2px 10px rgba(0,0,0,0.22);
   }
   .frost-pill {
     background: rgba(255,255,255,0.58);
@@ -822,16 +817,25 @@ function allocationInterestEligibleDate(depositDate) {
 // tình cờ là khoản nạp đầu tiên theo thời gian, dù người dùng chưa hề khai báo số tiền ban
 // đầu ở form Sửa quỹ. Nếu quỹ chưa từng khai báo "Số tiền nạp quỹ lần đầu" thì đơn giản là
 // KHÔNG có dòng "ban đầu" nào cả — mọi khoản nạp/rút đều hiển thị là Nạp quỹ/Rút quỹ bình thường.
-function findInitialAllocation(transactions, categoryId) {
-  const allocations = transactions.filter((t) => t.category_id === categoryId && t.type === 'allocation');
-  const flagged = allocations.find((t) => t.is_initial === true);
-  if (flagged) return flagged;
+// FIX: dùng CHUNG 1 cách nhận diện "khoản nạp quỹ ban đầu" cho cả findInitialAllocation
+// (hiển thị ở form Sửa quỹ) VÀ calculateFinancialsFromTxs (tính Còn lại/Thu nhập được chi).
+// Trước đây 2 nơi lệch nhau: findInitialAllocation có fallback nhận diện qua ghi chú cho
+// dữ liệu cũ chưa có cờ is_initial, còn calculateFinancialsFromTxs chỉ check is_initial —
+// khiến 1 khoản nạp ban đầu (không lấy từ nguồn nào) vẫn bị trừ vào Thu nhập được chi,
+// làm "Còn lại" bị âm sai dù Chi tiêu thực tế rất nhỏ.
+function isInitialAllocationTx(t) {
+  if (t.is_initial === true) return true;
   // Dữ liệu cũ tạo trước khi có cột is_initial sẽ không có cờ này — nhận diện tạm qua
   // ĐÚNG nội dung ghi chú "Nạp quỹ lần đầu" (form Tạo quỹ luôn ghi note y hệt chuỗi này
   // khi tạo khoản nạp ban đầu). An toàn hơn hẳn cách đoán "giao dịch sớm nhất" trước đây
   // vì không thể bị nhầm với 1 khoản nạp bình thường chỉ vì nó tình cờ có ngày sớm hơn —
   // chỉ khớp khi đúng là dòng do chính flow "nạp ban đầu" tạo ra.
-  return allocations.find((t) => stripPeriodTag(t.note || '') === 'Nạp quỹ lần đầu') || null;
+  return stripPeriodTag(t.note || '') === 'Nạp quỹ lần đầu';
+}
+
+function findInitialAllocation(transactions, categoryId) {
+  const allocations = transactions.filter((t) => t.category_id === categoryId && t.type === 'allocation');
+  return allocations.find((t) => t.is_initial === true) || allocations.find(isInitialAllocationTx) || null;
 }
 
 function fundBalance(categoryId, transactions) {
@@ -1463,7 +1467,7 @@ function calculateFinancialsFromTxs(txs, categories, spendingPoolOverride) {
   // (account_id === null). Nạp quỹ từ 1 ví/tài khoản khác (account_id != null) không
   // trừ vào Thu nhập được chi — tiền chỉ chuyển từ ví đó sang quỹ.
   const allocationFromSpendingPool = periodTxs
-    .filter((t) => t.type === 'allocation' && t.is_initial !== true && t.account_id === null)
+    .filter((t) => t.type === 'allocation' && !isInitialAllocationTx(t) && t.account_id === null)
     .reduce((s, t) => s + Number(t.amount), 0);
 
   // 8B/8C. Chi tiêu: phân biệt chi từ quỹ (isFund) vs chi thường (theo nguồn tiền)
@@ -1907,7 +1911,7 @@ function AvatarMenu({ avatarUrl, displayName, openSettings, variant = 'desktop' 
         onClick={() => setOpen((v) => !v)}
         className={isDesktop
           ? 'flex items-center gap-2 pl-2 pr-2.5 py-1.5 rounded-full hover:bg-ice-cream dark:hover:bg-night-sky/30 transition'
-          : 'w-11 h-11 rounded-full bg-white/30 backdrop-blur flex items-center justify-center text-white border border-white/40 overflow-hidden'}
+          : 'w-11 h-11 rounded-full frost-inset flex items-center justify-center text-blueberry dark:text-white overflow-hidden'}
       >
         {avatarUrl ? (
           <img src={avatarUrl} alt="" className={isDesktop ? 'w-9 h-9 rounded-full object-cover flex-shrink-0' : 'w-full h-full object-cover'} />
@@ -3576,6 +3580,21 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
   const mobileMaxIncome = Math.max(...mobileIncomeSeries.flatMap((c) => c.values), 1);
   const mobileMaxExpense = Math.max(...mobileExpenseSeries.flatMap((c) => c.values), 1);
 
+  // Dữ liệu cho 2 card mới trên Trang chủ (mobile): "Chi tiêu theo danh mục" (donut)
+  // và "Thu và Chi" (cột) — TÁCH RIÊNG thành 2 card thay vì gộp chung 1 card, và cùng
+  // đi theo mobileComboFilter (đồng bộ với GlobalPeriodWidget / bộ lọc chung Dashboard).
+  const mobileSpendingTxs = filteredTxsForCard(transactions, mobileComboFilter, mobileBuckets, 'expense');
+  const mobileSpendingByCat = expenseCats
+    .map((c) => ({ ...c, amount: mobileSpendingTxs.filter((t) => t.category_id === c.id).reduce((s, t) => s + Number(t.amount), 0) }))
+    .filter((c) => c.amount > 0)
+    .sort((a, b) => b.amount - a.amount);
+  const mobileSpendingTotal = mobileSpendingByCat.reduce((s, c) => s + c.amount, 0) || 1;
+
+  const mobileIncTotals = bucketTotalsFor(transactions, 'income', mobileBuckets, mobileComboFilter.period, mobileComboFilter.periodKey, mobileComboFilter.year);
+  const mobileExpTotals = bucketTotalsFor(transactions, 'expense', mobileBuckets, mobileComboFilter.period, mobileComboFilter.periodKey, mobileComboFilter.year);
+  const mobileTrendBuckets = mobileBuckets.map((b, i) => ({ label: b.label, inc: mobileIncTotals[i] || 0, exp: mobileExpTotals[i] || 0 }));
+  const mobileMaxTrend = Math.max(...mobileTrendBuckets.flatMap((b) => [b.inc, b.exp]), 1);
+
   const incomeCardBuckets = computePeriodBuckets(incomeCardFilter);
   const incomeCardSeries = buildCategorySeriesFor(transactions, incomeCats, 'income', incomeCardBuckets, incomeCardFilter.period, incomeCardFilter.periodKey, incomeCardFilter.year);
   const incomeCardMax = Math.max(...incomeCardSeries.flatMap((c) => c.values), 1);
@@ -4024,13 +4043,13 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
   const mobileWalletCarousel = (
     <div className="mt-4 px-5">
       <div className="flex items-center justify-between mb-2">
-        <p className="text-white/80 text-xs font-semibold">Ví của bạn</p>
-        <button onClick={() => setScreen('accounts')} className="text-white/70 text-xs font-bold">Xem tất cả</button>
+        <p className="text-steel dark:text-light-grey text-xs font-semibold">Ví của bạn</p>
+        <button onClick={() => setScreen('accounts')} className="text-steel dark:text-light-grey text-xs font-bold">Xem tất cả</button>
       </div>
       <div className="overflow-x-auto snap-x snap-mandatory scrollbar-hide -mx-1 px-1">
         <div className="flex gap-3 py-1">
           {accounts.length === 0 ? (
-            <div className="snap-start shrink-0 w-[85%] bg-white/10 backdrop-blur rounded-2xl p-4 text-center text-white/60 text-sm">
+            <div className="snap-start shrink-0 w-full frost-inset rounded-2xl p-4 text-center text-steel dark:text-light-grey text-sm">
               Chưa có ví nào. Bấm + để thêm.
             </div>
           ) : (
@@ -4039,7 +4058,7 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
               // không phải số tài khoản/thẻ thật.
               const maskedDigits = String(acc.id || '').replace(/[^0-9a-zA-Z]/g, '').slice(-4).toUpperCase().padStart(4, '0');
               return (
-                <div key={acc.id} className="snap-start shrink-0 w-[85%] max-w-[300px]">
+                <div key={acc.id} className="snap-start shrink-0 w-full max-w-[420px]">
                   <button
                     onClick={() => onOpenAccount(acc.id, 'dashboard')}
                     style={{ background: accountCardGradient(acc.type) }}
@@ -4083,34 +4102,26 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
     <>
       {/* Mobile version */}
       <div className="md:hidden relative">
-        <div className={`absolute inset-0 ${theme === 'dark' ? 'bg-[#1a1a2e]' : 'bg-gradient-hero opacity-70'}`} />
+        <div className={`absolute inset-0 ${theme === 'dark' ? 'bg-[#1a1a2e]' : 'bg-page'}`} />
         <div className="w-full min-h-[100dvh] pb-28 relative">
           <div className="px-5 pt-8 flex items-center justify-between">
-            <div><p className="text-white/80 text-sm font-semibold">Chào bạn!</p><h1 className="text-white text-2xl font-extrabold">{displayName || 'Bạn'}</h1></div>
+            <div><p className="text-steel dark:text-light-grey text-sm font-semibold">Chào bạn!</p><h1 className="text-blueberry dark:text-white text-2xl font-extrabold">{displayName || 'Bạn'}</h1></div>
             <AvatarMenu avatarUrl={avatarUrl} displayName={displayName} openSettings={openSettings || (() => setScreen('settings'))} variant="mobile" />
           </div>
           <div className="px-5 mt-4">
-            <GlobalPeriodWidget wrapClassName="bg-white/15" inactiveClass="text-white/70" />
+            <GlobalPeriodWidget />
           </div>
           <div className="px-5 mt-4">
-            <div className="flex items-start justify-between gap-3">
+            <HoverDetailCard detail={<AssetBreakdownDetail wallets={overviewWalletItems} funds={overviewFundItems} gold={overviewGoldItems} total={totalAssets} />}>
               <div className="min-w-0">
-                <p className="text-white/70 text-xs font-semibold">Tổng tài sản</p>
-                <p className="text-white text-3xl font-extrabold mt-1 truncate">{formatMoney(totalAssets)}</p>
+                <p className="text-steel dark:text-light-grey text-xs font-semibold">Tổng tài sản</p>
+                <p className="text-blueberry dark:text-white text-3xl font-extrabold mt-1 truncate">{formatMoney(totalAssets)}</p>
               </div>
-              <div className="flex items-center gap-2 flex-shrink-0 mt-0.5">
-                <button onClick={onAddClick} aria-label="Thêm giao dịch" className="w-11 h-11 rounded-full bg-gradient-secondary flex items-center justify-center shadow-lg shadow-black/10 active:scale-95 transition">
-                  <Plus size={18} className="text-white" />
-                </button>
-                <button onClick={() => setScreen('report')} aria-label="Xem báo cáo" className="w-11 h-11 rounded-full bg-gradient-primary flex items-center justify-center shadow-lg shadow-black/10 active:scale-95 transition">
-                  <BarChart3 size={18} className="text-white" />
-                </button>
-              </div>
-            </div>
+            </HoverDetailCard>
             {/* Đường biểu đồ nhỏ mang tính trang trí, cùng phong cách với khu vực
                 "Total balance" trong bản thiết kế tham khảo — không đại diện số liệu thật. */}
             <svg width="100%" height="26" viewBox="0 0 200 26" preserveAspectRatio="none" className="w-full mt-3 opacity-60">
-              <polyline points="0,18 20,15 40,20 60,9 80,13 100,5 120,11 140,4 160,10 180,2 200,7" fill="none" stroke="rgba(255,255,255,0.6)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+              <polyline points="0,18 20,15 40,20 60,9 80,13 100,5 120,11 140,4 160,10 180,2 200,7" fill="none" stroke={theme === 'dark' ? 'rgba(255,255,255,0.6)' : 'rgba(48,49,80,0.35)'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
           </div>
 
@@ -4118,49 +4129,54 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
           {mobileWalletCarousel}
 
           <div className="mt-6 px-5 flex gap-3 overflow-x-auto pb-2 scrollbar-hide hide-scrollbar" style={{ WebkitOverflowScrolling: 'touch', scrollSnapType: 'x mandatory', scrollPaddingLeft: 20 }}>
-            {fundCategories.length === 0 ? <p className="text-white/70 text-sm">Đánh dấu danh mục là "Quỹ" trong Cài đặt để hiện ở đây.</p>
+            {fundCategories.length === 0 ? <p className="text-steel dark:text-light-grey text-sm">Đánh dấu danh mục là "Quỹ" trong Cài đặt để hiện ở đây.</p>
               : fundCategories.map((f) => (
-                <button key={f.id} onClick={() => onOpenFund(f.id)} style={{ scrollSnapAlign: 'start' }} className="frost-card min-w-[150px] text-left rounded-3xl p-4 flex-shrink-0">
-                  <EmojiCircle emoji={f.icon} size={36} active activeColor="#0DBACC" />
-                  <p className="text-steel dark:text-light-grey text-xs mt-3 font-semibold">{f.name}</p>
-                  <p className="text-blueberry dark:text-white font-bold text-base">{formatMoney(fundBalanceWithProfit(f, transactions))}</p>
+                <button key={f.id} onClick={() => onOpenFund(f.id)} style={{ scrollSnapAlign: 'start' }} className="relative flex-shrink-0 w-[150px] text-left active:scale-95 transition">
+                  <svg viewBox="0 0 170 175" className="w-full h-auto drop-shadow-md">
+                    <defs>
+                      <linearGradient id={`piggyBody-${f.id}`} x1="0%" y1="0%" x2="100%" y2="100%">
+                        <stop offset="0%" stopColor="#FFE1EC" />
+                        <stop offset="100%" stopColor="#F6A9C4" />
+                      </linearGradient>
+                    </defs>
+                    {/* Tai heo — hình cánh tròn dựng đứng, không rũ xuống như tai chó */}
+                    <path d="M26,56 Q17,30 39,10 Q60,28 54,54 Q40,66 26,56 Z" fill={`url(#piggyBody-${f.id})`} />
+                    <path d="M144,56 Q153,30 131,10 Q110,28 116,54 Q130,66 144,56 Z" fill={`url(#piggyBody-${f.id})`} />
+                    <path d="M32,50 Q27,32 40,20 Q52,31 48,49 Q40,57 32,50 Z" fill="#FFC2D9" />
+                    <path d="M138,50 Q143,32 130,20 Q118,31 122,49 Q130,57 138,50 Z" fill="#FFC2D9" />
+                    {/* Chân ngồi, thò ra dưới thân — có rãnh nhỏ gợi móng chẻ của heo */}
+                    <ellipse cx="52" cy="164" rx="16" ry="11" fill="#F6A9C4" />
+                    <ellipse cx="118" cy="164" rx="16" ry="11" fill="#F6A9C4" />
+                    <line x1="52" y1="157" x2="52" y2="171" stroke="#E28AAE" strokeWidth="2.5" strokeLinecap="round" />
+                    <line x1="118" y1="157" x2="118" y2="171" stroke="#E28AAE" strokeWidth="2.5" strokeLinecap="round" />
+                    {/* Thân mập tròn — bo góc siêu lớn cho mềm mại */}
+                    <rect x="14" y="46" width="142" height="118" rx="59" fill={`url(#piggyBody-${f.id})`} />
+                    {/* Má hồng */}
+                    <circle cx="46" cy="99" r="13" fill="#F49CB9" opacity="0.55" />
+                    <circle cx="124" cy="99" r="13" fill="#F49CB9" opacity="0.55" />
+                    {/* Mắt */}
+                    <circle cx="62" cy="87" r="5" fill="#6B4258" />
+                    <circle cx="108" cy="87" r="5" fill="#6B4258" />
+                    <circle cx="63.5" cy="85" r="1.4" fill="#fff" />
+                    <circle cx="109.5" cy="85" r="1.4" fill="#fff" />
+                    {/* Mõm */}
+                    <rect x="68" y="99" width="34" height="24" rx="12" fill="#FFC2D9" />
+                    <ellipse cx="78" cy="111" rx="2.4" ry="3.2" fill="#D46A93" />
+                    <ellipse cx="92" cy="111" rx="2.4" ry="3.2" fill="#D46A93" />
+                    {/* Tay ôm phía trước bụng */}
+                    <circle cx="34" cy="124" r="13" fill="#F6A9C4" />
+                    <circle cx="136" cy="124" r="13" fill="#F6A9C4" />
+                    {/* Vệt sáng mềm cho khối tròn đỡ phẳng */}
+                    <ellipse cx="55" cy="65" rx="26" ry="14" fill="#fff" opacity="0.25" />
+                  </svg>
+                  <div className="absolute flex flex-col items-center justify-center text-center px-2" style={{ top: '62%', bottom: '9%', left: '15%', right: '15%' }}>
+                    <p className="text-[#7A3B57] text-[10px] font-bold leading-tight truncate w-full">{f.icon} {f.name}</p>
+                    <p className="text-[#7A3B57] font-extrabold text-[11px] leading-tight truncate w-full">{formatMoney(fundBalanceWithProfit(f, transactions))}</p>
+                  </div>
                 </button>
               ))}
           </div>
-          <div className="frost-card mt-6 rounded-[2.5rem] min-h-[60vh] px-5 pt-6 pb-6 overflow-hidden">
-            <div className="frost-blob z-0 w-56 h-56 bg-turquoise-light/70 dark:bg-turquoise/22 -top-10 -right-10" />
-            <div className="frost-blob z-0 w-48 h-48 bg-cotton-candy-light/70 dark:bg-cotton-candy/22 bottom-24 -left-10" />
-            <div className="relative flex items-center justify-between mb-4">
-              <h2 className="text-blueberry dark:text-white font-extrabold text-lg">Ngân sách tháng này</h2>
-            </div>
-            {spentByCat.length === 0 ? <p className="text-steel dark:text-light-grey text-sm text-center py-6">Chưa có chi tiêu nào tháng này.</p> : (
-              <SpendingDonut data={spentByCat} total={total} />
-            )}
-
-            <div className="relative grid grid-cols-2 gap-3 mt-8">
-              <div className="frost-inset rounded-2xl p-4 flex flex-col items-center">
-                <p className="text-steel dark:text-light-grey text-xs font-semibold mb-2 self-start">Sức khỏe tài chính</p>
-                <svg width="72" height="72" viewBox="0 0 120 120" className="-rotate-90">
-                  <circle cx="60" cy="60" r="50" fill="none" stroke="#E3D6FF" strokeWidth="14" />
-                  <circle cx="60" cy="60" r="50" fill="none" stroke="#0DBACC" strokeWidth="14" strokeLinecap="round"
-                    strokeDasharray={`${(savingsRate / 100) * 2 * Math.PI * 50} ${2 * Math.PI * 50}`} />
-                </svg>
-                <p className="text-lg font-bold text-blueberry dark:text-white -mt-11">{Math.round(savingsRate)}%</p>
-                <p className="text-steel dark:text-light-grey text-[10px] mt-11">Tỷ lệ tiết kiệm</p>
-              </div>
-              <div className="frost-inset rounded-2xl p-4 flex flex-col justify-center">
-                <p className="text-steel dark:text-light-grey text-xs font-semibold mb-2">Hạn mức tháng</p>
-                {totalMonthlyLimit === 0 ? (
-                  <p className="text-steel dark:text-light-grey text-xs">Chưa đặt hạn mức nào.</p>
-                ) : (
-                  <>
-                    <ProgressBar pct={limitPct} colorClass={limitPct > 100 ? 'bg-cotton-candy' : 'bg-turquoise'} />
-                    <p className="text-steel dark:text-light-grey text-[11px] mt-2">{formatMoney(expenseThisMonth)} / {formatMoney(totalMonthlyLimit)}</p>
-                  </>
-                )}
-              </div>
-            </div>
-
+          <div className="mt-6 px-5 pt-6 pb-6">
             {goals && goals.length > 0 && (
               <div className="mt-6">
                 <div className="flex items-center justify-between mb-3">
@@ -4184,19 +4200,33 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
               </div>
             )}
 
-            <div className="mt-6">
-              <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-                <h2 className="text-blueberry dark:text-white font-extrabold text-lg">Thu/chi theo danh mục</h2>
-                <PeriodControlsFor filter={mobileComboFilter} />
+            <div className="mt-6 flex flex-col gap-4">
+              {/* Card riêng #1: Chi tiêu theo danh mục (donut) — tách khỏi card "Thu và Chi"
+                  bên dưới để tránh nhồi 2 biểu đồ khác kiểu vào chung 1 khối nhìn rối mắt. */}
+              <div className="frost-inset rounded-2xl p-4">
+                <h2 className="text-blueberry dark:text-white font-extrabold text-base mb-3">Chi tiêu theo danh mục</h2>
+                {mobileSpendingByCat.length === 0 ? (
+                  <p className="text-steel dark:text-light-grey text-xs">Chưa có chi tiêu trong khoảng này.</p>
+                ) : (
+                  <SpendingDonut data={mobileSpendingByCat} total={mobileSpendingTotal} />
+                )}
               </div>
-              <p className="text-steel dark:text-light-grey text-xs font-bold mb-2">Thu nhập</p>
-              {mobileIncomeSeries.length === 0 ? <p className="text-steel dark:text-light-grey text-xs mb-4">Chưa có thu nhập trong khoảng này.</p> : (
-                <div className="mb-5"><CategoryBarChart series={mobileIncomeSeries} maxVal={mobileMaxIncome} buckets={mobileBuckets} /></div>
-              )}
-              <p className="text-steel dark:text-light-grey text-xs font-bold mb-2">Chi tiêu</p>
-              {mobileExpenseSeries.length === 0 ? <p className="text-steel dark:text-light-grey text-xs">Chưa có chi tiêu trong khoảng này.</p> : (
-                <CategoryBarChart series={mobileExpenseSeries} maxVal={mobileMaxExpense} buckets={mobileBuckets} />
-              )}
+
+              {/* Card riêng #2: Thu và Chi (biểu đồ cột so sánh theo từng mốc thời gian) */}
+              <div className="frost-inset rounded-2xl p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <h2 className="text-blueberry dark:text-white font-extrabold text-base">Thu và Chi</h2>
+                  <div className="flex items-center gap-3 text-xs font-semibold flex-shrink-0">
+                    <span className="flex items-center gap-1.5 text-steel dark:text-light-grey"><span className="w-2.5 h-2.5 rounded-full bg-turquoise" />Thu</span>
+                    <span className="flex items-center gap-1.5 text-steel dark:text-light-grey"><span className="w-2.5 h-2.5 rounded-full bg-cotton-candy" />Chi</span>
+                  </div>
+                </div>
+                {mobileTrendBuckets.every((b) => b.inc === 0 && b.exp === 0) ? (
+                  <p className="text-steel dark:text-light-grey text-xs">Chưa có thu/chi trong khoảng này.</p>
+                ) : (
+                  <TrendBarChart buckets={mobileTrendBuckets} maxVal={mobileMaxTrend} />
+                )}
+              </div>
             </div>
 
             <div className="flex items-center justify-between mt-8 mb-3">
@@ -4678,7 +4708,7 @@ function Funds({ setScreen, categories, transactions, onOpenFund, reload, softDe
     <>
       {/* Mobile version */}
       <div className="md:hidden relative">
-        <div className={`absolute inset-0 ${theme === 'dark' ? 'bg-[#1a1a2e]' : 'bg-gradient-secondary opacity-70'}`} />
+        <div className={`absolute inset-0 ${theme === 'dark' ? 'bg-[#1a1a2e]' : 'bg-page'}`} />
         <div className="w-full min-h-[100dvh] pb-28 relative">
           <div className="px-5 pt-8">
             <div className="flex items-center gap-2 bg-white dark:bg-[#2a2a44] rounded-2xl shadow-soft px-4 py-3">
@@ -5138,7 +5168,7 @@ function FundDetail({ category, transactions, categories, accounts, onBack, relo
       <div className="md:hidden min-h-[100dvh] pb-28 relative bg-ice-cream dark:bg-[#1a1a2e]">
         <div className="h-56 relative"
           style={{
-            ...(category.background_url ? { backgroundImage: `linear-gradient(rgba(0,0,0,0.35),rgba(0,0,0,0.35)), url(${category.background_url})`, backgroundSize: 'cover', backgroundPosition: 'center' } : { background: 'linear-gradient(180deg,#0DBACC,#74ACEF,#C1DDFF)' }),
+            ...(category.background_url ? { backgroundImage: `linear-gradient(rgba(0,0,0,0.35),rgba(0,0,0,0.35)), url(${category.background_url})`, backgroundSize: 'cover', backgroundPosition: 'center' } : { background: 'linear-gradient(180deg,#0DBACC,#9F7FE0)' }),
           }}>
           <div className="px-5 pt-8 flex items-center justify-between">
             <div className="flex items-center gap-3">
@@ -5488,21 +5518,21 @@ function Accounts({ setScreen, accounts, transactions, onOpenAccount, reload, on
   return (
     <>
       <div className="md:hidden relative">
-        <div className={`absolute inset-0 ${theme === 'dark' ? 'bg-[#1a1a2e]' : 'bg-gradient-primary opacity-70'}`} />
+        <div className={`absolute inset-0 ${theme === 'dark' ? 'bg-[#1a1a2e]' : 'bg-page'}`} />
         <div className="w-full min-h-[100dvh] pb-28 relative">
           <div className="px-5 pt-8 flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <button onClick={() => setScreen('dashboard')} className="w-9 h-9 rounded-full bg-white/30 backdrop-blur flex items-center justify-center"><ArrowLeft size={18} className="text-white" /></button>
-              <h1 className="text-white text-lg font-bold">Quản lý ví</h1>
+              <button onClick={() => setScreen('dashboard')} className="w-9 h-9 rounded-full frost-inset flex items-center justify-center"><ArrowLeft size={18} className="text-blueberry dark:text-white" /></button>
+              <h1 className="text-blueberry dark:text-white text-lg font-bold">Quản lý ví</h1>
             </div>
-            <button onClick={() => setShowCreate(true)} className="w-9 h-9 rounded-full bg-white/30 backdrop-blur flex items-center justify-center"><Plus size={18} className="text-white" /></button>
+            <button onClick={() => setShowCreate(true)} className="w-9 h-9 rounded-full frost-inset flex items-center justify-center"><Plus size={18} className="text-blueberry dark:text-white" /></button>
           </div>
           <div className="px-5 mt-4 text-center">
-            <p className="text-white/80 text-sm font-semibold">Tổng tất cả tài khoản</p>
-            <p className="text-white text-3xl font-bold">{formatMoney(totalBalance)}</p>
-            <p className="text-white/70 text-xs font-semibold mt-1">Tổng tất cả trừ vàng: {formatMoney(totalExcludingGold)}</p>
+            <p className="text-steel dark:text-light-grey text-sm font-semibold">Tổng tất cả tài khoản</p>
+            <p className="text-blueberry dark:text-white text-3xl font-bold">{formatMoney(totalBalance)}</p>
+            <p className="text-steel dark:text-light-grey text-xs font-semibold mt-1">Tổng tất cả trừ vàng: {formatMoney(totalExcludingGold)}</p>
           </div>
-          <div className="mt-6 bg-white dark:bg-[#1e1e32] rounded-[2.5rem] min-h-[70vh] px-5 pt-6 pb-6 shadow-soft">
+          <div className="mt-6 px-5 pt-6 pb-6">
             {accounts.length === 0 ? <p className="text-steel dark:text-light-grey text-sm text-center py-10">Chưa có ví nào. Bấm + để thêm ví đầu tiên.</p> : (
               <div className="flex flex-col gap-4 scrollbar-hide">
                 {accounts.map((acc) => {
@@ -5638,7 +5668,7 @@ function AccountDetail({ account, transactions, categories, accounts, onBack, re
 
   return (
     <>
-      <div className="md:hidden min-h-[100dvh] pb-28 relative" style={{ background: 'linear-gradient(180deg,#0DBACC,#74ACEF,#C1DDFF)' }}>
+      <div className="md:hidden min-h-[100dvh] pb-28 relative" style={{ background: 'linear-gradient(180deg,#0DBACC,#9F7FE0)' }}>
         <div className="px-5 pt-8 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <button onClick={onBack} className="w-9 h-9 rounded-full bg-white/30 backdrop-blur flex items-center justify-center"><ArrowLeft size={18} className="text-white" /></button>
@@ -5666,7 +5696,7 @@ function AccountDetail({ account, transactions, categories, accounts, onBack, re
           </div>
         </div>
 
-        <div className="mt-6 bg-white dark:bg-[#1e1e32] rounded-[2.5rem] min-h-[65vh] px-5 pt-6 pb-6 shadow-soft">
+        <div className="mt-6 px-5 pt-6 pb-6">
           <h2 className="text-blueberry dark:text-white font-extrabold text-lg mb-3">Lịch sử</h2>
           {history.length === 0 ? <p className="text-steel dark:text-light-grey text-sm text-center py-8">Chưa có giao dịch nào.</p> : (
             <div className="flex flex-col divide-y divide-[rgba(189,189,203,0.2)] dark:divide-[rgba(189,189,203,0.1)] scrollbar-hide">
@@ -5841,13 +5871,13 @@ function Goals({ setScreen, goals, loadingGoals, reload, softDelete, onAddClick,
   return (
     <>
       <div className="md:hidden relative">
-        <div className={`absolute inset-0 ${theme === 'dark' ? 'bg-[#1a1a2e]' : 'bg-gradient-secondary opacity-70'}`} />
+        <div className={`absolute inset-0 ${theme === 'dark' ? 'bg-[#1a1a2e]' : 'bg-page'}`} />
         <div className="w-full min-h-[100dvh] pb-28 relative">
           <div className="px-5 pt-8 flex items-center gap-3">
-            <button onClick={() => setScreen('dashboard')} className="w-9 h-9 rounded-full bg-white/30 backdrop-blur flex items-center justify-center"><ArrowLeft size={18} className="text-white" /></button>
-            <h1 className="text-white text-lg font-bold">Mục tiêu</h1>
+            <button onClick={() => setScreen('dashboard')} className="w-9 h-9 rounded-full frost-inset flex items-center justify-center"><ArrowLeft size={18} className="text-blueberry dark:text-white" /></button>
+            <h1 className="text-blueberry dark:text-white text-lg font-bold">Mục tiêu</h1>
           </div>
-          <div className="mt-6 bg-white dark:bg-[#1e1e32] rounded-[2.5rem] min-h-[80vh] px-5 pt-6 pb-6 shadow-soft">
+          <div className="mt-6 px-5 pt-6 pb-6">
             <div className="flex items-center justify-between mb-3">
               <h2 className="text-blueberry dark:text-white font-extrabold text-lg">Mục tiêu của tôi</h2>
               <button onClick={() => setEditingGoal('new')} className="w-7 h-7 rounded-full bg-ice-cream dark:bg-night-sky flex items-center justify-center"><Plus size={16} className="text-blueberry dark:text-white" /></button>
@@ -6312,21 +6342,21 @@ function Settings({ setScreen, categories, accounts, reload, softDelete, user, o
   return (
     <>
       <div className="md:hidden relative">
-        <div className={`absolute inset-0 ${theme === 'dark' ? 'bg-[#1a1a2e]' : 'bg-gradient-secondary opacity-70'}`} />
+        <div className={`absolute inset-0 ${theme === 'dark' ? 'bg-[#1a1a2e]' : 'bg-page'}`} />
         <div className="w-full min-h-[100dvh] pb-28 relative">
           <div className="px-5 pt-8 flex items-center gap-3">
-            <button onClick={() => setScreen('dashboard')} className="w-9 h-9 rounded-full bg-white/30 backdrop-blur flex items-center justify-center"><ArrowLeft size={18} className="text-white" /></button>
-            <h1 className="text-white text-lg font-bold">Cài đặt</h1>
+            <button onClick={() => setScreen('dashboard')} className="w-9 h-9 rounded-full frost-inset flex items-center justify-center"><ArrowLeft size={18} className="text-blueberry dark:text-white" /></button>
+            <h1 className="text-blueberry dark:text-white text-lg font-bold">Cài đặt</h1>
           </div>
 
           <div className="px-5 mt-4 flex gap-2">
-            <button onClick={() => setSection('profile')} className={`flex-1 py-2 rounded-full text-sm font-bold ${section === 'profile' ? 'bg-white dark:bg-[#2a2a44] text-blueberry dark:text-white shadow' : 'bg-white/30 text-white'}`}>Hồ sơ</button>
-            <button onClick={() => setSection('categories')} className={`flex-1 py-2 rounded-full text-sm font-bold ${section === 'categories' ? 'bg-white dark:bg-[#2a2a44] text-blueberry dark:text-white shadow' : 'bg-white/30 text-white'}`}>Danh mục</button>
-            <button onClick={() => setSection('data')} className={`flex-1 py-2 rounded-full text-sm font-bold ${section === 'data' ? 'bg-white dark:bg-[#2a2a44] text-blueberry dark:text-white shadow' : 'bg-white/30 text-white'}`}>Dữ liệu</button>
-            <button onClick={() => setSection('history')} className={`flex-1 py-2 rounded-full text-sm font-bold ${section === 'history' ? 'bg-white dark:bg-[#2a2a44] text-blueberry dark:text-white shadow' : 'bg-white/30 text-white'}`}>Lịch sử</button>
+            <button onClick={() => setSection('profile')} className={`flex-1 py-2 rounded-full text-sm font-bold ${section === 'profile' ? 'bg-white dark:bg-[#2a2a44] text-blueberry dark:text-white shadow' : 'bg-white/30 text-blueberry dark:text-white'}`}>Hồ sơ</button>
+            <button onClick={() => setSection('categories')} className={`flex-1 py-2 rounded-full text-sm font-bold ${section === 'categories' ? 'bg-white dark:bg-[#2a2a44] text-blueberry dark:text-white shadow' : 'bg-white/30 text-blueberry dark:text-white'}`}>Danh mục</button>
+            <button onClick={() => setSection('data')} className={`flex-1 py-2 rounded-full text-sm font-bold ${section === 'data' ? 'bg-white dark:bg-[#2a2a44] text-blueberry dark:text-white shadow' : 'bg-white/30 text-blueberry dark:text-white'}`}>Dữ liệu</button>
+            <button onClick={() => setSection('history')} className={`flex-1 py-2 rounded-full text-sm font-bold ${section === 'history' ? 'bg-white dark:bg-[#2a2a44] text-blueberry dark:text-white shadow' : 'bg-white/30 text-blueberry dark:text-white'}`}>Lịch sử</button>
           </div>
 
-          <div className="mt-4 bg-white dark:bg-[#1e1e32] rounded-[2.5rem] min-h-[76vh] px-5 pt-6 pb-6 shadow-soft scrollbar-hide">
+          <div className="mt-4 px-5 pt-6 pb-6 scrollbar-hide">
             {section === 'profile' && <ProfileSection user={user} onUpdated={onProfileUpdated} logActivity={logActivity} />}
             {section === 'categories' && <CategorySection categories={categories} reload={reload} softDelete={softDelete} spendingPoolByPeriod={spendingPoolByPeriod} saveSpendingPoolForPeriod={saveSpendingPoolForPeriod} />}
             {section === 'data' && ResetDataPanel}
@@ -6764,7 +6794,7 @@ function poolBalanceAfterTx(tx, allTx, categories, spendingPoolByPeriod) {
   const poolTxs = allTx
     .filter((t) => transactionPeriodKey(t) === periodKey)
     .filter((t) => {
-      if (t.type === 'allocation') return t.is_initial !== true && t.account_id === null;
+      if (t.type === 'allocation') return !isInitialAllocationTx(t) && t.account_id === null;
       if (t.type === 'expense') { const c = catById.get(t.category_id); return !(c && c.is_fund) && t.account_id === null; }
       return false;
     })
@@ -6823,7 +6853,7 @@ function TxLedgerRow({ tx, categories, accounts, allTx, spendingPoolByPeriod, on
     // "Thu nhập được chi" (pool): với khoản CHI/nạp quỹ trừ vào pool, hiện số dư còn lại
     // sau giao dịch; với khoản THU NHẬP cộng vào pool, hiện tổng đã cộng dồn tính đến
     // giao dịch này (không có "số dư sau khi trừ" vì đây là chiều cộng vào, không phải trừ ra).
-    const isPoolDeduction = (tx.type === 'expense') || (tx.type === 'allocation' && tx.is_initial !== true);
+    const isPoolDeduction = (tx.type === 'expense') || (tx.type === 'allocation' && !isInitialAllocationTx(tx));
     if (isPoolDeduction) balanceAfter = poolBalanceAfterTx(tx, allTx, categories, spendingPoolByPeriod);
     else if (tx.type === 'income') balanceAfter = poolIncomeCumulativeAfterTx(tx, allTx, categories);
   }
@@ -7664,14 +7694,14 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
   return (
     <>
       <div className="md:hidden relative">
-        <div className={`absolute inset-0 ${theme === 'dark' ? 'bg-[#1a1a2e]' : 'bg-gradient-hero opacity-70'}`} />
+        <div className={`absolute inset-0 ${theme === 'dark' ? 'bg-[#1a1a2e]' : 'bg-page'}`} />
         <div className="w-full min-h-[100dvh] pb-28 relative">
           <div className="px-5 pt-8 flex items-center justify-between">
-            <h1 className="text-white text-lg font-bold">Báo cáo</h1>
-            <button onClick={() => setScreen('dashboard')} className="w-9 h-9 rounded-full bg-white/30 backdrop-blur flex items-center justify-center"><X size={18} className="text-white" /></button>
+            <h1 className="text-blueberry dark:text-white text-lg font-bold">Báo cáo</h1>
+            <button onClick={() => setScreen('dashboard')} className="w-9 h-9 rounded-full frost-inset flex items-center justify-center"><X size={18} className="text-blueberry dark:text-white" /></button>
           </div>
           <div onClickCapture={captureIncomeCardScrollAnchor} onChangeCapture={captureIncomeCardScrollAnchor} className="px-5 mt-2">
-            <CustomSelect value={timeType} onChange={(e) => setTimeType(e.target.value)} className="" triggerClassName="w-full bg-white/20 backdrop-blur rounded-xl px-4 py-2 text-sm text-white outline-none [color-scheme:light] dark:[color-scheme:dark]">
+            <CustomSelect value={timeType} onChange={(e) => setTimeType(e.target.value)} className="" triggerClassName="w-full frost-inset rounded-xl px-4 py-2 text-sm text-blueberry dark:text-white outline-none [color-scheme:light] dark:[color-scheme:dark]">
               <option value="day">Ngày</option>
               <option value="week">Tuần</option>
               <option value="month">Tháng</option>
@@ -7680,43 +7710,43 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
               <option value="year">Năm</option>
               <option value="custom">Tùy chỉnh</option>
             </CustomSelect>
-            {timeType === 'day' && <DateField value={selectedDay} onChange={setSelectedDay} className="w-full justify-between mt-2 bg-white/20 backdrop-blur rounded-xl px-4 py-2 text-sm text-white" />}
-            {timeType === 'week' && <DateField value={selectedWeek} onChange={setSelectedWeek} className="w-full justify-between mt-2 bg-white/20 backdrop-blur rounded-xl px-4 py-2 text-sm text-white" />}
+            {timeType === 'day' && <DateField value={selectedDay} onChange={setSelectedDay} className="w-full justify-between mt-2 frost-inset rounded-xl px-4 py-2 text-sm text-blueberry dark:text-white" />}
+            {timeType === 'week' && <DateField value={selectedWeek} onChange={setSelectedWeek} className="w-full justify-between mt-2 frost-inset rounded-xl px-4 py-2 text-sm text-blueberry dark:text-white" />}
             {timeType === 'month' && (
               <div className="flex gap-2 mt-2">
-                <CustomSelect value={selectedMonth} onChange={(e) => setSelectedMonth(Number(e.target.value))} className="" triggerClassName="flex-1 bg-white/20 backdrop-blur rounded-xl px-4 py-2 text-sm text-white outline-none [color-scheme:light] dark:[color-scheme:dark]">
+                <CustomSelect value={selectedMonth} onChange={(e) => setSelectedMonth(Number(e.target.value))} className="" triggerClassName="flex-1 frost-inset rounded-xl px-4 py-2 text-sm text-blueberry dark:text-white outline-none [color-scheme:light] dark:[color-scheme:dark]">
                   {Array.from({length:12}, (_,i) => i+1).map(m => <option key={m} value={m}>{m}</option>)}
                 </CustomSelect>
-                <input type="number" value={selectedYear} onChange={(e) => setSelectedYear(Number(e.target.value))} className="w-20 bg-white/20 backdrop-blur rounded-xl px-4 py-2 text-sm text-white outline-none" />
+                <input type="number" value={selectedYear} onChange={(e) => setSelectedYear(Number(e.target.value))} className="w-20 frost-inset rounded-xl px-4 py-2 text-sm text-blueberry dark:text-white outline-none" />
               </div>
             )}
             {timeType === 'quarter' && (
               <div className="flex gap-2 mt-2">
-                <CustomSelect value={selectedQuarter} onChange={(e) => setSelectedQuarter(Number(e.target.value))} className="" triggerClassName="flex-1 bg-white/20 backdrop-blur rounded-xl px-4 py-2 text-sm text-white outline-none [color-scheme:light] dark:[color-scheme:dark]">
+                <CustomSelect value={selectedQuarter} onChange={(e) => setSelectedQuarter(Number(e.target.value))} className="" triggerClassName="flex-1 frost-inset rounded-xl px-4 py-2 text-sm text-blueberry dark:text-white outline-none [color-scheme:light] dark:[color-scheme:dark]">
                   <option value={1}>Q1</option><option value={2}>Q2</option><option value={3}>Q3</option><option value={4}>Q4</option>
                 </CustomSelect>
-                <input type="number" value={selectedYear} onChange={(e) => setSelectedYear(Number(e.target.value))} className="w-20 bg-white/20 backdrop-blur rounded-xl px-4 py-2 text-sm text-white outline-none" />
+                <input type="number" value={selectedYear} onChange={(e) => setSelectedYear(Number(e.target.value))} className="w-20 frost-inset rounded-xl px-4 py-2 text-sm text-blueberry dark:text-white outline-none" />
               </div>
             )}
             {timeType === '6month' && (
               <div className="flex gap-2 mt-2">
-                <CustomSelect value={selectedHalf} onChange={(e) => setSelectedHalf(Number(e.target.value))} className="" triggerClassName="flex-1 bg-white/20 backdrop-blur rounded-xl px-4 py-2 text-sm text-white outline-none [color-scheme:light] dark:[color-scheme:dark]">
+                <CustomSelect value={selectedHalf} onChange={(e) => setSelectedHalf(Number(e.target.value))} className="" triggerClassName="flex-1 frost-inset rounded-xl px-4 py-2 text-sm text-blueberry dark:text-white outline-none [color-scheme:light] dark:[color-scheme:dark]">
                   <option value={1}>H1</option><option value={2}>H2</option>
                 </CustomSelect>
-                <input type="number" value={selectedYear} onChange={(e) => setSelectedYear(Number(e.target.value))} className="w-20 bg-white/20 backdrop-blur rounded-xl px-4 py-2 text-sm text-white outline-none" />
+                <input type="number" value={selectedYear} onChange={(e) => setSelectedYear(Number(e.target.value))} className="w-20 frost-inset rounded-xl px-4 py-2 text-sm text-blueberry dark:text-white outline-none" />
               </div>
             )}
             {timeType === 'year' && (
-              <input type="number" value={selectedYear} onChange={(e) => setSelectedYear(Number(e.target.value))} className="w-full mt-2 bg-white/20 backdrop-blur rounded-xl px-4 py-2 text-sm text-white outline-none" />
+              <input type="number" value={selectedYear} onChange={(e) => setSelectedYear(Number(e.target.value))} className="w-full mt-2 frost-inset rounded-xl px-4 py-2 text-sm text-blueberry dark:text-white outline-none" />
             )}
             {timeType === 'custom' && (
               <div className="flex gap-2 mt-2">
-                <DateField value={customStart} onChange={setCustomStart} className="flex-1 justify-between bg-white/20 backdrop-blur rounded-xl px-4 py-2 text-sm text-white" />
-                <DateField value={customEnd} onChange={setCustomEnd} align="right" className="flex-1 justify-between bg-white/20 backdrop-blur rounded-xl px-4 py-2 text-sm text-white" />
+                <DateField value={customStart} onChange={setCustomStart} className="flex-1 justify-between frost-inset rounded-xl px-4 py-2 text-sm text-blueberry dark:text-white" />
+                <DateField value={customEnd} onChange={setCustomEnd} align="right" className="flex-1 justify-between frost-inset rounded-xl px-4 py-2 text-sm text-blueberry dark:text-white" />
               </div>
             )}
           </div>
-          <div className="px-5 mt-4 bg-white dark:bg-[#1e1e32] rounded-3xl shadow-soft p-4">
+          <div className="px-5 mt-4">
             <h2 className="text-blueberry dark:text-white font-extrabold text-base mb-3">Tổng quan</h2>
             <p className="text-steel dark:text-light-grey text-[11px] mb-2">Chạm vào 1 dòng để xem chi tiết</p>
             <div className="grid grid-cols-1 gap-2">
@@ -7737,7 +7767,7 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
               </HoverDetailCard>
             </div>
           </div>
-          <div ref={incomeCardMobileRef} className="px-5 mt-4 bg-white dark:bg-[#1e1e32] rounded-3xl shadow-soft p-4">
+          <div ref={incomeCardMobileRef} className="px-5 mt-4">
             <h2 className="text-blueberry dark:text-white font-extrabold text-base mb-1">Thu nhập đã đi đâu?</h2>
             <p className="text-steel dark:text-light-grey text-[11px] mb-3">Tổng thu nhập → Thu nhập được chi + Thu nhập đặc biệt</p>
             <div className="space-y-1">
@@ -7760,14 +7790,14 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
             )}
             {isOverSpendingPool && <p className="text-cotton-candy text-xs mt-2 font-semibold">⚠️ Đã sử dụng vượt quá Thu nhập được chi của kỳ này.</p>}
           </div>
-          <div className="px-5 mt-4 bg-white dark:bg-[#1e1e32] rounded-3xl shadow-soft p-4">
+          <div className="px-5 mt-4">
             <h2 className="text-blueberry dark:text-white font-extrabold text-base mb-3">Top chi tiêu</h2>
             {expenseBreakdown.slice(0,3).map(c => (
               <div key={c.id} className="flex justify-between py-1"><span>{c.name}</span><span className="font-bold text-cotton-candy">{formatMoney(c.amount)}</span></div>
             ))}
           </div>
 
-          <div data-report-anchor="recent-activity" ref={activityAnchorMobileRef} className="px-5 mt-4 bg-white dark:bg-[#1e1e32] rounded-3xl shadow-soft p-4">
+          <div data-report-anchor="recent-activity" ref={activityAnchorMobileRef} className="px-5 mt-4">
             <h2 className="text-blueberry dark:text-white font-extrabold text-base mb-3">Hoạt động gần đây</h2>
             <ActivityFilterBar compact />
             {filteredActivityTxs.length === 0 ? (
@@ -8512,6 +8542,10 @@ function AuthScreen() {
     setLoading(false);
   }
 
+  function handleKeyDown(e) {
+    if (e.key === 'Enter' && !loading) handleSubmit();
+  }
+
   async function handleForgotPassword() {
     if (!email) { setMessage('Nhập email để nhận link đặt lại mật khẩu'); setIsError(true); return; }
     setLoading(true);
@@ -8580,6 +8614,7 @@ function AuthScreen() {
               <Mail size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-blueberry/50 pointer-events-none" />
               <input
                 type="email" value={email} onChange={(e) => setEmail(e.target.value)}
+                onKeyDown={handleKeyDown}
                 placeholder="Email của bạn" autoCapitalize="none"
                 className={`${fieldClass} pl-11 pr-5`}
               />
@@ -8588,6 +8623,7 @@ function AuthScreen() {
               <Lock size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-blueberry/50 pointer-events-none" />
               <input
                 type={showPassword ? 'text' : 'password'} value={password} onChange={(e) => setPassword(e.target.value)}
+                onKeyDown={handleKeyDown}
                 placeholder="Mật khẩu (tối thiểu 6 ký tự)"
                 className={`${fieldClass} pl-11 pr-11`}
               />
