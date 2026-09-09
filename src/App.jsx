@@ -2,6 +2,7 @@
    01. IMPORTS
    ============================================================================== */
 import { useState, useEffect, useLayoutEffect, useRef, Fragment, Children } from 'react';
+import { createPortal } from 'react-dom';
 import { supabase } from './supabaseClient';
 import {
   Home, Sparkles, Plus, BarChart3, Settings as SettingsIcon, TrendingUp, TrendingDown, PiggyBank, HeartPulse,
@@ -705,6 +706,17 @@ function formatMoneySigned(n) {
   return (n < 0 ? '-' : '') + Math.round(Math.abs(n)).toLocaleString('en-US') + 'đ';
 }
 
+// Rút gọn số tiền cho nhãn trục tung của biểu đồ (vd: 1.2tr, 500k) — trục tung
+// chỉ cần đọc nhanh độ lớn, không cần chính xác từng đồng như formatMoney.
+function formatMoneyCompact(n) {
+  const abs = Math.abs(n);
+  const trimZero = (s) => s.replace(/\.0$/, '');
+  if (abs >= 1e9) return trimZero((n / 1e9).toFixed(1)) + 'tỷ';
+  if (abs >= 1e6) return trimZero((n / 1e6).toFixed(1)) + 'tr';
+  if (abs >= 1e3) return trimZero((n / 1e3).toFixed(1)) + 'k';
+  return Math.round(n).toLocaleString('en-US');
+}
+
 // ==============================================================================
 // XOÁ GIAO DỊCH TRONG CÁC DÒNG LỊCH SỬ (dùng chung cho mọi màn hình có hiển thị
 // lịch sử giao dịch — Trang chủ, Chi tiết quỹ, Chi tiết ví, Báo cáo...).
@@ -1149,6 +1161,25 @@ const PERIOD_TAG_RE = /^\[KY:(\d{4}-\d{2})\]\s?/;
 function tagPeriodNote(periodKey, note) { return periodKey ? `[KY:${periodKey}] ${note || ''}`.trim() : (note || null); }
 function parsePeriodTag(note) { const m = (note || '').match(PERIOD_TAG_RE); return m ? m[1] : null; }
 function stripPeriodTag(note) { return (note || '').replace(PERIOD_TAG_RE, ''); }
+// Hậu tố hiển thị kỳ áp dụng cho hạn mức chi của danh mục (Tuần/Tháng/Năm) — dùng chung
+// cho cảnh báo vượt hạn mức khi nhập giao dịch. Mặc định "Tháng" cho danh mục cũ chưa có
+// limit_period (dữ liệu tạo trước khi có tính năng chọn kỳ).
+function limitPeriodSuffix(period) { return period === 'week' ? '/tuần' : period === 'year' ? '/năm' : '/tháng'; }
+// Số ngày quy đổi cho mỗi kỳ hạn mức — dùng để chia hạn mức theo kỳ (Tuần/Tháng/Năm) thành
+// một mức trần trung bình mỗi NGÀY, vì việc kiểm tra vượt hạn mức được làm theo tổng chi
+// trong ngày hôm nay của danh mục, không phải theo từng giao dịch riêng lẻ.
+function periodDaysFor(period) { return period === 'week' ? 7 : period === 'year' ? 365 : 30; }
+// Mức trần chi mỗi ngày quy đổi từ hạn mức kỳ của danh mục (null nếu danh mục chưa đặt hạn mức).
+function dailyLimitFor(cat) { return cat?.monthly_limit ? Number(cat.monthly_limit) / periodDaysFor(cat.limit_period) : null; }
+// Ngày hôm nay theo giờ địa phương, định dạng 'YYYY-MM-DD' — khớp định dạng field `date` của giao dịch.
+function todayDateStr() { const d = new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 10); }
+// Tổng đã chi trong ngày hôm nay của 1 danh mục (chỉ tính giao dịch loại 'expense', không tính quỹ).
+function todaySpentInCategory(transactions, categoryId) {
+  const today = todayDateStr();
+  return (transactions || [])
+    .filter((t) => t.type === 'expense' && t.category_id === categoryId && (t.date || (t.created_at || '').slice(0, 10)) === today)
+    .reduce((s, t) => s + Number(t.amount), 0);
+}
 
 function buildPeriods(year) {
   return Array.from({ length: 12 }, (_, i) => {
@@ -1245,11 +1276,12 @@ function periodBucketMatch(t, b, bi, buckets, period, year) {
   return d >= b.start && d <= b.end;
 }
 // Chuỗi số liệu theo từng danh mục, cho 1 card lọc thời gian độc lập.
-function buildCategorySeriesFor(transactions, cats, txType, buckets, period, periodKey, year) {
+function buildCategorySeriesFor(transactions, cats, txTypes, buckets, period, periodKey, year) {
+  const typesArr = Array.isArray(txTypes) ? txTypes : [txTypes];
   const isPeriodMode = period === 'month';
   return cats
     .map((c) => {
-      let catTx = transactions.filter((t) => t.category_id === c.id && t.type === txType);
+      let catTx = transactions.filter((t) => t.category_id === c.id && typesArr.includes(t.type) && !(t.type === 'allocation' && isInitialAllocationTx(t)));
       if (isPeriodMode) catTx = catTx.filter((t) => transactionPeriodKey(t) === periodKey);
       const values = buckets.map((b, bi) => catTx.filter((t) => periodBucketMatch(t, b, bi, buckets, period, year)).reduce((s, t) => s + Number(t.amount), 0));
       return { ...c, values, total: values.reduce((s, v) => s + v, 0) };
@@ -2409,7 +2441,13 @@ function AddTransaction({ onClose, accounts, categories, transactions, onSaved, 
   const categoryList = categories.filter((c) => c.type === categoryType && (type !== 'allocation' || c.is_fund));
   const activeCat = categories.find((c) => c.id === selectedCategory);
   const isFundCategory = type === 'expense' && !!activeCat?.is_fund;
-  const overLimit = type === 'expense' && activeCat?.monthly_limit && Number(amount) > Number(activeCat.monthly_limit);
+  // Hạn mức của danh mục (không áp dụng cho quỹ) được quy đổi ra mức trần MỖI NGÀY từ hạn
+  // mức theo kỳ (vd: 600,000đ/tháng → ~20,000đ/ngày). Kiểm tra bằng tổng đã chi HÔM NAY của
+  // danh mục này cộng thêm khoản đang nhập, chứ không so trực tiếp khoản đang nhập với cả
+  // hạn mức kỳ — vì hạn mức kỳ là tổng cho cả kỳ, không phải mức cho phép mỗi lần nhập.
+  const dailyLimit = !isFundCategory ? dailyLimitFor(activeCat) : null;
+  const todaySpent = dailyLimit != null ? todaySpentInCategory(transactions, activeCat.id) : 0;
+  const overLimit = type === 'expense' && dailyLimit != null && amount && (todaySpent + Number(amount)) > dailyLimit;
 
   const usesPeriod = type === 'income' || (type === 'allocation' && expenseSource === 'income') || (type === 'expense' && !isFundCategory && expenseSource === 'income');
   // Compute financials for the selected period using the new logic
@@ -2470,7 +2508,7 @@ function AddTransaction({ onClose, accounts, categories, transactions, onSaved, 
     // Check overlimit
     if (overLimit) {
       const confirm = window.confirm(
-        `Khoản chi này vượt quá hạn mức ${formatMoney(activeCat.monthly_limit)}. Bạn vẫn muốn tiếp tục nhập?`
+        `Cộng khoản này, hôm nay bạn sẽ chi ${formatMoney(todaySpent + Number(amount))} cho "${activeCat.name}" — vượt mức trung bình ${formatMoney(dailyLimit)}/ngày (quy đổi từ hạn mức ${formatMoney(activeCat.monthly_limit)}${limitPeriodSuffix(activeCat.limit_period)}). Bạn vẫn muốn tiếp tục nhập?`
       );
       if (!confirm) return;
       noteToSave = `[Vượt hạn mức] ${noteToSave || ''}`;
@@ -2478,13 +2516,13 @@ function AddTransaction({ onClose, accounts, categories, transactions, onSaved, 
 
     if (type === 'income') {
       if (!selectedPeriod) { alert('Vui lòng chọn Kỳ'); return; }
-      noteToSave = tagPeriodNote(selectedPeriod, note);
+      noteToSave = tagPeriodNote(selectedPeriod, noteToSave);
     } else if (type === 'allocation') {
       if (!expenseSource) { alert('Vui lòng chọn Nguồn tiền cho khoản nạp quỹ này.'); return; }
       if (expenseSource === 'income') {
         if (!selectedPeriod) { alert('Vui lòng chọn Kỳ (nguồn thu nhập để nạp quỹ)'); return; }
         if (periodOverLimit) { alert('Số tiền nạp vượt quá Thu nhập được chi còn lại của kỳ thu nhập.'); return; }
-        noteToSave = tagPeriodNote(selectedPeriod, note);
+        noteToSave = tagPeriodNote(selectedPeriod, noteToSave);
       } else {
         if (sourceOverBalance) { alert('Số dư nguồn tiền không đủ.'); return; }
         accountIdToSave = expenseSource;
@@ -2498,7 +2536,7 @@ function AddTransaction({ onClose, accounts, categories, transactions, onSaved, 
         if (expenseSource === 'income') {
           if (!selectedPeriod) { alert('Vui lòng chọn Kỳ'); return; }
           if (periodOverLimit) { alert('Số tiền chi vượt quá Thu nhập được chi còn lại của kỳ thu nhập.'); return; }
-          noteToSave = tagPeriodNote(selectedPeriod, note);
+          noteToSave = tagPeriodNote(selectedPeriod, noteToSave);
         } else {
           if (sourceOverBalance) { alert('Số dư nguồn tiền không đủ.'); return; }
           accountIdToSave = expenseSource;
@@ -2542,7 +2580,7 @@ function AddTransaction({ onClose, accounts, categories, transactions, onSaved, 
             <MoneyInput value={amount} onChange={setAmount} placeholder="0" className={`text-4xl font-bold text-center bg-transparent outline-none w-full ${overLimit || periodOverLimit ? 'text-cotton-candy' : type === 'income' || type === 'allocation' ? 'text-turquoise' : 'text-blueberry dark:text-white'}`} />
             <span className="text-4xl font-bold text-light-grey">đ</span>
           </div>
-          {overLimit && <p className="text-cotton-candy text-xs mt-2 font-semibold">⚠️ Vượt hạn mức {formatMoney(activeCat.monthly_limit)} của danh mục này!</p>}
+          {overLimit && <p className="text-cotton-candy text-xs mt-2 font-semibold">⚠️ Hôm nay đã chi {formatMoney(todaySpent)}, cộng khoản này sẽ vượt mức trung bình {formatMoney(dailyLimit)}/ngày của danh mục này!</p>}
           {periodOverLimit && <p className="text-cotton-candy text-xs mt-2 font-semibold">⚠️ Vượt Thu nhập được chi còn lại ({formatMoney(remainingAfterSpend)}) của kỳ này!</p>}
           {fundOverBalance && <p className="text-cotton-candy text-xs mt-2 font-semibold">⚠️ Vượt số dư hiện có của quỹ ({formatMoney(fundBalanceNow)})!</p>}
           {sourceOverBalance && <p className="text-cotton-candy text-xs mt-2 font-semibold">⚠️ Vượt số dư hiện có của nguồn tiền này ({formatMoney(accountBalance(sourceAccount, transactions || []))})!</p>}
@@ -2683,11 +2721,15 @@ function EditTransaction({ transaction, onClose, accounts, categories, transacti
 
   const activeCat = categories.find((c) => c.id === selectedCategory);
   const isFundCategory = type === 'expense' && !!activeCat?.is_fund;
-  const overLimit = type === 'expense' && activeCat?.monthly_limit && Number(amount) > Number(activeCat.monthly_limit);
-  const usesPeriod = type === 'income' || (type === 'allocation' && expenseSource === 'income') || (type === 'expense' && !isFundCategory && expenseSource === 'income');
-
   // Exclude the current transaction from the pool calculation to check if the new amount exceeds remaining
   const otherTxs = (allTx || []).filter(t => t.id !== transaction.id);
+  // Cùng quy tắc "hạn mức mỗi ngày" như AddTransaction — trừ chính giao dịch đang sửa ra
+  // khỏi tổng đã chi hôm nay để không tự cộng đè lên chính nó.
+  const dailyLimit = !isFundCategory ? dailyLimitFor(activeCat) : null;
+  const todaySpent = dailyLimit != null ? todaySpentInCategory(otherTxs, activeCat.id) : 0;
+  const overLimit = type === 'expense' && dailyLimit != null && amount && (todaySpent + Number(amount)) > dailyLimit;
+  const usesPeriod = type === 'income' || (type === 'allocation' && expenseSource === 'income') || (type === 'expense' && !isFundCategory && expenseSource === 'income');
+
   const financials = usesPeriod && selectedPeriod
     ? calculatePeriodFinancials(selectedPeriod, otherTxs, categories, spendingPoolByPeriod?.[selectedPeriod])
     : null;
@@ -2737,7 +2779,7 @@ function EditTransaction({ transaction, onClose, accounts, categories, transacti
 
     if (overLimit) {
       const confirm = window.confirm(
-        `Khoản chi này vượt quá hạn mức ${formatMoney(activeCat.monthly_limit)}. Bạn vẫn muốn tiếp tục nhập?`
+        `Cộng khoản này, hôm nay bạn sẽ chi ${formatMoney(todaySpent + Number(amount))} cho "${activeCat.name}" — vượt mức trung bình ${formatMoney(dailyLimit)}/ngày (quy đổi từ hạn mức ${formatMoney(activeCat.monthly_limit)}${limitPeriodSuffix(activeCat.limit_period)}). Bạn vẫn muốn tiếp tục nhập?`
       );
       if (!confirm) return;
       noteToSave = `[Vượt hạn mức] ${noteToSave || ''}`;
@@ -2745,13 +2787,13 @@ function EditTransaction({ transaction, onClose, accounts, categories, transacti
 
     if (type === 'income') {
       if (!selectedPeriod) { alert('Vui lòng chọn Kỳ'); return; }
-      noteToSave = tagPeriodNote(selectedPeriod, note);
+      noteToSave = tagPeriodNote(selectedPeriod, noteToSave);
     } else if (type === 'allocation') {
       if (!expenseSource) { alert('Vui lòng chọn Nguồn tiền cho khoản nạp quỹ này.'); return; }
       if (expenseSource === 'income') {
         if (!selectedPeriod) { alert('Vui lòng chọn Kỳ (nguồn thu nhập để nạp quỹ)'); return; }
         if (periodOverLimit) { alert('Số tiền nạp vượt quá Thu nhập được chi còn lại của kỳ thu nhập.'); return; }
-        noteToSave = tagPeriodNote(selectedPeriod, note);
+        noteToSave = tagPeriodNote(selectedPeriod, noteToSave);
       } else {
         if (sourceOverBalance) { alert('Số dư nguồn tiền không đủ.'); return; }
         accountIdToSave = expenseSource;
@@ -2764,7 +2806,7 @@ function EditTransaction({ transaction, onClose, accounts, categories, transacti
         if (expenseSource === 'income') {
           if (!selectedPeriod) { alert('Vui lòng chọn Kỳ'); return; }
           if (periodOverLimit) { alert('Số tiền chi vượt quá Thu nhập được chi còn lại của kỳ thu nhập.'); return; }
-          noteToSave = tagPeriodNote(selectedPeriod, note);
+          noteToSave = tagPeriodNote(selectedPeriod, noteToSave);
         } else {
           if (sourceOverBalance) { alert('Số dư nguồn tiền không đủ.'); return; }
           accountIdToSave = expenseSource;
@@ -2804,7 +2846,7 @@ function EditTransaction({ transaction, onClose, accounts, categories, transacti
             <MoneyInput value={amount} onChange={setAmount} placeholder="0" className={`text-4xl font-bold text-center bg-transparent outline-none w-full ${overLimit || periodOverLimit ? 'text-cotton-candy' : type === 'income' || type === 'allocation' ? 'text-turquoise' : 'text-blueberry dark:text-white'}`} />
             <span className="text-4xl font-bold text-light-grey">đ</span>
           </div>
-          {overLimit && <p className="text-cotton-candy text-xs mt-2 font-semibold">⚠️ Vượt hạn mức {formatMoney(activeCat.monthly_limit)} của danh mục này!</p>}
+          {overLimit && <p className="text-cotton-candy text-xs mt-2 font-semibold">⚠️ Hôm nay đã chi {formatMoney(todaySpent)}, cộng khoản này sẽ vượt mức trung bình {formatMoney(dailyLimit)}/ngày của danh mục này!</p>}
           {periodOverLimit && <p className="text-cotton-candy text-xs mt-2 font-semibold">⚠️ Vượt Thu nhập được chi còn lại ({formatMoney(remainingAfterSpend)}) của kỳ này!</p>}
           {fundOverBalance && <p className="text-cotton-candy text-xs mt-2 font-semibold">⚠️ Vượt số dư hiện có của quỹ ({formatMoney(fundBalanceNow)})!</p>}
           {sourceOverBalance && <p className="text-cotton-candy text-xs mt-2 font-semibold">⚠️ Vượt số dư hiện có của nguồn tiền này ({formatMoney(accountBalance(sourceAccount, allTx || []))})!</p>}
@@ -3508,7 +3550,7 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
   }
   function GlobalPeriodWidget({ className = '', wrapClassName = '', inactiveClass = 'text-steel dark:text-light-grey' }) {
     return (
-      <div className={`flex items-center gap-1.5 flex-wrap justify-end ${className}`}>
+      <div className={`flex items-center gap-1.5 flex-nowrap overflow-x-auto scrollbar-hide justify-end ${className}`}>
         <div className={`flex backdrop-blur-md rounded-full p-0.5 flex-shrink-0 ${wrapClassName || 'bg-white/50 dark:bg-white/10'}`}>
           {[{ k: 'week', l: 'Tuần' }, { k: 'month', l: 'Tháng' }, { k: 'year', l: 'Năm' }].map((p) => (
             <button
@@ -3522,7 +3564,7 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
           ))}
         </div>
         {globalPeriod === 'week' && (
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-1.5 flex-shrink-0">
             <DateField value={globalWeekStart} max={globalWeekEnd} showIcon={false} clearable={false}
               onChange={(v) => { setGlobalWeekStart(v); allCardFilters.forEach((f) => f.setWeekStart(v)); }}
               className="bg-white/50 dark:bg-white/10 rounded-full text-xs font-bold px-2.5 py-1.5 text-blueberry dark:text-white" />
@@ -3534,7 +3576,7 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
         )}
         {globalPeriod === 'year' && (
           <CustomSelect value={globalYear} onChange={(e) => { const y = Number(e.target.value); setGlobalYear(y); allCardFilters.forEach((f) => f.setYear(y)); }}
-            triggerClassName="bg-white/50 dark:bg-white/10 rounded-full text-xs font-bold px-2.5 py-1.5 outline-none text-blueberry dark:text-white [color-scheme:light] dark:[color-scheme:dark]">
+            triggerClassName="bg-white/50 dark:bg-white/10 rounded-full text-xs font-bold px-2.5 py-1.5 outline-none text-blueberry dark:text-white [color-scheme:light] dark:[color-scheme:dark] flex-shrink-0">
             {YEAR_OPTIONS.map((y) => <option key={y} value={y}>{y}</option>)}
           </CustomSelect>
         )}
@@ -3547,7 +3589,7 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
               setGlobalPeriodKey(newKey);
               allCardFilters.forEach((f) => { f.setYear(y); f.setPeriodKey(newKey); });
             }}
-              triggerClassName="bg-white/50 dark:bg-white/10 rounded-full text-xs font-bold px-2.5 py-1.5 outline-none text-blueberry dark:text-white [color-scheme:light] dark:[color-scheme:dark]">
+              triggerClassName="bg-white/50 dark:bg-white/10 rounded-full text-xs font-bold px-2.5 py-1.5 outline-none text-blueberry dark:text-white [color-scheme:light] dark:[color-scheme:dark] flex-shrink-0">
               {YEAR_OPTIONS.map((y) => <option key={y} value={y}>{y}</option>)}
             </CustomSelect>
             <CustomSelect value={globalPeriodKey} onChange={(e) => {
@@ -3555,7 +3597,7 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
               setGlobalPeriodKey(pk);
               allCardFilters.forEach((f) => f.setPeriodKey(pk));
             }}
-              triggerClassName="bg-white/50 dark:bg-white/10 rounded-full text-xs font-bold px-2.5 py-1.5 outline-none text-blueberry dark:text-white [color-scheme:light] dark:[color-scheme:dark] max-w-[190px]">
+              triggerClassName="bg-white/50 dark:bg-white/10 rounded-full text-xs font-bold px-2.5 py-1.5 outline-none text-blueberry dark:text-white [color-scheme:light] dark:[color-scheme:dark] max-w-[190px] flex-shrink-0 whitespace-nowrap">
               {buildPeriods(globalYear).map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
             </CustomSelect>
           </>
@@ -3583,12 +3625,27 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
   // Dữ liệu cho 2 card mới trên Trang chủ (mobile): "Chi tiêu theo danh mục" (donut)
   // và "Thu và Chi" (cột) — TÁCH RIÊNG thành 2 card thay vì gộp chung 1 card, và cùng
   // đi theo mobileComboFilter (đồng bộ với GlobalPeriodWidget / bộ lọc chung Dashboard).
-  const mobileSpendingTxs = filteredTxsForCard(transactions, mobileComboFilter, mobileBuckets, 'expense');
+  const mobileSpendingTxs = [
+    ...filteredTxsForCard(transactions, mobileComboFilter, mobileBuckets, 'expense'),
+    // Loại trừ khoản "Nạp quỹ lần đầu" (is_initial): đây là số dư tự nhập khi tạo quỹ,
+    // không phải tiền lấy ra từ thu nhập/ví trong kỳ nên không được tính là chi tiêu.
+    ...filteredTxsForCard(transactions, mobileComboFilter, mobileBuckets, 'allocation').filter((t) => !isInitialAllocationTx(t)),
+  ];
   const mobileSpendingByCat = expenseCats
     .map((c) => ({ ...c, amount: mobileSpendingTxs.filter((t) => t.category_id === c.id).reduce((s, t) => s + Number(t.amount), 0) }))
     .filter((c) => c.amount > 0)
     .sort((a, b) => b.amount - a.amount);
   const mobileSpendingTotal = mobileSpendingByCat.reduce((s, c) => s + c.amount, 0) || 1;
+
+  // Donut "Tổng thu nhập theo danh mục" (mobile, trên Trang chủ) — tỷ trọng % từng loại
+  // thu nhập trong kỳ, dùng chung mobileComboFilter với card "Chi tiêu theo danh mục" bên
+  // dưới để 2 biểu đồ luôn khớp cùng khoảng thời gian.
+  const mobileIncomeTxs = filteredTxsForCard(transactions, mobileComboFilter, mobileBuckets, 'income');
+  const mobileIncomeByCat = incomeCats
+    .map((c) => ({ ...c, amount: mobileIncomeTxs.filter((t) => t.category_id === c.id).reduce((s, t) => s + Number(t.amount), 0) }))
+    .filter((c) => c.amount > 0)
+    .sort((a, b) => b.amount - a.amount);
+  const mobileIncomeTotal = mobileIncomeByCat.reduce((s, c) => s + c.amount, 0) || 1;
 
   const mobileIncTotals = bucketTotalsFor(transactions, 'income', mobileBuckets, mobileComboFilter.period, mobileComboFilter.periodKey, mobileComboFilter.year);
   const mobileExpTotals = bucketTotalsFor(transactions, 'expense', mobileBuckets, mobileComboFilter.period, mobileComboFilter.periodKey, mobileComboFilter.year);
@@ -3597,18 +3654,25 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
 
   const incomeCardBuckets = computePeriodBuckets(incomeCardFilter);
   const incomeCardSeries = buildCategorySeriesFor(transactions, incomeCats, 'income', incomeCardBuckets, incomeCardFilter.period, incomeCardFilter.periodKey, incomeCardFilter.year);
-  const incomeCardMax = Math.max(...incomeCardSeries.flatMap((c) => c.values), 1);
+  // maxVal phải theo TỔNG CẢ CỘT (sum theo bucket) chứ không phải giá trị lớn nhất của 1
+  // danh mục riêng lẻ — nếu không cột chồng sẽ tràn ra ngoài khung (giống lưu ý ở costMaxVal).
+  const incomeCardBucketTotals = incomeCardBuckets.map((b, bi) => incomeCardSeries.reduce((s, c) => s + (c.values[bi] || 0), 0));
+  const incomeCardMax = Math.max(...incomeCardBucketTotals, 1);
 
   const expenseCardBuckets = computePeriodBuckets(expenseCardFilter);
-  const expenseCardSeries = buildCategorySeriesFor(transactions, expenseCats, 'expense', expenseCardBuckets, expenseCardFilter.period, expenseCardFilter.periodKey, expenseCardFilter.year);
-  const expenseCardMax = Math.max(...expenseCardSeries.flatMap((c) => c.values), 1);
+  const expenseCardSeries = buildCategorySeriesFor(transactions, expenseCats, ['expense', 'allocation'], expenseCardBuckets, expenseCardFilter.period, expenseCardFilter.periodKey, expenseCardFilter.year);
+  const expenseCardBucketTotals = expenseCardBuckets.map((b, bi) => expenseCardSeries.reduce((s, c) => s + (c.values[bi] || 0), 0));
+  const expenseCardMax = Math.max(...expenseCardBucketTotals, 1);
 
-  // Card "Phân tích chi phí" — cột là từng loại chi tiêu (mỗi loại 1 màu), đường là
-  // xu hướng thu nhập tổng, cùng lọc theo costFilter (Tuần/Tháng/Năm) riêng của card.
+  // Card "Phân tích chi phí" — cột CHỒNG (stacked) từng loại chi tiêu (mỗi loại 1 màu),
+  // đường liền là "Tổng chi" theo từng cột, đường nét đứt là "Thu nhập" để so sánh.
+  // costMaxVal phải dựa trên TỔNG CẢ CỘT (sum theo bucket) chứ không phải giá trị lớn
+  // nhất của 1 danh mục riêng lẻ — nếu không cột chồng sẽ bị tràn ra ngoài khung.
   const costBuckets = computePeriodBuckets(costFilter);
   const costExpenseSeries = buildCategorySeriesFor(transactions, expenseCats, 'expense', costBuckets, costFilter.period, costFilter.periodKey, costFilter.year);
   const costIncomeTotals = bucketTotalsFor(transactions, 'income', costBuckets, costFilter.period, costFilter.periodKey, costFilter.year);
-  const costMaxVal = Math.max(...costExpenseSeries.flatMap((c) => c.values), ...costIncomeTotals, 1);
+  const costBucketTotals = costBuckets.map((b, bi) => costExpenseSeries.reduce((s, c) => s + (c.values[bi] || 0), 0));
+  const costMaxVal = Math.max(...costBucketTotals, ...costIncomeTotals, 1);
 
   // Ledger modal ("Xem chi tiết") cho 2 card "Thu nhập/Chi tiêu theo danh mục" — cùng
   // TxLedgerModal đang dùng ở màn Báo cáo, lấy đúng danh sách giao dịch thô đang được
@@ -3651,7 +3715,8 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
   }
 
   // Donut "Ngân sách tháng này" — rê chuột vào từng lát cắt để xem tên danh mục,
-  // số tiền và % trên tổng chi tiêu.
+  // số tiền và % trên tổng chi tiêu. Giữa vòng tròn hiện "Tổng" + tổng số tiền, giống
+  // cách SegmentDonut đang hiện ở dashboard desktop (card "Tổng thu nhập"/"Tổng chi tiêu").
   function SpendingDonut({ data, total }) {
     const { tip, wrapRef, showTip, hideTip } = useChartTooltip();
     const r = 60, circ = 2 * Math.PI * r;
@@ -3659,23 +3724,29 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
     return (
       <div ref={wrapRef} className="relative flex items-center gap-6">
         <ChartTooltip tip={tip} />
-        <svg width="150" height="150" viewBox="0 0 150 150" className="-rotate-90 flex-shrink-0">
-          {data.map((cat, i) => {
-            const pct = cat.amount / total;
-            const dash = pct * circ;
-            const offset = acc;
-            acc += dash;
-            return (
-              <circle
-                key={cat.id} cx="75" cy="75" r={r} fill="none" stroke={palette[i % palette.length]} strokeWidth="14"
-                strokeDasharray={`${dash} ${circ - dash}`} strokeDashoffset={-offset} strokeLinecap="round"
-                className="cursor-default"
-                onMouseMove={(e) => showTip(e, { label: cat.name, value: formatMoney(cat.amount), pct: Math.round(pct * 100) })}
-                onMouseLeave={hideTip}
-              />
-            );
-          })}
-        </svg>
+        <div className="relative flex-shrink-0" style={{ width: 150, height: 150 }}>
+          <svg width="150" height="150" viewBox="0 0 150 150" className="-rotate-90">
+            {data.map((cat, i) => {
+              const pct = cat.amount / total;
+              const dash = pct * circ;
+              const offset = acc;
+              acc += dash;
+              return (
+                <circle
+                  key={cat.id} cx="75" cy="75" r={r} fill="none" stroke={palette[i % palette.length]} strokeWidth="14"
+                  strokeDasharray={`${dash} ${circ - dash}`} strokeDashoffset={-offset} strokeLinecap="round"
+                  className="cursor-default"
+                  onMouseMove={(e) => showTip(e, { label: cat.name, value: formatMoney(cat.amount), pct: Math.round(pct * 100) })}
+                  onMouseLeave={hideTip}
+                />
+              );
+            })}
+          </svg>
+          <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+            <span className="text-[11px] text-steel dark:text-light-grey">Tổng</span>
+            <span className="text-sm font-bold text-blueberry dark:text-white">{formatMoney(total)}</span>
+          </div>
+        </div>
         <div className="flex flex-col gap-2 text-sm min-w-0">
           {data.map((cat, i) => (
             <div key={cat.id} className="flex items-center gap-2">
@@ -3688,38 +3759,105 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
     );
   }
 
+  // Biểu đồ CỘT CHỒNG DỌC + đường Tổng cho 2 card "Thu nhập theo danh mục" và "Chi tiêu
+  // theo danh mục" — cùng 1 component, chỉ khác dataset (series) truyền vào. Đúng theo
+  // yêu cầu: mỗi kỳ (theo bộ lọc Tuần/Tháng/Năm, hoặc theo NGÀY nếu filter là ngày) là 1
+  // CỘT dọc duy nhất (trục hoành = thời gian), các danh mục (vd: Ăn uống, Đi lại, Nạp
+  // quỹ...) XẾP CHỒNG lên nhau trong CÙNG 1 cột đó theo chiều dọc, mỗi danh mục 1 màu.
+  // Trục tung = số tiền, maxVal auto-tính theo TỔNG CẢ CỘT (sum theo bucket, xem
+  // incomeCardMax/expenseCardMax) để cột chồng không tràn khung. Đường liền nối đỉnh từng
+  // cột (= tổng của kỳ đó), có nhãn số tiền hiện phía trên mỗi điểm giống ảnh mẫu. Rê
+  // chuột vào từng đoạn màu (hoặc từng điểm trên đường) để xem tên danh mục/kỳ, số liệu
+  // và % (tỷ trọng của danh mục đó trong tổng của kỳ). Legend bên dưới liệt kê mỗi danh
+  // mục đúng 1 lần, số tiền là tổng của cả khoảng thời gian đang chọn.
   function CategoryBarChart({ series, maxVal, buckets }) {
     const { tip, wrapRef, showTip, hideTip } = useChartTooltip();
     if (series.length === 0) return null;
+    const chartH = 200; // chiều cao vùng vẽ (px)
+    const labelColW = 40; // độ rộng cột nhãn số tiền bên trái (trục tung)
+    const bucketTotals = buckets.map((b, bi) => series.reduce((s, c) => s + (c.values[bi] || 0), 0));
+    // Trục tung: 4 mốc từ 0 đến maxVal (maxVal đã được tính theo tổng cả cột mỗi kỳ).
+    const yTicks = [0, 0.33, 0.66, 1].map((f) => maxVal * f);
+    const yPct = (v) => Math.min((v / maxVal) * 100, 100); // % chiều cao tính từ đáy lên
+    const xCenter = (bi) => ((bi + 0.5) / buckets.length) * 100; // % vị trí ngang, canh giữa mỗi cột
+    const totalLinePoints = bucketTotals.map((v, bi) => `${xCenter(bi)},${100 - yPct(v)}`).join(' ');
+
     return (
-      <div ref={wrapRef} className="relative">
+      <div ref={wrapRef} className="relative min-w-0">
         <ChartTooltip tip={tip} />
-        <div className="flex items-end gap-3 overflow-x-auto pb-1 scrollbar-hide" style={{ height: 130 }}>
-          {buckets.map((b, bi) => {
-            const bucketTotal = series.reduce((s, c) => s + (c.values[bi] || 0), 0);
-            return (
-              <div key={bi} className="flex flex-col items-center justify-end h-full flex-shrink-0" style={{ minWidth: series.length * 9 + 10 }}>
-                <div className="flex items-end gap-1 h-full">
-                  {series.map((c, i) => {
-                    const v = c.values[bi];
-                    const pct = bucketTotal > 0 ? Math.round((v / bucketTotal) * 100) : 0;
-                    return (
-                      <div
-                        key={c.id}
-                        className="rounded-t-sm cursor-default"
-                        style={{ width: 8, height: `${(v / maxVal) * 100}%`, minHeight: v > 0 ? 3 : 0, background: palette[i % palette.length] }}
-                        onMouseMove={(e) => showTip(e, { label: `${c.name} (${b.label})`, value: formatMoney(v), pct })}
-                        onMouseLeave={hideTip}
-                      />
-                    );
-                  })}
-                </div>
-                <span className="text-[10px] text-steel dark:text-light-grey mt-1.5 whitespace-nowrap">{b.label}</span>
+        <div className="flex min-w-0">
+          {/* Cột nhãn số tiền bên trái (trục tung), từ cao xuống thấp */}
+          <div className="flex flex-col justify-between flex-shrink-0 pr-2" style={{ height: chartH, width: labelColW }}>
+            {[...yTicks].reverse().map((v, i) => (
+              <span key={i} className="text-[9px] text-steel dark:text-light-grey whitespace-nowrap leading-none">{formatMoneyCompact(v)}</span>
+            ))}
+          </div>
+
+          {/* Vùng vẽ: các cột chồng theo từng kỳ/ngày + đường Tổng (trục hoành = thời gian) */}
+          <div className="flex-1 min-w-0 relative" style={{ height: chartH, overflow: 'visible' }}>
+            {/* Lưới ngang mảnh theo mốc số tiền */}
+            <div className="absolute inset-0 flex flex-col justify-between pointer-events-none">
+              {yTicks.map((_, i) => (
+                <div key={i} className="border-t border-dashed border-steel/20 dark:border-light-grey/15 w-full" />
+              ))}
+            </div>
+
+            {/* Các cột chồng — mỗi cột là 1 kỳ/ngày, mỗi màu là 1 danh mục */}
+            <div className="absolute inset-0 flex items-end">
+              {buckets.map((b, bi) => {
+                const bucketTotal = bucketTotals[bi];
+                return (
+                  <div key={bi} className="flex-1 h-full flex flex-col-reverse items-stretch px-1 box-border min-w-0">
+                    {series.map((c, i) => {
+                      const v = c.values[bi];
+                      if (!v) return null;
+                      const h = yPct(v);
+                      const pct = bucketTotal > 0 ? Math.round((v / bucketTotal) * 100) : 0;
+                      return (
+                        <div
+                          key={c.id}
+                          className="w-full cursor-default"
+                          style={{ height: `${h}%`, minHeight: v > 0 ? 2 : 0, background: palette[i % palette.length] }}
+                          onMouseMove={(e) => showTip(e, { label: `${c.name} (${b.label})`, value: formatMoney(v), pct })}
+                          onMouseLeave={hideTip}
+                        />
+                      );
+                    })}
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Đường liền nối đỉnh từng cột = Tổng của kỳ/ngày đó */}
+            <svg width="100%" height="100%" viewBox="0 0 100 100" preserveAspectRatio="none" className="absolute inset-0 pointer-events-none overflow-visible">
+              <polyline points={totalLinePoints} fill="none" stroke="#0DBACC" strokeWidth="2" vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+
+            {/* Chấm tròn + nhãn số tiền trên mỗi điểm Tổng, giống ảnh mẫu, rê vào xem số liệu */}
+            {bucketTotals.map((v, bi) => (
+              <div
+                key={bi}
+                className="absolute cursor-default"
+                style={{ left: `${xCenter(bi)}%`, top: `${100 - yPct(v)}%`, transform: 'translate(-50%, -50%)' }}
+                onMouseMove={(e) => showTip(e, { label: `Tổng (${buckets[bi].label})`, value: formatMoney(v) })}
+                onMouseLeave={hideTip}
+              >
+                <span className="absolute left-1/2 -translate-x-1/2 bottom-[calc(100%+3px)] text-[10px] font-extrabold text-blueberry dark:text-white whitespace-nowrap">{v > 0 ? formatMoneyCompact(v) : ''}</span>
+                <div className="w-2 h-2 rounded-full bg-turquoise border border-white dark:border-night-sky" />
               </div>
-            );
-          })}
+            ))}
+          </div>
         </div>
-        <div className="flex flex-col gap-1.5 mt-4">
+
+        {/* Trục hoành: nhãn kỳ/ngày theo từng cột */}
+        <div className="flex mt-2" style={{ paddingLeft: labelColW + 8 }}>
+          {buckets.map((b, bi) => (
+            <div key={bi} className="flex-1 text-center text-[10px] text-steel dark:text-light-grey whitespace-nowrap truncate px-0.5">{b.label}</div>
+          ))}
+        </div>
+
+        {/* Legend — mỗi danh mục 1 dòng duy nhất, số tiền là tổng cả khoảng thời gian đang chọn */}
+        <div className={`flex flex-col gap-1.5 mt-4 ${series.length > 6 ? 'max-h-40 overflow-y-auto scrollbar-hide pr-1' : ''}`}>
           {series.map((c, i) => (
             <div key={c.id} className="flex items-center gap-2">
               <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: palette[i % palette.length] }} />
@@ -3765,63 +3903,105 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
     );
   }
 
-  // Biểu đồ kết hợp cột + đường cho card "Phân tích chi phí": mỗi loại chi tiêu là 1
-  // cột màu riêng theo từng mốc thời gian, đường liền là xu hướng tổng thu nhập. Rê
-  // chuột vào cột hoặc điểm trên đường để xem tên, số liệu và % (tooltip riêng, thay
-  // cho <title> mặc định của trình duyệt).
+  // Biểu đồ kết hợp CỘT CHỒNG DỌC + đường cho card "Phân tích chi phí" — đúng theo ảnh
+  // mẫu: mỗi kỳ (theo bộ lọc Tuần/Tháng/Năm) là 1 CỘT dọc (trục hoành = thời gian theo bộ
+  // lọc), các loại chi tiêu XẾP CHỒNG lên nhau theo chiều dọc trong cột đó (mỗi loại 1
+  // màu, trục tung = số tiền, mốc tối đa lấy theo THU NHẬP cao nhất — xem costMaxVal, tức
+  // "tối đa là tổng thu nhập" đúng yêu cầu). Đường liền "Tổng chi" nối đỉnh từng cột (=
+  // tổng chi của kỳ đó), có nhãn số tiền hiện ngay phía trên mỗi điểm giống ảnh mẫu; đường
+  // nét đứt "Thu nhập" đi kèm để so sánh chi/thu. Rê chuột vào từng đoạn màu (hoặc từng
+  // điểm trên đường Tổng chi) để xem tên, số liệu và % (tỷ trọng của loại đó trong tổng
+  // chi của kỳ) ngay trong cột đó.
   function IncomeExpenseComboChart({ buckets, series, incomeTotals, maxVal }) {
     const { tip, wrapRef, showTip, hideTip } = useChartTooltip();
     if (buckets.length === 0) return null;
-    const bucketW = 52;
-    const chartH = 128;
-    const vbWidth = Math.max(buckets.length * bucketW, 200);
-    const barW = 7, barGap = 3;
-    const groupCenterX = (bi) => bi * bucketW + bucketW / 2;
-    const valueY = (v) => chartH - (v / maxVal) * chartH;
-    const linePoints = incomeTotals.map((v, bi) => `${groupCenterX(bi)},${valueY(v)}`).join(' ');
+    const chartH = 220; // chiều cao vùng vẽ (px)
+    const labelColW = 40; // độ rộng cột nhãn số tiền bên trái (trục tung)
+    const bucketTotals = buckets.map((b, bi) => series.reduce((s, c) => s + (c.values[bi] || 0), 0));
+    // Trục tung: 5 mốc từ 0 đến maxVal (maxVal = tổng thu nhập cao nhất, xem costMaxVal).
+    const yTicks = [0, 0.25, 0.5, 0.75, 1].map((f) => maxVal * f);
+    const yPct = (v) => Math.min((v / maxVal) * 100, 100); // % chiều cao tính từ đáy lên
+    const xCenter = (bi) => ((bi + 0.5) / buckets.length) * 100; // % vị trí ngang, canh giữa mỗi cột
+    const totalLinePoints = bucketTotals.map((v, bi) => `${xCenter(bi)},${100 - yPct(v)}`).join(' ');
+    const incomeLinePoints = incomeTotals.map((v, bi) => `${xCenter(bi)},${100 - yPct(v)}`).join(' ');
     return (
       <div ref={wrapRef} className="relative">
         <ChartTooltip tip={tip} />
-        <div className="relative" style={{ height: chartH + 28 }}>
-          <svg width="100%" height={chartH} viewBox={`0 0 ${vbWidth} ${chartH}`} preserveAspectRatio="none" className="absolute top-0 left-0 w-full" style={{ height: chartH }}>
-            {series.map((c, i) => buckets.map((b, bi) => {
-              const v = c.values[bi];
-              if (!v) return null;
-              const groupWidth = series.length * barW + (series.length - 1) * barGap;
-              const startX = groupCenterX(bi) - groupWidth / 2;
-              const x = startX + i * (barW + barGap);
-              const y = valueY(v);
-              const bucketTotal = series.reduce((s, c2) => s + (c2.values[bi] || 0), 0);
-              const pct = bucketTotal > 0 ? Math.round((v / bucketTotal) * 100) : 0;
-              return (
-                <rect
-                  key={`${c.id}-${bi}`} x={x} y={y} width={barW} height={Math.max(chartH - y, v > 0 ? 2 : 0)} rx={1.5} fill={palette[i % palette.length]}
-                  className="cursor-default"
-                  onMouseMove={(e) => showTip(e, { label: `${c.name} (${b.label})`, value: formatMoney(v), pct })}
-                  onMouseLeave={hideTip}
-                />
-              );
-            }))}
-            <polyline points={linePoints} fill="none" stroke="#0DBACC" strokeWidth="2" vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeLinejoin="round" />
-            {incomeTotals.map((v, bi) => (
-              <circle
-                key={bi} cx={groupCenterX(bi)} cy={valueY(v)} r="3.2" fill="#0DBACC" stroke="white" strokeWidth="1.2"
-                className="cursor-default"
-                onMouseMove={(e) => showTip(e, { label: `Thu nhập (${buckets[bi].label})`, value: formatMoney(v) })}
-                onMouseLeave={hideTip}
-              />
+        <div className="flex">
+          {/* Cột nhãn số tiền bên trái (trục tung), từ cao xuống thấp */}
+          <div className="flex flex-col justify-between flex-shrink-0 pr-2" style={{ height: chartH, width: labelColW }}>
+            {[...yTicks].reverse().map((v, i) => (
+              <span key={i} className="text-[9px] text-steel dark:text-light-grey whitespace-nowrap leading-none">{formatMoneyCompact(v)}</span>
             ))}
-          </svg>
-          <div className="absolute left-0 right-0" style={{ top: chartH + 6, width: '100%' }}>
-            <div className="relative" style={{ height: 16 }}>
-              {buckets.map((b, bi) => (
-                <span key={bi} className="absolute text-[10px] text-steel dark:text-light-grey whitespace-nowrap" style={{ left: `${(groupCenterX(bi) / vbWidth) * 100}%`, transform: 'translateX(-50%)' }}>{b.label}</span>
+          </div>
+
+          {/* Vùng vẽ: các cột chồng theo từng kỳ + 2 đường xu hướng (trục hoành = thời gian) */}
+          <div className="flex-1 min-w-0 relative" style={{ height: chartH, overflow: 'visible' }}>
+            {/* Lưới ngang mảnh theo mốc số tiền */}
+            <div className="absolute inset-0 flex flex-col justify-between pointer-events-none">
+              {yTicks.map((_, i) => (
+                <div key={i} className="border-t border-dashed border-steel/20 dark:border-light-grey/15 w-full" />
               ))}
             </div>
+
+            {/* Các cột chồng — mỗi cột là 1 kỳ thời gian, mỗi màu là 1 loại chi tiêu */}
+            <div className="absolute inset-0 flex items-end">
+              {buckets.map((b, bi) => {
+                const bucketTotal = bucketTotals[bi];
+                return (
+                  <div key={bi} className="flex-1 h-full flex flex-col-reverse items-stretch px-1.5 box-border min-w-0">
+                    {series.map((c, i) => {
+                      const v = c.values[bi];
+                      if (!v) return null;
+                      const h = yPct(v);
+                      const pct = bucketTotal > 0 ? Math.round((v / bucketTotal) * 100) : 0;
+                      return (
+                        <div
+                          key={c.id}
+                          className="w-full cursor-default"
+                          style={{ height: `${h}%`, minHeight: v > 0 ? 2 : 0, background: palette[i % palette.length] }}
+                          onMouseMove={(e) => showTip(e, { label: `${c.name} (${b.label})`, value: formatMoney(v), pct })}
+                          onMouseLeave={hideTip}
+                        />
+                      );
+                    })}
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* 2 đường xu hướng: liền = Tổng chi, nét đứt = Thu nhập */}
+            <svg width="100%" height="100%" viewBox="0 0 100 100" preserveAspectRatio="none" className="absolute inset-0 pointer-events-none overflow-visible">
+              <polyline points={incomeLinePoints} fill="none" stroke="currentColor" className="text-steel/50 dark:text-light-grey/50" strokeWidth="1.5" strokeDasharray="5 4" vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeLinejoin="round" />
+              <polyline points={totalLinePoints} fill="none" stroke="#0DBACC" strokeWidth="2" vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+
+            {/* Chấm tròn + nhãn số tiền trên mỗi điểm "Tổng chi", giống ảnh mẫu, rê vào xem số liệu */}
+            {bucketTotals.map((v, bi) => (
+              <div
+                key={bi}
+                className="absolute cursor-default"
+                style={{ left: `${xCenter(bi)}%`, top: `${100 - yPct(v)}%`, transform: 'translate(-50%, -50%)' }}
+                onMouseMove={(e) => showTip(e, { label: `Tổng chi (${buckets[bi].label})`, value: formatMoney(v) })}
+                onMouseLeave={hideTip}
+              >
+                <span className="absolute left-1/2 -translate-x-1/2 bottom-[calc(100%+3px)] text-[10px] font-extrabold text-blueberry dark:text-white whitespace-nowrap">{v > 0 ? formatMoneyCompact(v) : ''}</span>
+                <div className="w-2 h-2 rounded-full bg-turquoise border border-white dark:border-night-sky" />
+              </div>
+            ))}
           </div>
         </div>
+
+        {/* Trục hoành: nhãn thời gian theo từng cột (T5/2025, T6/2025... giống ảnh mẫu) */}
+        <div className="flex mt-2" style={{ paddingLeft: labelColW + 8 }}>
+          {buckets.map((b, bi) => (
+            <div key={bi} className="flex-1 text-center text-[10px] text-steel dark:text-light-grey whitespace-nowrap truncate px-0.5">{b.label}</div>
+          ))}
+        </div>
+
         <div className="flex items-center gap-4 mt-3 text-xs flex-wrap">
-          <span className="flex items-center gap-1.5 text-steel dark:text-light-grey font-semibold"><span className="w-3 h-0.5 rounded-full bg-turquoise inline-block" />Xu hướng thu nhập</span>
+          <span className="flex items-center gap-1.5 text-steel dark:text-light-grey font-semibold"><span className="w-3 h-0.5 rounded-full bg-turquoise inline-block" />Tổng chi</span>
+          <span className="flex items-center gap-1.5 text-steel dark:text-light-grey font-semibold"><span className="w-3 h-0.5 rounded-full border-t border-dashed border-steel dark:border-light-grey inline-block" />Thu nhập</span>
         </div>
         <div className="flex flex-col gap-1.5 mt-3">
           {series.map((c, i) => (
@@ -3921,13 +4101,17 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
   const totalMonthlyLimit = categories.filter((c) => c.type === 'expense' && c.monthly_limit).reduce((s, c) => s + Number(c.monthly_limit), 0);
   const limitPct = totalMonthlyLimit > 0 ? (expenseThisMonth / totalMonthlyLimit) * 100 : 0;
 
-  function catTotalsForYear(cats, txType, selectedYear, selectedMonth) {
+  function catTotalsForYear(cats, txTypes, selectedYear, selectedMonth) {
+    const typesArr = Array.isArray(txTypes) ? txTypes : [txTypes];
     return cats
       .map((c) => ({
         ...c,
         amount: transactions
           .filter((t) => {
-            if (t.category_id !== c.id || t.type !== txType) return false;
+            if (t.category_id !== c.id || !typesArr.includes(t.type)) return false;
+            // Loại trừ khoản "Nạp quỹ lần đầu" (is_initial) — số dư tự nhập khi tạo quỹ,
+            // không phải tiền lấy ra từ thu nhập/ví trong kỳ nên không tính là chi tiêu.
+            if (t.type === 'allocation' && isInitialAllocationTx(t)) return false;
             const [py, pm] = transactionPeriodKey(t).split('-').map(Number);
             if (py !== selectedYear) return false;
             if (selectedMonth !== 'all' && pm !== Number(selectedMonth)) return false;
@@ -3990,7 +4174,10 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
   const incomeByCatYear = catTotalsForYear(incomeCats, 'income', incomeTotalsYear, incomeTotalsMonth);
   const totalIncomeYear = incomeByCatYear.reduce((s, c) => s + c.amount, 0) || 1;
   const incomeYearSegments = pieSegments(incomeByCatYear, totalIncomeYear);
-  const expenseByCatYear = catTotalsForYear(expenseCats, 'expense', expenseTotalsYear, expenseTotalsMonth);
+  // Tính cả giao dịch loại 'allocation' (nạp quỹ) vào "Tổng chi tiêu" — đồng nhất với
+  // cách card "Chi tiêu theo danh mục" bên Mobile đang tính (nạp quỹ cũng là một hình
+  // thức chi tiền ra khỏi phần chi tiêu tự do, xem thêm ghi chú ở mobileSpendingByCat).
+  const expenseByCatYear = catTotalsForYear(expenseCats, ['expense', 'allocation'], expenseTotalsYear, expenseTotalsMonth);
   const totalExpenseYear = expenseByCatYear.reduce((s, c) => s + c.amount, 0) || 1;
   const expenseYearSegments = pieSegments(expenseByCatYear, totalExpenseYear);
 
@@ -4128,7 +4315,7 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
           {/* Mobile wallet carousel */}
           {mobileWalletCarousel}
 
-          <div className="mt-6 px-5 flex gap-3 overflow-x-auto pb-2 scrollbar-hide hide-scrollbar" style={{ WebkitOverflowScrolling: 'touch', scrollSnapType: 'x mandatory', scrollPaddingLeft: 20 }}>
+          <div className="mt-6 px-5 flex gap-3 overflow-x-auto pb-2 scrollbar-hide hide-scrollbar" style={{ WebkitOverflowScrolling: 'touch', scrollSnapType: 'x proximity', scrollPaddingLeft: 20, touchAction: 'pan-x' }}>
             {fundCategories.length === 0 ? <p className="text-steel dark:text-light-grey text-sm">Đánh dấu danh mục là "Quỹ" trong Cài đặt để hiện ở đây.</p>
               : fundCategories.map((f) => (
                 <button key={f.id} onClick={() => onOpenFund(f.id)} style={{ scrollSnapAlign: 'start' }} className="relative flex-shrink-0 w-[150px] text-left active:scale-95 transition">
@@ -4139,12 +4326,12 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
                         <stop offset="100%" stopColor="#F6A9C4" />
                       </linearGradient>
                     </defs>
-                    {/* Tai heo — hình cánh tròn dựng đứng, không rũ xuống như tai chó */}
-                    <path d="M26,56 Q17,30 39,10 Q60,28 54,54 Q40,66 26,56 Z" fill={`url(#piggyBody-${f.id})`} />
-                    <path d="M144,56 Q153,30 131,10 Q110,28 116,54 Q130,66 144,56 Z" fill={`url(#piggyBody-${f.id})`} />
-                    <path d="M32,50 Q27,32 40,20 Q52,31 48,49 Q40,57 32,50 Z" fill="#FFC2D9" />
-                    <path d="M138,50 Q143,32 130,20 Q118,31 122,49 Q130,57 138,50 Z" fill="#FFC2D9" />
-                    {/* Chân ngồi, thò ra dưới thân — có rãnh nhỏ gợi móng chẻ của heo */}
+                    {/* Tai — cánh nhọn đặc trưng của heo (không tròn như tai gấu) */}
+                    <path d="M20,54 Q10,22 42,8 Q60,24 52,52 Q36,64 20,54 Z" fill={`url(#piggyBody-${f.id})`} />
+                    <path d="M150,54 Q160,22 128,8 Q110,24 118,52 Q134,64 150,54 Z" fill={`url(#piggyBody-${f.id})`} />
+                    <path d="M28,48 Q23,29 42,20 Q52,29 48,47 Q38,54 28,48 Z" fill="#FFC2D9" />
+                    <path d="M142,48 Q147,29 128,20 Q118,29 122,47 Q132,54 142,48 Z" fill="#FFC2D9" />
+                    {/* Chân — bầu dục có rãnh chẻ móng, đặc trưng của heo (gấu không có móng chẻ) */}
                     <ellipse cx="52" cy="164" rx="16" ry="11" fill="#F6A9C4" />
                     <ellipse cx="118" cy="164" rx="16" ry="11" fill="#F6A9C4" />
                     <line x1="52" y1="157" x2="52" y2="171" stroke="#E28AAE" strokeWidth="2.5" strokeLinecap="round" />
@@ -4155,17 +4342,16 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
                     <circle cx="46" cy="99" r="13" fill="#F49CB9" opacity="0.55" />
                     <circle cx="124" cy="99" r="13" fill="#F49CB9" opacity="0.55" />
                     {/* Mắt */}
-                    <circle cx="62" cy="87" r="5" fill="#6B4258" />
-                    <circle cx="108" cy="87" r="5" fill="#6B4258" />
-                    <circle cx="63.5" cy="85" r="1.4" fill="#fff" />
-                    <circle cx="109.5" cy="85" r="1.4" fill="#fff" />
+                    <ellipse cx="62" cy="87" rx="5" ry="6" fill="#6B4258" />
+                    <ellipse cx="108" cy="87" rx="5" ry="6" fill="#6B4258" />
+                    <circle cx="63.5" cy="84.5" r="1.4" fill="#fff" />
+                    <circle cx="109.5" cy="84.5" r="1.4" fill="#fff" />
                     {/* Mõm */}
                     <rect x="68" y="99" width="34" height="24" rx="12" fill="#FFC2D9" />
-                    <ellipse cx="78" cy="111" rx="2.4" ry="3.2" fill="#D46A93" />
-                    <ellipse cx="92" cy="111" rx="2.4" ry="3.2" fill="#D46A93" />
-                    {/* Tay ôm phía trước bụng */}
-                    <circle cx="34" cy="124" r="13" fill="#F6A9C4" />
-                    <circle cx="136" cy="124" r="13" fill="#F6A9C4" />
+                    <rect x="76.5" y="107" width="4" height="9" rx="2" fill="#D46A93" />
+                    <rect x="89.5" y="107" width="4" height="9" rx="2" fill="#D46A93" />
+                    {/* Nụ cười — cho mặt vui */}
+                    <path d="M72,127 Q85,136 98,127" stroke="#D46A93" strokeWidth="3" strokeLinecap="round" fill="none" />
                     {/* Vệt sáng mềm cho khối tròn đỡ phẳng */}
                     <ellipse cx="55" cy="65" rx="26" ry="14" fill="#fff" opacity="0.25" />
                   </svg>
@@ -4201,8 +4387,21 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
             )}
 
             <div className="mt-6 flex flex-col gap-4">
+              {/* Card riêng #0: Tổng thu nhập theo danh mục (donut) — đặt trên "Chi tiêu theo
+                  danh mục" theo đúng thứ tự Thu trước Chi. */}
+              <div className="frost-inset rounded-2xl p-4">
+                <h2 className="text-blueberry dark:text-white font-extrabold text-base mb-3">Thu nhập theo danh mục</h2>
+                {mobileIncomeByCat.length === 0 ? (
+                  <p className="text-steel dark:text-light-grey text-xs">Chưa có thu nhập trong khoảng này.</p>
+                ) : (
+                  <SpendingDonut data={mobileIncomeByCat} total={mobileIncomeTotal} />
+                )}
+              </div>
+
               {/* Card riêng #1: Chi tiêu theo danh mục (donut) — tách khỏi card "Thu và Chi"
-                  bên dưới để tránh nhồi 2 biểu đồ khác kiểu vào chung 1 khối nhìn rối mắt. */}
+                  bên dưới để tránh nhồi 2 biểu đồ khác kiểu vào chung 1 khối nhìn rối mắt.
+                  Bao gồm cả giao dịch loại 'allocation' (nạp quỹ) vì với người dùng, nạp
+                  vào quỹ cũng là một hình thức "chi" tiền ra khỏi phần được chi tiêu tự do. */}
               <div className="frost-inset rounded-2xl p-4">
                 <h2 className="text-blueberry dark:text-white font-extrabold text-base mb-3">Chi tiêu theo danh mục</h2>
                 {mobileSpendingByCat.length === 0 ? (
@@ -4243,7 +4442,7 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
                       <div className="flex flex-col divide-y divide-[rgba(189,189,203,0.2)] dark:divide-[rgba(189,189,203,0.1)]">
                         {groupedRecentTx[key].map((tx) => {
                           const cat = categories.find((c) => c.id === tx.category_id);
-                          const isOverLimit = (tx.note || '').startsWith('[Vượt hạn mức]');
+                          const isOverLimit = (tx.note || '').includes('[Vượt hạn mức]');
                           return (
                             <div key={tx.id} onClick={() => setEditingTx(tx)} className="flex items-center gap-3 py-3 first:pt-0 last:pb-0 cursor-pointer hover:bg-ice-cream dark:hover:bg-night-sky/30 rounded-xl -mx-2 px-2 transition">
                               <EmojiCircle emoji={cat?.icon} size={40} bg={tx.type === 'income' ? '#B4F1F1' : '#E3D6FF'} />
@@ -4460,7 +4659,7 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
                         <div className="flex flex-col divide-y divide-[rgba(189,189,203,0.2)] dark:divide-[rgba(189,189,203,0.1)]">
                           {groupedRecentTx[key].map((tx) => {
                             const cat = categories.find((c) => c.id === tx.category_id);
-                            const isOverLimit = (tx.note || '').startsWith('[Vượt hạn mức]');
+                            const isOverLimit = (tx.note || '').includes('[Vượt hạn mức]');
                             // FIX: với khoản chi tiêu KHÔNG phải quỹ (danh mục thường, VD "Điện thoại")
                             // và được trừ trực tiếp từ thu nhập của kỳ (không qua ví), hiển thị thêm
                             // "Thu nhập kỳ còn lại" — tương tự cách quỹ hiển thị "Số dư" sau mỗi giao dịch.
@@ -4573,7 +4772,7 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
         </div>
 
         <div className="grid grid-cols-2 gap-6 mt-6">
-          <div className="frost-card rounded-3xl p-6">
+          <div className="frost-card rounded-3xl p-6 min-w-0">
             <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
               <h3 className="text-blueberry dark:text-white font-extrabold">Thu nhập theo danh mục</h3>
               <div className="flex items-center gap-2 flex-wrap justify-end">
@@ -4586,12 +4785,12 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
             )}
           </div>
 
-          <div className="frost-card rounded-3xl p-6">
+          <div className="frost-card rounded-3xl p-6 min-w-0">
             <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
               <h3 className="text-blueberry dark:text-white font-extrabold">Chi tiêu theo danh mục</h3>
               <div className="flex items-center gap-2 flex-wrap justify-end">
                 <PeriodControlsFor filter={expenseCardFilter} />
-                <button onClick={() => setLedgerModal({ title: `Chi tiêu theo danh mục — ${labelForCardFilter(expenseCardFilter)}`, txs: filteredTxsForCard(transactions, expenseCardFilter, expenseCardBuckets, 'expense') })} className="text-xs font-bold text-cotton-candy hover:underline whitespace-nowrap">Xem chi tiết</button>
+                <button onClick={() => setLedgerModal({ title: `Chi tiêu theo danh mục — ${labelForCardFilter(expenseCardFilter)}`, txs: [...filteredTxsForCard(transactions, expenseCardFilter, expenseCardBuckets, 'expense'), ...filteredTxsForCard(transactions, expenseCardFilter, expenseCardBuckets, 'allocation').filter((t) => !isInitialAllocationTx(t))] })} className="text-xs font-bold text-cotton-candy hover:underline whitespace-nowrap">Xem chi tiết</button>
               </div>
             </div>
             {expenseCardSeries.length === 0 ? <p className="text-steel dark:text-light-grey text-sm text-center py-6">Chưa có chi tiêu trong khoảng này.</p> : (
@@ -5260,7 +5459,7 @@ function FundDetail({ category, transactions, categories, accounts, onBack, relo
                   const iconBg = item.type === 'expense' ? 'bg-cotton-candy/10' : 'bg-turquoise/10';
                   const amountColor = item.type === 'expense' ? 'text-cotton-candy' : 'text-turquoise';
                   const timeDisplay = formatDisplayTime(item);
-                  const isOverLimit = (item.note || '').startsWith('[Vượt hạn mức]');
+                  const isOverLimit = (item.note || '').includes('[Vượt hạn mức]');
                   // Nhóm theo ngày thực hiện thực tế: giao dịch dùng "date" (thời điểm thật khi bấm nạp/rút),
                   // lợi nhuận dùng "created_at" (= ngày được credit theo quy tắc)
                   const itemDate = new Date(isProfit ? item.created_at : (item.date || item.created_at));
@@ -5436,7 +5635,7 @@ function FundDetail({ category, transactions, categories, accounts, onBack, relo
                 <div className="flex flex-col scrollbar-hide">
                   {displayHistory.map((item, idx) => {
                     const isInitial = item.type === 'allocation' && firstAllocation && item.id === firstAllocation.id;
-                    const isOverLimit = (item.note || '').startsWith('[Vượt hạn mức]');
+                    const isOverLimit = (item.note || '').includes('[Vượt hạn mức]');
                     const showTopBorder = idx > 0 && !isInitial;
                     const itemDateTime = historyItemDate(item);
                     const dateTimeLabel = `${itemDateTime.toLocaleDateString('vi-VN')} ${itemDateTime.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}`;
@@ -5593,7 +5792,7 @@ function Accounts({ setScreen, accounts, transactions, onOpenAccount, reload, on
         {accounts.length === 0 ? (
           <p className="text-steel dark:text-light-grey text-sm text-center py-16">Chưa có ví nào. Bấm "Thêm ví mới" để bắt đầu.</p>
         ) : (
-          <div className="relative grid gap-5 mt-6" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 280px), 280px))', maxWidth: 1180 }}>
+          <div className="relative grid gap-5 mt-6" style={{ gridTemplateColumns: `repeat(${sidebarCollapsed ? 6 : 5}, 1fr)` }}>
             {accounts.map((acc) => {
               const maskedDigits = String(acc.id || '').replace(/[^0-9a-zA-Z]/g, '').slice(-4).toUpperCase().padStart(4, '0');
               return (
@@ -5706,7 +5905,7 @@ function AccountDetail({ account, transactions, categories, accounts, onBack, re
                 const displayNote = isDirectSet ? (tx.note || '').replace('[SET] ', '') : tx.note;
                 const isPositive = tx.type === 'income' || (tx.type === 'adjustment' && !isDirectSet && Number(tx.amount) > 0);
                 const label = tx.type === 'adjustment' ? 'Cập nhật số dư' : (cat?.name || (tx.type === 'income' ? 'Thu nhập' : 'Chi tiêu'));
-                const isOverLimit = (tx.note || '').startsWith('[Vượt hạn mức]');
+                const isOverLimit = (tx.note || '').includes('[Vượt hạn mức]');
                 return (
                   <div key={tx.id} className="flex items-center gap-3 py-3">
                     <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${isDirectSet ? 'bg-ice-cream dark:bg-night-sky' : isPositive ? 'bg-turquoise/10' : 'bg-cotton-candy/10'}`}>
@@ -5769,7 +5968,7 @@ function AccountDetail({ account, transactions, categories, accounts, onBack, re
                     const displayNote = isDirectSet ? (tx.note || '').replace('[SET] ', '') : tx.note;
                     const isPositive = tx.type === 'income' || (tx.type === 'adjustment' && !isDirectSet && Number(tx.amount) > 0);
                     const label = tx.type === 'adjustment' ? 'Cập nhật số dư' : (cat?.name || (tx.type === 'income' ? 'Thu nhập' : 'Chi tiêu'));
-                    const isOverLimit = (tx.note || '').startsWith('[Vượt hạn mức]');
+                    const isOverLimit = (tx.note || '').includes('[Vượt hạn mức]');
                     return (
                       <div key={tx.id} className="flex items-center gap-3 py-3">
                         <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${isDirectSet ? 'frost-inset' : isPositive ? 'bg-turquoise/10' : 'bg-cotton-candy/10'}`}>
@@ -6510,7 +6709,7 @@ function CategorySection({ categories, reload, softDelete, spendingPoolByPeriod,
   // Bộ lọc hiển thị theo isFund — chỉ lọc hiển thị, không đổi dữ liệu
   const [fundFilter, setFundFilter] = useState('all'); // 'all' | 'fund' | 'not_fund'
   const [editing, setEditing] = useState(null);
-  const [form, setForm] = useState({ name: '', icon: '', monthly_limit: '', is_fund: false, interest_rate: '', include_in_spending_pool: true });
+  const [form, setForm] = useState({ name: '', icon: '', monthly_limit: '', limit_period: 'month', is_fund: false, interest_rate: '', include_in_spending_pool: true });
   const [saving, setSaving] = useState(false);
 
   // ==== Thu nhập được chi theo kỳ — chọn kỳ rồi nhập số tiền được phép chi ====
@@ -6530,13 +6729,13 @@ function CategorySection({ categories, reload, softDelete, spendingPoolByPeriod,
     if (ok) setPoolAmountInput('');
   }
 
-  function startNew() { setForm({ name: '', icon: '', monthly_limit: '', is_fund: false, interest_rate: '', include_in_spending_pool: true }); setEditing('new'); }
-  function startEdit(cat) { setForm({ name: cat.name, icon: cat.icon || '', monthly_limit: cat.monthly_limit || '', is_fund: cat.is_fund || false, interest_rate: cat.interest_rate || '', include_in_spending_pool: cat.include_in_spending_pool !== false }); setEditing(cat.id); }
+  function startNew() { setForm({ name: '', icon: '', monthly_limit: '', limit_period: 'month', is_fund: false, interest_rate: '', include_in_spending_pool: true }); setEditing('new'); }
+  function startEdit(cat) { setForm({ name: cat.name, icon: cat.icon || '', monthly_limit: cat.monthly_limit || '', limit_period: cat.limit_period || 'month', is_fund: cat.is_fund || false, interest_rate: cat.interest_rate || '', include_in_spending_pool: cat.include_in_spending_pool !== false }); setEditing(cat.id); }
 
   async function handleSave() {
     if (!form.name) { alert('Nhập tên danh mục'); return; }
     setSaving(true);
-    const payload = { name: form.name, icon: form.icon || '❔', type: tab, monthly_limit: form.monthly_limit ? Number(form.monthly_limit) : null, is_fund: form.is_fund, interest_rate: form.interest_rate ? Number(form.interest_rate) : 0, ...(tab === 'income' ? { include_in_spending_pool: form.include_in_spending_pool } : {}) };
+    const payload = { name: form.name, icon: form.icon || '❔', type: tab, monthly_limit: form.monthly_limit ? Number(form.monthly_limit) : null, limit_period: form.monthly_limit ? form.limit_period : null, is_fund: form.is_fund, interest_rate: form.interest_rate ? Number(form.interest_rate) : 0, ...(tab === 'income' ? { include_in_spending_pool: form.include_in_spending_pool } : {}) };
     const { error } = editing === 'new' ? await supabase.from('categories').insert(payload) : await supabase.from('categories').update(payload).eq('id', editing);
     setSaving(false);
     if (error) { alert('Lỗi: ' + error.message); return; }
@@ -6561,6 +6760,12 @@ function CategorySection({ categories, reload, softDelete, spendingPoolByPeriod,
     { key: 'fund', label: 'Quỹ' },
     { key: 'not_fund', label: 'Không phải quỹ' },
   ];
+  const LIMIT_PERIOD_OPTIONS = [
+    { key: 'week', label: 'Tuần' },
+    { key: 'month', label: 'Tháng' },
+    { key: 'year', label: 'Năm' },
+  ];
+  function limitPeriodLabel(key) { return LIMIT_PERIOD_OPTIONS.find((p) => p.key === key)?.label || 'Tháng'; }
 
   return (
     <>
@@ -6626,7 +6831,7 @@ function CategorySection({ categories, reload, softDelete, spendingPoolByPeriod,
                 ))}
               </p>
               <p className="text-steel dark:text-light-grey text-xs font-semibold">
-                {cat.monthly_limit ? `Hạn mức: ${formatMoney(cat.monthly_limit)}` : ''}
+                {cat.monthly_limit ? `Hạn mức: ${formatMoney(cat.monthly_limit)}/${limitPeriodLabel(cat.limit_period).toLowerCase()}` : ''}
                 {cat.monthly_limit && cat.interest_rate > 0 ? ' • ' : ''}
                 {cat.interest_rate > 0 ? `Lãi ${cat.interest_rate}%/năm` : ''}
               </p>
@@ -6637,13 +6842,20 @@ function CategorySection({ categories, reload, softDelete, spendingPoolByPeriod,
         ))}
       </div>
 
-      {editing && (
-        <div className="fixed inset-0 bg-black/40 flex items-end z-20" onClick={() => setEditing(null)}>
-          <div className="bg-white dark:bg-[#1e1e32] w-full rounded-t-3xl p-5 max-w-sm mx-auto max-h-[85vh] overflow-y-auto scrollbar-hide" onClick={(e) => e.stopPropagation()}>
+      {editing && createPortal(
+        <div className="fixed inset-0 bg-black/40 flex items-end md:items-center justify-center z-[999] p-0 md:p-4" onClick={() => setEditing(null)}>
+          <div className="bg-white dark:bg-[#1e1e32] w-full rounded-t-3xl md:rounded-3xl p-5 max-w-sm mx-auto max-h-[85vh] overflow-y-auto scrollbar-hide" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-4"><h3 className="font-bold text-blueberry dark:text-white">{editing === 'new' ? 'Danh mục mới' : 'Sửa danh mục'}</h3><button onClick={() => setEditing(null)}><X size={18} className="text-steel dark:text-light-grey" /></button></div>
             <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Tên danh mục" className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none mb-3 dark:text-white dark:placeholder:text-light-grey text-blueberry" />
             <input value={form.icon} onChange={(e) => setForm({ ...form, icon: e.target.value })} placeholder="Emoji (vd: 🍜)" className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none mb-3 dark:text-white dark:placeholder:text-light-grey text-blueberry" />
-            <MoneyInput value={form.monthly_limit} onChange={(v) => setForm({ ...form, monthly_limit: v })} placeholder="Hạn mức tối đa mỗi lần nhập (không bắt buộc)" className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none mb-3 dark:text-white dark:placeholder:text-light-grey text-blueberry" />
+            <p className="text-steel dark:text-light-grey text-xs font-semibold mb-1.5">Hạn mức chi tối đa (không bắt buộc)</p>
+            <div className="flex gap-2 mb-1">
+              <CustomSelect value={form.limit_period} onChange={(e) => setForm({ ...form, limit_period: e.target.value })} triggerClassName="bg-ice-cream dark:bg-night-sky rounded-xl px-3 py-3 text-sm outline-none dark:text-white text-blueberry [color-scheme:light] dark:[color-scheme:dark]">
+                {LIMIT_PERIOD_OPTIONS.map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
+              </CustomSelect>
+              <MoneyInput value={form.monthly_limit} onChange={(v) => setForm({ ...form, monthly_limit: v })} placeholder="Số tiền tối đa cho kỳ này" className="flex-1 bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none dark:text-white dark:placeholder:text-light-grey text-blueberry" />
+            </div>
+            <p className="text-steel dark:text-light-grey text-xs mb-3">Ví dụ: chọn "Tuần" + 500,000đ nghĩa là danh mục này không được chi quá 500,000đ trong 1 tuần.</p>
             {tab === 'expense' && (
               <input value={form.interest_rate} onChange={(e) => setForm({ ...form, interest_rate: e.target.value.replace(/[^0-9.]/g, '') })} inputMode="decimal" placeholder="Tỷ suất lợi nhuận %/năm (không bắt buộc)" className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none mb-3 dark:text-white dark:placeholder:text-light-grey text-blueberry" />
             )}
@@ -6661,7 +6873,8 @@ function CategorySection({ categories, reload, softDelete, spendingPoolByPeriod,
             )}
             <button onClick={handleSave} disabled={saving} className="w-full bg-gradient-primary text-white rounded-xl py-3 font-bold flex items-center justify-center gap-2 disabled:opacity-60 shadow-md shadow-turquoise/30">{saving ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />} Lưu</button>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </>
   );
@@ -7321,7 +7534,7 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
   // Component filter dùng chung cho cả bản mobile lẫn desktop của "Hoạt động gần đây".
   function ActivityFilterBar({ compact = false }) {
     return (
-      <div className={`flex items-center gap-2 flex-wrap ${compact ? 'mb-3' : 'mb-4'}`}>
+      <div className={`flex items-center gap-2 flex-wrap ${compact ? '' : 'mb-4'}`}>
         <CustomSelect
           value={activityKindFilter}
           onChange={(e) => handleActivityKindChange(e.target.value)}
@@ -7351,7 +7564,7 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
   function TxDetailRow({ tx }) {
     const cat = categories.find((c) => c.id === tx.category_id);
     const src = getTxSource(tx);
-    const isOverLimit = (tx.note || '').startsWith('[Vượt hạn mức]');
+    const isOverLimit = (tx.note || '').includes('[Vượt hạn mức]');
     const noteText = stripPeriodTag(tx.note);
     const timeLabel = new Date(tx.created_at || tx.date).toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit', year: 'numeric' });
     const txDate = new Date(tx.date || tx.created_at);
@@ -7814,8 +8027,10 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
           </div>
 
           <div data-report-anchor="recent-activity" ref={activityAnchorMobileRef} className="px-5 mt-4">
-            <h2 className="text-blueberry dark:text-white font-extrabold text-base mb-3">Hoạt động gần đây</h2>
-            <ActivityFilterBar compact />
+            <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
+              <h2 className="text-blueberry dark:text-white font-extrabold text-base">Hoạt động gần đây</h2>
+              <ActivityFilterBar compact />
+            </div>
             {filteredActivityTxs.length === 0 ? (
               <p className="text-steel dark:text-light-grey text-sm text-center py-4">
                 {allPeriodTxsSorted.length === 0 ? 'Không có giao dịch nào trong khoảng thời gian này.' : 'Không có giao dịch nào khớp bộ lọc.'}
