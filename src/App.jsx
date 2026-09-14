@@ -3775,22 +3775,31 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
               })}
             </div>
 
-            {/* Đường liền nối đỉnh từng cột = Tổng của kỳ/ngày đó */}
-            <svg width="100%" height="100%" viewBox="0 0 100 100" preserveAspectRatio="none" className="absolute inset-0 pointer-events-none overflow-visible">
-              <polyline points={totalLinePoints} fill="none" stroke="#0DBACC" strokeWidth="2" vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeLinejoin="round" />
+            {/* Đường liền nối đỉnh từng cột = Tổng của kỳ/ngày đó. zIndex cao hơn hẳn z-index
+                cao nhất của các đoạn cột (kể cả khi hover = 10) để đường LUÔN nổi lên trên
+                cột, không bị cột che mất. Màu đổi sang cam-vàng (#FFB020) thay vì turquoise
+                cũ vì turquoise trùng màu với đoạn cột đầu tiên trong palette (#0DBACC),
+                khiến đường gần như biến mất mỗi khi đi ngang qua đoạn màu đó. */}
+            <svg
+              width="100%" height="100%" viewBox="0 0 100 100" preserveAspectRatio="none"
+              className="absolute inset-0 pointer-events-none overflow-visible"
+              style={{ zIndex: 15 }}
+            >
+              <polyline points={totalLinePoints} fill="none" stroke="#FFB020" strokeWidth="2" vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
 
-            {/* Chấm tròn + nhãn số tiền trên mỗi điểm Tổng, giống ảnh mẫu, rê vào xem số liệu */}
+            {/* Chấm tròn + nhãn số tiền trên mỗi điểm Tổng, giống ảnh mẫu, rê vào xem số liệu.
+                zIndex cao hơn cột (và cao hơn cả svg đường ở trên) để chấm + nhãn luôn hiện rõ. */}
             {bucketTotals.map((v, bi) => (
               <div
                 key={bi}
                 className="absolute cursor-default"
-                style={{ left: `${xCenter(bi)}%`, top: `${100 - yPct(v)}%`, transform: 'translate(-50%, -50%)' }}
+                style={{ left: `${xCenter(bi)}%`, top: `${100 - yPct(v)}%`, transform: 'translate(-50%, -50%)', zIndex: 16 }}
                 onMouseMove={(e) => showTip(e, { label: `Tổng (${buckets[bi].label})`, value: formatMoney(v) })}
                 onMouseLeave={hideTip}
               >
                 <span className="absolute left-1/2 -translate-x-1/2 bottom-[calc(100%+3px)] text-[10px] font-extrabold text-blueberry dark:text-white whitespace-nowrap">{v > 0 ? formatMoneyCompact(v) : ''}</span>
-                <div className="w-2 h-2 rounded-full bg-turquoise border border-white dark:border-night-sky" />
+                <div className="w-2 h-2 rounded-full border border-white dark:border-night-sky" style={{ background: '#FFB020' }} />
               </div>
             ))}
           </div>
@@ -6993,12 +7002,17 @@ function HoverDetailCard({ className, children, detail, align = 'left' }) {
   const [open, setOpen] = useState(false);
   const [hasHover, setHasHover] = useState(true);
   const ref = useRef(null);
+  // Hẹn giờ đóng popup (debounce) — xem giải thích ở closeSoon() bên dưới.
+  const closeTimer = useRef(null);
 
   useEffect(() => {
     if (typeof window !== 'undefined' && window.matchMedia) {
       setHasHover(window.matchMedia('(hover: hover)').matches);
     }
   }, []);
+
+  // Dọn timer khi unmount để tránh setState trên component đã gỡ bỏ.
+  useEffect(() => () => { if (closeTimer.current) clearTimeout(closeTimer.current); }, []);
 
   useEffect(() => {
     if (!open || hasHover) return;
@@ -7013,6 +7027,23 @@ function HoverDetailCard({ className, children, detail, align = 'left' }) {
     };
   }, [open, hasHover]);
 
+  // Mở ngay + huỷ mọi lịch đóng đang chờ (phòng trường hợp chuột vừa rời rồi quay lại kịp).
+  function openNow() {
+    if (closeTimer.current) { clearTimeout(closeTimer.current); closeTimer.current = null; }
+    setOpen(true);
+  }
+  // Đóng có độ trễ nhỏ thay vì đóng ngay lập tức. Popup nằm cách thẻ trigger 8px
+  // (top-[calc(100%+8px)]) — khi rê chuột từ thẻ xuống popup (để xem/scroll danh sách),
+  // con trỏ phải băng qua khoảng trống 8px đó, nơi không phần tử nào trong card đang
+  // "hứng" chuột trong khoảnh khắc đó, khiến mouseleave bắn ra và đóng popup ngay lập
+  // tức dù người dùng chỉ đang di chuyển tiếp xuống. Trễ ~180ms rồi mới đóng, và huỷ
+  // lịch đóng nếu chuột kịp vào lại (thẻ hoặc popup) trong lúc đó, giúp việc rê vào rồi
+  // scroll bên trong popup mượt hơn hẳn, không còn bị "nhảy mất" phải rê lại nhiều lần.
+  function closeSoon() {
+    if (closeTimer.current) clearTimeout(closeTimer.current);
+    closeTimer.current = setTimeout(() => { setOpen(false); closeTimer.current = null; }, 180);
+  }
+
   return (
     <div
       ref={ref}
@@ -7021,13 +7052,19 @@ function HoverDetailCard({ className, children, detail, align = 'left' }) {
       // context của card. Khi popup đang mở, ta nâng hẳn z-index của CHÍNH card cha lên
       // trên các card anh em (và các khối phía dưới) để popup thoát ra hiển thị đúng.
       className={`relative ${open ? 'z-[5]' : 'z-0'} ${className || ''}`}
-      onMouseEnter={() => { if (hasHover) setOpen(true); }}
-      onMouseLeave={() => { if (hasHover) setOpen(false); }}
+      onMouseEnter={() => { if (hasHover) openNow(); }}
+      onMouseLeave={() => { if (hasHover) closeSoon(); }}
       onClick={() => { if (!hasHover) setOpen((v) => !v); }}
     >
       {children}
       <div
         onClick={(e) => e.stopPropagation()}
+        // Gắn thêm mouseenter/mouseleave ngay trên chính popup: dù popup vốn đã là con
+        // của div cha ở trên (nên về lý thuyết không cần thêm), việc khai báo tường minh
+        // ở đây giúp huỷ lịch đóng ngay khi chuột chạm vào popup, không phải chờ tới khi
+        // rời khỏi khoảng trống 8px mới được tính là "đã vào lại".
+        onMouseEnter={() => { if (hasHover) openNow(); }}
+        onMouseLeave={() => { if (hasHover) closeSoon(); }}
         style={{ position: 'absolute' }}
         // LƯU Ý: trước đây className có cả "absolute" lẫn "relative" (đi kèm "isolate").
         // Tailwind biên dịch .relative SAU .absolute trong stylesheet, nên khi 1 phần tử có
