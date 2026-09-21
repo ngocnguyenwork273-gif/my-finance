@@ -293,6 +293,46 @@ const fincheckStyles = `
     display: none;
   }
 
+  /* FIX: bấm vào nút / biểu tượng (icon button) không còn hiện con trỏ chữ (I-beam)
+     kiểu ô nhập văn bản, và không bị bôi đen chữ khi bấm nhanh 2 lần.
+     Ô nhập liệu được loại trừ ngay bên dưới để vẫn gõ / bôi đen text bình thường. */
+  button,
+  [role="button"],
+  [role="tab"],
+  [role="option"],
+  label,
+  summary,
+  button svg,
+  [role="button"] svg,
+  label svg {
+    cursor: pointer;
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  button:disabled,
+  [role="button"][aria-disabled="true"] {
+    cursor: not-allowed;
+  }
+  /* Các ô nhập liệu vẫn giữ con trỏ chữ và cho phép bôi đen, kể cả khi nằm trong <label> */
+  input,
+  textarea,
+  select,
+  [contenteditable="true"] {
+    -webkit-user-select: text;
+    user-select: text;
+  }
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="button"]):not([type="submit"]),
+  textarea,
+  [contenteditable="true"] {
+    cursor: text;
+  }
+  select,
+  input[type="checkbox"],
+  input[type="radio"] {
+    cursor: pointer;
+  }
+
   /* Mobile: ẩn scrollbar toàn bộ */
   @media (max-width: 767px) {
     * {
@@ -1604,8 +1644,16 @@ function ChangeBadge({ pct, good = true }) {
 // FIX: cho phép gõ biểu thức cộng/trừ/nhân/chia (vd "50000+2000") rồi tự tính ra kết quả.
 // Hỗ trợ 2 kiểu: (1) gõ số thường rồi rời khỏi ô/Enter mới tính; (2) gõ kèm dấu "="
 // ở bất kỳ đâu (vd "45000+5000=" hoặc "=45000+5000") sẽ TÍNH NGAY LẬP TỨC, giống máy tính/Excel.
+// FIX: bỏ số 0 thừa ở đầu mỗi cụm số ("012334" -> "12334"). Bắt buộc phải làm trước khi
+// tính biểu thức: ở strict mode, "012334" bị coi là số bát phân kiểu cũ và ném SyntaxError,
+// khiến evalMoneyExpression trả về null -> ô tiền bị xoá trắng thay vì hiện 12,334.
+// Không đụng tới "0.5" (sau số 0 là dấu chấm) và cũng không xoá số 0 đứng một mình.
+function stripLeadingZeros(text) {
+  return (text || '').replace(/(^|[^\d.])0+(\d)/g, '$1$2');
+}
+
 function evalMoneyExpression(str) {
-  const cleaned = (str || '').replace(/[^0-9+\-*/.() ]/g, '');
+  const cleaned = stripLeadingZeros((str || '').replace(/[^0-9+\-*/.() ]/g, ''));
   if (!cleaned.trim()) return 0;
   try {
     // eslint-disable-next-line no-new-func
@@ -1652,7 +1700,7 @@ function MoneyInput({ value, onChange, placeholder, className }) {
   const inputRef = useRef(null);
   const pendingCursor = useRef(null); // số ký tự thật trước con trỏ, để khôi phục vị trí sau khi format lại
 
-  function handleFocus() { setFocused(true); setRawText(value ? String(value) : ''); }
+  function handleFocus() { setFocused(true); setRawText(value ? stripLeadingZeros(String(value)) : ''); }
 
   function handleChange(e) {
     const typed = e.target.value;
@@ -1672,7 +1720,12 @@ function MoneyInput({ value, onChange, placeholder, className }) {
     // vị trí con trỏ sau khi định dạng lại có thêm/bớt dấu phẩy.
     pendingCursor.current = countRealCharsBefore(typed, cursorPos);
     // vẫn cho gõ số + các phép toán, không chặn ký tự toán tử như trước; bỏ dấu phẩy hiển thị
-    setRawText(typed.replace(/[^0-9+\-*/.() ]/g, ''));
+    const nextRaw = stripLeadingZeros(typed.replace(/[^0-9+\-*/.() ]/g, ''));
+    // Nếu vừa có số 0 thừa bị bỏ đi thì con trỏ cũng phải lùi tương ứng, nếu không
+    // con trỏ sẽ nhảy sai 1 ký tự so với chỗ người dùng đang gõ.
+    const removed = typed.replace(/[^0-9+\-*/.() ]/g, '').length - nextRaw.length;
+    if (removed > 0) pendingCursor.current = Math.max(0, pendingCursor.current - removed);
+    setRawText(nextRaw);
   }
 
   function commit() {
@@ -5860,7 +5913,15 @@ function Accounts({ setScreen, accounts, transactions, onOpenAccount, reload, on
         {accounts.length === 0 ? (
           <p className="text-steel dark:text-light-grey text-sm text-center py-16">Chưa có ví nào. Bấm "Thêm ví mới" để bắt đầu.</p>
         ) : (
-          <div className="relative grid gap-5 mt-6" style={{ gridTemplateColumns: `repeat(${sidebarCollapsed ? 6 : 5}, 1fr)` }}>
+          // FIX: trước đây ép cứng 5/6 cột (`repeat(N, 1fr)`) bất kể chiều rộng khả dụng.
+          // Trên các màn hình laptop tỉ lệ thấp hơn 16:9 (vd 16:10) hoặc cửa sổ trình duyệt
+          // hẹp hơn, khu vực nội dung (đã trừ sidebar) hẹp lại nhưng vẫn bị ép đủ 5-6 cột
+          // -> mỗi thẻ bị bóp quá hẹp, kéo theo chiều cao (aspect ratio cố định) quá thấp
+          // so với cỡ chữ/khoảng đệm cố định bên trong -> số dư & nhãn "LOẠI VÍ" bị tràn ra
+          // ngoài rồi bị overflow-hidden cắt cụt ở mép dưới thẻ (đúng lỗi trong ảnh chụp).
+          // Đổi sang auto-fill + minmax: số cột tự co giãn theo bề rộng thật, mỗi thẻ luôn
+          // có bề rộng tối thiểu 200px nên đủ cao để chứa hết nội dung, không còn bị cắt.
+          <div className="relative grid gap-5 mt-6" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))' }}>
             {accounts.map((acc) => {
               const maskedDigits = String(acc.id || '').replace(/[^0-9a-zA-Z]/g, '').slice(-4).toUpperCase().padStart(4, '0');
               return (
@@ -5868,7 +5929,7 @@ function Accounts({ setScreen, accounts, transactions, onOpenAccount, reload, on
                   key={acc.id}
                   onClick={() => onOpenAccount(acc.id, 'accounts')}
                   style={{ background: accountCardGradient(acc.type) }}
-                  className="text-left rounded-2xl p-4 relative overflow-hidden shadow-lg shadow-black/10 hover:shadow-card transition aspect-[1.586/1] flex flex-col justify-between"
+                  className="text-left rounded-2xl p-4 relative overflow-hidden shadow-lg shadow-black/10 hover:shadow-card transition aspect-[1.586/1] flex flex-col justify-between min-h-[126px]"
                 >
                   <div className="pointer-events-none absolute -top-10 -right-10 w-32 h-32 rounded-full bg-white/15" />
                   <div className="pointer-events-none absolute -bottom-14 -left-8 w-32 h-32 rounded-full bg-black/10" />
@@ -6819,13 +6880,31 @@ function ProfileSection({ user, onUpdated, logActivity }) {
   );
 }
 
+// Form rỗng dùng chung cho "Danh mục mới" — gồm cả các trường chỉ dành cho quỹ
+// (description / initial_allocation / target_amount / background_url). Các trường quỹ
+// chỉ hiện ra khi tích vào ô 'Đây là 1 "quỹ"', và chỉ được ghi xuống DB khi đang là quỹ.
+function blankCategoryForm() {
+  const now = new Date();
+  return {
+    name: '', icon: '', monthly_limit: '', limit_period: 'month', is_fund: false,
+    interest_rate: '', include_in_spending_pool: true,
+    description: '', target_amount: '', background_url: '',
+    initial_allocation: '',
+    initial_allocation_date: now.toISOString().slice(0, 10),
+    initial_allocation_time: now.toTimeString().slice(0, 5),
+  };
+}
+
 function CategorySection({ categories, reload, softDelete, spendingPoolByPeriod, saveSpendingPoolForPeriod }) {
   const [tab, setTab] = useState('expense');
   // Bộ lọc hiển thị theo isFund — chỉ lọc hiển thị, không đổi dữ liệu
   const [fundFilter, setFundFilter] = useState('all'); // 'all' | 'fund' | 'not_fund'
   const [editing, setEditing] = useState(null);
-  const [form, setForm] = useState({ name: '', icon: '', monthly_limit: '', limit_period: 'month', is_fund: false, interest_rate: '', include_in_spending_pool: true });
+  const [form, setForm] = useState(blankCategoryForm);
   const [saving, setSaving] = useState(false);
+  // Trạng thái phục vụ phần "chi tiết quỹ" hiện thêm khi tích ô quỹ
+  const [uploading, setUploading] = useState(false);
+  const [firstAlloc, setFirstAlloc] = useState(null); // giao dịch "Nạp quỹ lần đầu" (nếu có)
 
   // ==== Thu nhập được chi theo kỳ — chọn kỳ rồi nhập số tiền được phép chi ====
   const nowYear = new Date().getFullYear();
@@ -6844,17 +6923,112 @@ function CategorySection({ categories, reload, softDelete, spendingPoolByPeriod,
     if (ok) setPoolAmountInput('');
   }
 
-  function startNew() { setForm({ name: '', icon: '', monthly_limit: '', limit_period: 'month', is_fund: false, interest_rate: '', include_in_spending_pool: true }); setEditing('new'); }
-  function startEdit(cat) { setForm({ name: cat.name, icon: cat.icon || '', monthly_limit: cat.monthly_limit || '', limit_period: cat.limit_period || 'month', is_fund: cat.is_fund || false, interest_rate: cat.interest_rate || '', include_in_spending_pool: cat.include_in_spending_pool !== false }); setEditing(cat.id); }
+  function startNew() { setFirstAlloc(null); setForm(blankCategoryForm()); setEditing('new'); }
+  function startEdit(cat) {
+    setFirstAlloc(null);
+    setForm({
+      ...blankCategoryForm(),
+      name: cat.name, icon: cat.icon || '', monthly_limit: cat.monthly_limit || '',
+      limit_period: cat.limit_period || 'month', is_fund: cat.is_fund || false,
+      interest_rate: cat.interest_rate || '', include_in_spending_pool: cat.include_in_spending_pool !== false,
+      description: cat.description || '', target_amount: cat.target_amount || '', background_url: cat.background_url || '',
+    });
+    setEditing(cat.id);
+    if (cat.is_fund) loadInitialAllocation(cat.id);
+  }
+
+  // Đọc khoản "Nạp quỹ lần đầu" của quỹ đang sửa để pre-fill ô "Số tiền nạp quỹ lần đầu"
+  // (cùng cách xác định với form Sửa quỹ: ưu tiên cờ is_initial, fallback theo ghi chú).
+  async function loadInitialAllocation(catId) {
+    const { data } = await supabase
+      .from('transactions').select('*')
+      .eq('category_id', catId).eq('type', 'allocation')
+      .is('deleted_at', null).order('created_at', { ascending: true });
+    const initial = data && data.length ? findInitialAllocation(data, catId) : null;
+    if (!initial) return;
+    setFirstAlloc(initial);
+    const raw = initial.created_at || initial.date;
+    const d = raw ? new Date(raw) : null;
+    const valid = d && !isNaN(d);
+    setForm((f) => ({
+      ...f,
+      initial_allocation: initial.amount || '',
+      initial_allocation_date: (initial.date || (valid ? d.toISOString().slice(0, 10) : '')).slice(0, 10),
+      initial_allocation_time: valid ? `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}` : '00:00',
+    }));
+  }
+
+  // Bật ô "quỹ" cho 1 danh mục đang sửa -> nạp luôn khoản nạp lần đầu (nếu đã có)
+  function handleToggleFund(checked) {
+    setForm((f) => ({ ...f, is_fund: checked }));
+    if (checked && editing && editing !== 'new' && !firstAlloc) loadInitialAllocation(editing);
+  }
+
+  // Upload ảnh nền quỹ (dùng chung flow crop + storage với form Sửa quỹ)
+  async function handleCroppedBannerUpload(file) {
+    if (!file) return;
+    setUploading(true);
+    const fileName = `${Date.now()}-${sanitizeFileName(file.name)}`;
+    const { error: uploadError } = await supabase.storage.from('fund-images').upload(fileName, file);
+    if (uploadError) { alert('Lỗi tải ảnh lên: ' + uploadError.message); setUploading(false); return; }
+    const { data } = supabase.storage.from('fund-images').getPublicUrl(fileName);
+    setForm((f) => ({ ...f, background_url: data.publicUrl }));
+    setUploading(false);
+  }
+
+  // Ghi/cập nhật đúng 1 dòng "Nạp quỹ lần đầu" cho quỹ (không insert trùng dòng mới)
+  async function syncInitialAllocation(catId) {
+    const dateOnly = (form.initial_allocation_date || new Date().toISOString().slice(0, 10)).slice(0, 10);
+    const dtObj = new Date(`${dateOnly}T${form.initial_allocation_time || '00:00'}:00`);
+    const createdAt = isNaN(dtObj) ? new Date().toISOString() : dtObj.toISOString();
+    const newInitial = form.initial_allocation ? Number(form.initial_allocation) : 0;
+    if (firstAlloc) {
+      if (newInitial > 0) {
+        await supabase.from('transactions')
+          .update({ amount: newInitial, date: dateOnly, created_at: createdAt, is_initial: true })
+          .eq('id', firstAlloc.id);
+      }
+    } else if (newInitial > 0) {
+      await supabase.from('transactions').insert({
+        category_id: catId, type: 'allocation', amount: newInitial,
+        note: 'Nạp quỹ lần đầu', date: dateOnly, created_at: createdAt, is_initial: true,
+      });
+    }
+  }
 
   async function handleSave() {
     if (!form.name) { alert('Nhập tên danh mục'); return; }
     setSaving(true);
-    const payload = { name: form.name, icon: form.icon || '❔', type: tab, monthly_limit: form.monthly_limit ? Number(form.monthly_limit) : null, limit_period: form.monthly_limit ? form.limit_period : null, is_fund: form.is_fund, interest_rate: form.interest_rate ? Number(form.interest_rate) : 0, ...(tab === 'income' ? { include_in_spending_pool: form.include_in_spending_pool } : {}) };
-    const { error } = editing === 'new' ? await supabase.from('categories').insert(payload) : await supabase.from('categories').update(payload).eq('id', editing);
+    const isFundMode = tab === 'expense' && form.is_fund;
+    const payload = {
+      name: form.name,
+      icon: form.icon || (isFundMode ? '💰' : '❔'),
+      type: tab,
+      // Quỹ không dùng hạn mức chi theo kỳ -> xoá hạn mức cũ nếu chuyển thành quỹ
+      monthly_limit: !isFundMode && form.monthly_limit ? Number(form.monthly_limit) : null,
+      limit_period: !isFundMode && form.monthly_limit ? form.limit_period : null,
+      is_fund: form.is_fund,
+      interest_rate: form.interest_rate ? Number(form.interest_rate) : 0,
+      ...(tab === 'income' ? { include_in_spending_pool: form.include_in_spending_pool } : {}),
+      // Các trường riêng của quỹ: chỉ ghi khi là quỹ, ngược lại dọn về null
+      ...(tab === 'expense' ? {
+        description: isFundMode ? (form.description || null) : null,
+        target_amount: isFundMode && form.target_amount ? Number(form.target_amount) : null,
+        background_url: isFundMode ? (form.background_url || null) : null,
+      } : {}),
+    };
+    let catId = editing;
+    if (editing === 'new') {
+      const { data: newCat, error } = await supabase.from('categories').insert(payload).select().single();
+      if (error) { setSaving(false); alert('Lỗi: ' + error.message); return; }
+      catId = newCat?.id;
+    } else {
+      const { error } = await supabase.from('categories').update(payload).eq('id', editing);
+      if (error) { setSaving(false); alert('Lỗi: ' + error.message); return; }
+    }
+    if (isFundMode && catId) await syncInitialAllocation(catId);
     setSaving(false);
-    if (error) { alert('Lỗi: ' + error.message); return; }
-    setEditing(null); reload();
+    setEditing(null); setFirstAlloc(null); reload();
   }
 
   async function handleDelete(id) {
@@ -6881,6 +7055,8 @@ function CategorySection({ categories, reload, softDelete, spendingPoolByPeriod,
     { key: 'year', label: 'Năm' },
   ];
   function limitPeriodLabel(key) { return LIMIT_PERIOD_OPTIONS.find((p) => p.key === key)?.label || 'Tháng'; }
+  // Đang ở chế độ "quỹ" -> modal hiện thêm form chi tiết quỹ
+  const isFundForm = tab === 'expense' && form.is_fund;
 
   return (
     <>
@@ -6962,20 +7138,73 @@ function CategorySection({ categories, reload, softDelete, spendingPoolByPeriod,
           <div className="bg-white dark:bg-[#1e1e32] w-full rounded-t-3xl md:rounded-3xl p-5 max-w-sm mx-auto max-h-[85vh] overflow-y-auto scrollbar-hide" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-4"><h3 className="font-bold text-blueberry dark:text-white">{editing === 'new' ? 'Danh mục mới' : 'Sửa danh mục'}</h3><button onClick={() => setEditing(null)}><X size={18} className="text-steel dark:text-light-grey" /></button></div>
             <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Tên danh mục" className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none mb-3 dark:text-white dark:placeholder:text-light-grey text-blueberry" />
-            <input value={form.icon} onChange={(e) => setForm({ ...form, icon: e.target.value })} placeholder="Emoji (vd: 🍜)" className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none mb-3 dark:text-white dark:placeholder:text-light-grey text-blueberry" />
-            <p className="text-steel dark:text-light-grey text-xs font-semibold mb-1.5">Hạn mức chi tối đa (không bắt buộc)</p>
-            <div className="flex gap-2 mb-1">
-              <CustomSelect value={form.limit_period} onChange={(e) => setForm({ ...form, limit_period: e.target.value })} triggerClassName="bg-ice-cream dark:bg-night-sky rounded-xl px-3 py-3 text-sm outline-none dark:text-white text-blueberry [color-scheme:light] dark:[color-scheme:dark]">
-                {LIMIT_PERIOD_OPTIONS.map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
-              </CustomSelect>
-              <MoneyInput value={form.monthly_limit} onChange={(v) => setForm({ ...form, monthly_limit: v })} placeholder="Số tiền tối đa cho kỳ này" className="flex-1 bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none dark:text-white dark:placeholder:text-light-grey text-blueberry" />
-            </div>
-            <p className="text-steel dark:text-light-grey text-xs mb-3">Ví dụ: chọn "Tuần" + 500,000đ nghĩa là danh mục này không được chi quá 500,000đ trong 1 tuần.</p>
-            {tab === 'expense' && (
-              <input value={form.interest_rate} onChange={(e) => setForm({ ...form, interest_rate: e.target.value.replace(/[^0-9.]/g, '') })} inputMode="decimal" placeholder="Tỷ suất lợi nhuận %/năm (không bắt buộc)" className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none mb-3 dark:text-white dark:placeholder:text-light-grey text-blueberry" />
+            <input value={form.icon} onChange={(e) => setForm({ ...form, icon: e.target.value })} placeholder={isFundForm ? 'Emoji icon (vd: 💊)' : 'Emoji (vd: 🍜)'} className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none mb-3 dark:text-white dark:placeholder:text-light-grey text-blueberry" />
+            {/* Hạn mức + lãi suất: chỉ dành cho danh mục chi tiêu thường. Khi tích ô "quỹ",
+                phần này được thay bằng form chi tiết quỹ ở dưới (giống form Sửa quỹ). */}
+            {!isFundForm && (
+              <>
+                <p className="text-steel dark:text-light-grey text-xs font-semibold mb-1.5">Hạn mức chi tối đa (không bắt buộc)</p>
+                <div className="flex gap-2 mb-1">
+                  <CustomSelect value={form.limit_period} onChange={(e) => setForm({ ...form, limit_period: e.target.value })} triggerClassName="bg-ice-cream dark:bg-night-sky rounded-xl px-3 py-3 text-sm outline-none dark:text-white text-blueberry [color-scheme:light] dark:[color-scheme:dark]">
+                    {LIMIT_PERIOD_OPTIONS.map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
+                  </CustomSelect>
+                  <MoneyInput value={form.monthly_limit} onChange={(v) => setForm({ ...form, monthly_limit: v })} placeholder="Số tiền tối đa cho kỳ này" className="flex-1 bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none dark:text-white dark:placeholder:text-light-grey text-blueberry" />
+                </div>
+                <p className="text-steel dark:text-light-grey text-xs mb-3">Ví dụ: chọn "Tuần" + 500,000đ nghĩa là danh mục này không được chi quá 500,000đ trong 1 tuần.</p>
+                {tab === 'expense' && (
+                  <input value={form.interest_rate} onChange={(e) => setForm({ ...form, interest_rate: e.target.value.replace(/[^0-9.]/g, '') })} inputMode="decimal" placeholder="Tỷ suất lợi nhuận %/năm (không bắt buộc)" className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none mb-3 dark:text-white dark:placeholder:text-light-grey text-blueberry" />
+                )}
+              </>
             )}
             {tab === 'expense' && (
-              <label className="flex items-center gap-2 mb-4 text-sm text-blueberry dark:text-white font-semibold"><input type="checkbox" checked={form.is_fund} onChange={(e) => setForm({ ...form, is_fund: e.target.checked })} /> Đây là 1 "quỹ" — hiện thẻ tổng tiền ở Trang chủ</label>
+              <label className="flex items-center gap-2 mb-4 text-sm text-blueberry dark:text-white font-semibold"><input type="checkbox" checked={form.is_fund} onChange={(e) => handleToggleFund(e.target.checked)} /> Đây là 1 "quỹ" — hiện thẻ tổng tiền ở Trang chủ</label>
+            )}
+
+            {/* ==== Chi tiết quỹ — chỉ hiện khi đã tích ô "quỹ" ==== */}
+            {isFundForm && (
+              <div className="mb-1">
+                <textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="Mô tả quỹ (không bắt buộc)" rows={2} className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none mb-3 resize-none dark:text-white dark:placeholder:text-light-grey text-blueberry" />
+
+                <p className="text-sm text-blueberry dark:text-white font-semibold mb-2">Số tiền ban đầu</p>
+                <MoneyInput value={form.initial_allocation} onChange={(v) => setForm({ ...form, initial_allocation: v })} placeholder="Số tiền nạp quỹ lần đầu (không bắt buộc)" className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none mb-3 dark:text-white dark:placeholder:text-light-grey text-blueberry" />
+                {Number(form.initial_allocation) > 0 && (
+                  <div className="mb-3">
+                    <label className="text-xs text-steel dark:text-light-grey font-semibold block mb-1">Ngày & giờ nạp quỹ lần đầu</label>
+                    <DateTimeField
+                      value={form.initial_allocation_date ? `${form.initial_allocation_date}T${form.initial_allocation_time || '00:00'}` : ''}
+                      max={new Date().toISOString().slice(0, 10)}
+                      onChange={(v) => {
+                        const [d = '', t = ''] = v.split('T');
+                        setForm({ ...form, initial_allocation_date: d, initial_allocation_time: t });
+                      }}
+                      className="w-full justify-between bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm dark:text-white text-blueberry"
+                    />
+                  </div>
+                )}
+                <MoneyInput value={form.target_amount} onChange={(v) => setForm({ ...form, target_amount: v })} placeholder="Số tiền mục tiêu (không bắt buộc)" className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none mb-3 dark:text-white dark:placeholder:text-light-grey text-blueberry" />
+
+                <div className="relative mb-3">
+                  <input value={form.interest_rate} onChange={(e) => setForm({ ...form, interest_rate: e.target.value.replace(/[^0-9.]/g, '') })} inputMode="decimal" placeholder="Tỷ suất lợi nhuận /năm (không bắt buộc)" className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 pr-10 text-sm outline-none dark:text-white dark:placeholder:text-light-grey text-blueberry" />
+                  {form.interest_rate && <span className="absolute right-4 top-1/2 -translate-y-1/2 text-steel dark:text-light-grey text-sm font-semibold">%</span>}
+                </div>
+
+                <p className="text-sm text-blueberry dark:text-white font-semibold mb-2">Ảnh nền quỹ</p>
+                {form.background_url && (
+                  <div className="w-full h-28 rounded-xl overflow-hidden mb-2 bg-ice-cream dark:bg-night-sky">
+                    <img src={form.background_url} alt="" className="w-full h-full object-cover" />
+                  </div>
+                )}
+                <div className="flex gap-2 mb-3">
+                  <ImageUploader
+                    aspectRatio="16:9"
+                    uploading={uploading}
+                    triggerLabel="Tải ảnh từ thiết bị"
+                    triggerClassName="flex-1 bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm text-steel dark:text-light-grey text-center cursor-pointer hover:bg-light-grey/30 transition flex items-center justify-center gap-2"
+                    onConfirm={handleCroppedBannerUpload}
+                  />
+                </div>
+                <input value={form.background_url} onChange={(e) => setForm({ ...form, background_url: e.target.value })} placeholder="Hoặc dán link ảnh" className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none mb-4 dark:text-white dark:placeholder:text-light-grey text-blueberry" />
+              </div>
             )}
             {tab === 'income' && (
               <label className="flex items-start gap-2 mb-4 text-sm text-blueberry dark:text-white font-semibold">
@@ -6986,7 +7215,7 @@ function CategorySection({ categories, reload, softDelete, spendingPoolByPeriod,
                 </span>
               </label>
             )}
-            <button onClick={handleSave} disabled={saving} className="w-full bg-gradient-primary text-white rounded-xl py-3 font-bold flex items-center justify-center gap-2 disabled:opacity-60 shadow-md shadow-turquoise/30">{saving ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />} Lưu</button>
+            <button onClick={handleSave} disabled={saving || uploading} className="w-full bg-gradient-primary text-white rounded-xl py-3 font-bold flex items-center justify-center gap-2 disabled:opacity-60 shadow-md shadow-turquoise/30">{saving ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />} Lưu</button>
           </div>
         </div>,
         document.body
