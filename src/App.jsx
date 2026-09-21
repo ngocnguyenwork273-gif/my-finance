@@ -8941,7 +8941,8 @@ function MainApp({ user, theme, toggleTheme }) {
   }
 
   async function refreshUser() {
-    const { data } = await supabase.auth.getUser();
+    const { data, error } = await supabase.auth.getUser();
+    if (error || !data?.user) { console.error('refreshUser failed:', error); return; }
     setCurrentUser(data.user);
   }
 
@@ -9322,7 +9323,9 @@ export default function App() {
   });
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => setSession(data.session));
+    supabase.auth.getSession()
+      .then(({ data }) => setSession(data?.session ?? null))
+      .catch((err) => { console.error('getSession failed:', err); setSession(null); });
     const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => setSession(session));
     return () => listener.subscription.unsubscribe();
   }, []);
