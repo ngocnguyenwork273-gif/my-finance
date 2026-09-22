@@ -5,13 +5,13 @@ import { useState, useEffect, useLayoutEffect, useRef, Fragment, Children } from
 import { createPortal } from 'react-dom';
 import { supabase } from './supabaseClient';
 import {
-  Home, Sparkles, Plus, BarChart3, Settings as SettingsIcon, TrendingUp, TrendingDown, PiggyBank, HeartPulse,
+  Home, Sparkles, Plus, BarChart3, SettingsIcon, TrendingUp, TrendingDown, PiggyBank, HeartPulse,
   ArrowLeft, Download, X, Check, Loader2, Target, Wallet, Trash2, Pencil, LogOut, Mail, Lock, Search, Bell, Sun, Moon, User,
   Filter, MoreHorizontal, Eye, EyeOff, LayoutGrid, List, ArrowUpDown, Calendar, Clock, Star,
   ChevronDown, ChevronRight, ChevronLeft, Camera, KeyRound, UserCog, SlidersHorizontal,
   AlertTriangle, Info, PieChart, LineChart, BarChart, CircleDollarSign, FileText, SendHorizontal,
   BadgeCheck, CreditCard, Wifi
-} from 'lucide-react';
+} from './icons'; // <-- đổi từ 'lucide-react' sang bộ Solar Icons (file wrapper tự viết, xem icons.jsx)
 import ReactCrop, { centerCrop, makeAspectCrop } from 'react-image-crop';
 import 'react-image-crop/dist/ReactCrop.css';
 import DateField from './DateField';
@@ -293,6 +293,36 @@ const fincheckStyles = `
     display: none;
   }
 
+  /* Thanh cuộn ngang mảnh, chỉ dùng cho các chart cột (TrendBarChart...) — khác với
+     scrollbar-hide (ẩn hoàn toàn), ở đây để lộ một thanh mảnh, mờ để người dùng biết
+     là còn nội dung có thể kéo/cuộn ngang khi số cột (ngày/tháng) vượt quá khung nhìn. */
+  .chart-scroll-x {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(48,49,80,0.18) transparent;
+  }
+  .chart-scroll-x::-webkit-scrollbar {
+    height: 6px;
+  }
+  .chart-scroll-x::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .chart-scroll-x::-webkit-scrollbar-thumb {
+    background: rgba(48,49,80,0.18);
+    border-radius: 999px;
+  }
+  .chart-scroll-x::-webkit-scrollbar-thumb:hover {
+    background: rgba(48,49,80,0.32);
+  }
+  .dark .chart-scroll-x {
+    scrollbar-color: rgba(255,255,255,0.22) transparent;
+  }
+  .dark .chart-scroll-x::-webkit-scrollbar-thumb {
+    background: rgba(255,255,255,0.22);
+  }
+  .dark .chart-scroll-x::-webkit-scrollbar-thumb:hover {
+    background: rgba(255,255,255,0.36);
+  }
+
   /* FIX: bấm vào nút / biểu tượng (icon button) không còn hiện con trỏ chữ (I-beam)
      kiểu ô nhập văn bản, và không bị bôi đen chữ khi bấm nhanh 2 lần.
      Ô nhập liệu được loại trừ ngay bên dưới để vẫn gõ / bôi đen text bình thường. */
@@ -481,6 +511,31 @@ function useCloseOnEscape(isOpen, onClose) {
     document.addEventListener('keydown', handleKey);
     return () => document.removeEventListener('keydown', handleKey);
   }, [isOpen, onClose]);
+}
+
+// Trả về số CỘT lưới thẻ (card grid) đang thực sự hiển thị theo bề rộng màn hình
+// hiện tại — mốc breakpoint khớp CHÍNH XÁC với class Tailwind dùng trên các lưới
+// thẻ (grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5), để nơi gọi tính
+// được pageSize = số cột × số hàng mong muốn, LUÔN chia hết cho số cột thực tế dù
+// màn hình to/nhỏ/đổi kích thước ra sao — tránh tình trạng hàng cuối trang bị hụt
+// 1-2 ô trống rồi nhảy sang trang kế (chỉ xảy ra khi pageSize cố định không khớp
+// số cột thật của breakpoint đang hiển thị).
+function useResponsiveGridColumns() {
+  const getCols = () => {
+    if (typeof window === 'undefined') return 5;
+    const w = window.innerWidth;
+    if (w < 640) return 2;   // < sm
+    if (w < 1024) return 3;  // sm → lg
+    if (w < 1280) return 4;  // lg → xl
+    return 5;                 // ≥ xl
+  };
+  const [cols, setCols] = useState(getCols);
+  useEffect(() => {
+    function onResize() { setCols(getCols()); }
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+  return cols;
 }
 
 /* ==============================================================================
@@ -1859,6 +1914,366 @@ function useChartTooltip() {
   return { tip, wrapRef, showTip, hideTip };
 }
 
+// Bảng màu + kích thước donut dùng CHUNG cho mọi chart (SpendingDonut/CategoryBarChart/
+// TrendBarChart/SegmentDonut) — đặt ở module scope (KHÔNG khai báo lại bên trong
+// Dashboard/Report) để các hàm bên dưới không bị định nghĩa lại mỗi lần component cha
+// re-render. Xem ghi chú ở SpendingDonut/CategoryBarChart/TrendBarChart/SegmentDonut.
+const palette = ['#0DBACC', '#74ACEF', '#F18AB5', '#9F7FE0', '#B4F1F1', '#C1DDFF', '#FFCDDB', '#E3D6FF'];
+const radius = 60, circumference = 2 * Math.PI * radius;
+
+// FIX (chart trống/không hiện khi mở app): các component chart dưới đây TRƯỚC ĐÂY được
+// khai báo (function SpendingDonut(){...} v.v.) NGAY BÊN TRONG component Dashboard, nên
+// mỗi lần Dashboard re-render (đổi bộ lọc thời gian, hover vào bất kỳ đâu trong
+// Dashboard, dữ liệu giao dịch tải xong...) React coi đây là 1 "loại component" HOÀN
+// TOÀN MỚI (vì function reference đổi mỗi render) → unmount toàn bộ DOM chart cũ rồi
+// mount lại DOM mới ngay lập tức. Trên trình duyệt desktop việc này thường không thấy vì
+// remount + repaint gần như tức thì, nhưng trên WebView nhúng trong app khác (Zalo Mini
+// App, Facebook/TikTok in-app browser...) việc remount liên tục các phần tử có
+// backdrop-filter (frost-inset) hay bị "kẹt" không paint lại kịp, để lại 1 khối trống
+// trắng đúng ngay vị trí chart đó cho đến khi người dùng cuộn/chạm vào màn hình. Chuyển
+// các component này ra module scope (định nghĩa DUY NHẤT 1 lần khi file load, không phụ
+// thuộc props/state của Dashboard) giúp React NHẬN RA đây vẫn là cùng 1 component giữa
+// các lần re-render và chỉ cập nhật (update) DOM thay vì unmount/mount lại — chart sẽ
+// luôn hiện đúng ngay từ lần vẽ đầu tiên, kể cả trên các WebView "khó tính".
+function SpendingDonut({ data, total }) {
+  const { tip, wrapRef, showTip, hideTip } = useChartTooltip();
+  const [hoverId, setHoverId] = useState(null); // id danh mục đang hover, để lát đó nổi bật + các lát khác mờ đi
+  const r = 60, circ = 2 * Math.PI * r;
+  let acc = 0;
+  return (
+    <div ref={wrapRef} className="relative flex items-center gap-6">
+      <ChartTooltip tip={tip} />
+      <div className="relative flex-shrink-0" style={{ width: 150, height: 150 }}>
+        <svg width="150" height="150" viewBox="0 0 150 150" className="-rotate-90">
+          {data.map((cat, i) => {
+            const pct = cat.amount / total;
+            const dash = pct * circ;
+            const offset = acc;
+            acc += dash;
+            const isHovered = hoverId === cat.id;
+            const isDimmed = hoverId !== null && !isHovered;
+            return (
+              <circle
+                key={cat.id} cx="75" cy="75" r={r} fill="none" stroke={palette[i % palette.length]}
+                strokeWidth={isHovered ? 18 : 14}
+                strokeDasharray={`${dash} ${circ - dash}`} strokeDashoffset={-offset} strokeLinecap="round"
+                className="cursor-pointer"
+                style={{ opacity: isDimmed ? 0.35 : 1, transition: 'opacity 0.18s ease, stroke-width 0.18s ease' }}
+                onMouseMove={(e) => { setHoverId(cat.id); showTip(e, { label: cat.name, value: formatMoney(cat.amount), pct: Math.round(pct * 100) }); }}
+                onMouseLeave={() => { setHoverId(null); hideTip(); }}
+              />
+            );
+          })}
+        </svg>
+        <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+          <span className="text-[11px] text-steel dark:text-light-grey">Tổng</span>
+          <span className="text-sm font-bold text-blueberry dark:text-white">{formatMoney(total)}</span>
+        </div>
+      </div>
+      <div className="flex flex-col gap-2 text-sm min-w-0">
+        {data.map((cat, i) => (
+          <div
+            key={cat.id}
+            className="flex items-center gap-2 cursor-pointer rounded-lg px-1 -mx-1 transition-opacity duration-150"
+            style={{ opacity: hoverId !== null && hoverId !== cat.id ? 0.4 : 1 }}
+            onMouseEnter={() => setHoverId(cat.id)}
+            onMouseLeave={() => setHoverId(null)}
+          >
+            <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: palette[i % palette.length] }} />
+            <span className="text-blueberry dark:text-white font-semibold">{cat.name}</span><span className="text-blueberry dark:text-white font-bold ml-auto">{formatMoney(cat.amount)}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function CategoryBarChart({ series, maxVal, buckets }) {
+  const { tip, wrapRef, showTip, hideTip } = useChartTooltip();
+  const [hoverKey, setHoverKey] = useState(null); // `${bucketIndex}:${categoryId}` của đoạn đang hover, để đoạn đó nổi bật + mờ các đoạn còn lại
+  if (series.length === 0) return null;
+  const chartH = 200; // chiều cao vùng vẽ (px)
+  const labelColW = 40; // độ rộng cột nhãn số tiền bên trái (trục tung)
+  const bucketTotals = buckets.map((b, bi) => series.reduce((s, c) => s + (c.values[bi] || 0), 0));
+  // Trục tung: 4 mốc từ 0 đến maxVal (maxVal đã được tính theo tổng cả cột mỗi kỳ).
+  const yTicks = [0, 0.33, 0.66, 1].map((f) => maxVal * f);
+  const yPct = (v) => Math.min((v / maxVal) * 100, 100); // % chiều cao tính từ đáy lên
+  // Bề rộng CỐ ĐỊNH cho mỗi cột kỳ (px) — trước đây chia đều 100%/số-kỳ nên khi ít kỳ
+  // (vd 5 tuần) cột bị to/mập chiếm gần hết bề ngang. Giờ mỗi cột có bề rộng cố định,
+  // thon gọn hơn hẳn; khi nhiều kỳ vượt khung nhìn thì cuộn ngang (overflow-x-auto)
+  // thay vì ép cột nhỏ lại — giống cách TrendBarChart đã xử lý.
+  const bucketWidth = 56;
+  const plotWidth = Math.max(buckets.length * bucketWidth, 1);
+  const xCenter = (bi) => (bi + 0.5) * bucketWidth; // toạ độ px, canh giữa mỗi cột
+  const yPx = (v) => chartH - (yPct(v) / 100) * chartH;
+  const totalLinePoints = bucketTotals.map((v, bi) => `${xCenter(bi)},${yPx(v)}`).join(' ');
+
+  return (
+    <div ref={wrapRef} className="relative min-w-0">
+      <ChartTooltip tip={tip} />
+      <div className="flex min-w-0">
+        {/* Cột nhãn số tiền bên trái (trục tung) — cố định, không cuộn theo */}
+        <div className="flex flex-col justify-between flex-shrink-0 pr-2" style={{ height: chartH, width: labelColW }}>
+          {[...yTicks].reverse().map((v, i) => (
+            <span key={i} className="text-[9px] text-steel dark:text-light-grey whitespace-nowrap leading-none">{formatMoneyCompact(v)}</span>
+          ))}
+        </div>
+
+        {/* Vùng cuộn ngang — chứa CẢ phần vẽ cột lẫn nhãn trục hoành bên dưới, để 2 phần
+            luôn khớp cột với nhau dù kéo cuộn tới đâu. */}
+        <div className="flex-1 min-w-0 overflow-x-auto chart-scroll-x">
+          <div style={{ width: plotWidth, minWidth: '100%' }}>
+            {/* Vùng vẽ: các cột chồng theo từng kỳ/ngày + đường Tổng (trục hoành = thời gian) */}
+            <div className="relative" style={{ height: chartH, overflow: 'visible' }}>
+              {/* Lưới ngang mảnh theo mốc số tiền */}
+              <div className="absolute inset-0 flex flex-col justify-between pointer-events-none">
+                {yTicks.map((_, i) => (
+                  <div key={i} className="border-t border-dashed border-steel/20 dark:border-light-grey/15 w-full" />
+                ))}
+              </div>
+
+              {/* Các cột chồng — mỗi cột là 1 kỳ/ngày, mỗi màu là 1 danh mục, bề rộng cố
+                  định (bucketWidth) + đệm ngang (px-2.5) để cột thon gọn và có khoảng
+                  cách rõ ràng với cột bên cạnh, thay vì chiếm gần hết bề ngang như trước.
+                  Mỗi đoạn được bo góc ở đầu/cuối của cả cột (không bo giữa các đoạn) cho
+                  giống dạng "viên thuốc" chồng lên nhau; rê chuột vào 1 đoạn sẽ phóng to
+                  nhẹ + sáng lên, các đoạn khác mờ đi để dễ nhìn đoạn đang chọn giữa nhiều
+                  thành phần. */}
+              <div className="absolute inset-0 flex items-end">
+                {buckets.map((b, bi) => {
+                  const bucketTotal = bucketTotals[bi];
+                  const visible = series.map((c, i) => ({ c, i, v: c.values[bi] })).filter((s) => s.v > 0);
+                  return (
+                    <div key={bi} className="h-full flex flex-col-reverse items-stretch px-2.5 box-border flex-shrink-0 gap-[2px]" style={{ width: bucketWidth }}>
+                      {visible.map((s, vi) => {
+                        const { c, i, v } = s;
+                        const h = yPct(v);
+                        const pct = bucketTotal > 0 ? Math.round((v / bucketTotal) * 100) : 0;
+                        const key = `${bi}:${c.id}`;
+                        const isHovered = hoverKey === key;
+                        const isDimmed = hoverKey !== null && !isHovered;
+                        const isBottom = vi === 0;
+                        const isTop = vi === visible.length - 1;
+                        return (
+                          <div
+                            key={c.id}
+                            className="w-full cursor-pointer"
+                            style={{
+                              height: `${h}%`,
+                              minHeight: v > 0 ? 3 : 0,
+                              background: palette[i % palette.length],
+                              borderTopLeftRadius: isTop ? 6 : 0,
+                              borderTopRightRadius: isTop ? 6 : 0,
+                              borderBottomLeftRadius: isBottom ? 6 : 0,
+                              borderBottomRightRadius: isBottom ? 6 : 0,
+                              opacity: isDimmed ? 0.35 : 1,
+                              transform: isHovered ? 'scaleX(1.15)' : 'scaleX(1)',
+                              transformOrigin: 'center',
+                              filter: isHovered ? 'brightness(1.12) saturate(1.15)' : 'none',
+                              boxShadow: isHovered ? '0 4px 14px rgba(0,0,0,0.2)' : 'none',
+                              position: 'relative',
+                              zIndex: isHovered ? 10 : 1,
+                              transition: 'opacity 0.18s ease, transform 0.18s ease, filter 0.18s ease, box-shadow 0.18s ease',
+                            }}
+                            onMouseMove={(e) => { setHoverKey(key); showTip(e, { label: `${c.name} (${b.label})`, value: formatMoney(v), pct }); }}
+                            onMouseLeave={() => { setHoverKey(null); hideTip(); }}
+                          />
+                        );
+                      })}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Đường liền nối đỉnh từng cột = Tổng của kỳ/ngày đó. zIndex cao hơn hẳn z-index
+                  cao nhất của các đoạn cột (kể cả khi hover = 10) để đường LUÔN nổi lên trên
+                  cột, không bị cột che mất. Màu cam-vàng (#FFB020) để không trùng đoạn cột
+                  đầu tiên trong palette (#0DBACC). ViewBox giờ tính bằng px (khớp bề rộng
+                  cuộn thực tế của vùng vẽ) thay vì % như trước, để đường luôn thẳng hàng
+                  với cột dù đang cuộn ngang. */}
+              <svg
+                width={plotWidth} height={chartH} viewBox={`0 0 ${plotWidth} ${chartH}`} preserveAspectRatio="none"
+                className="absolute inset-0 pointer-events-none overflow-visible"
+                style={{ zIndex: 15 }}
+              >
+                <polyline points={totalLinePoints} fill="none" stroke="#FFB020" strokeWidth="2" vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+
+              {/* Chấm tròn + nhãn số tiền trên mỗi điểm Tổng, giống ảnh mẫu, rê vào xem số liệu. */}
+              {bucketTotals.map((v, bi) => (
+                <div
+                  key={bi}
+                  className="absolute cursor-default"
+                  style={{ left: xCenter(bi), top: `${100 - yPct(v)}%`, transform: 'translate(-50%, -50%)', zIndex: 16 }}
+                  onMouseMove={(e) => showTip(e, { label: `Tổng (${buckets[bi].label})`, value: formatMoney(v) })}
+                  onMouseLeave={hideTip}
+                >
+                  <span className="absolute left-1/2 -translate-x-1/2 bottom-[calc(100%+3px)] text-[10px] font-extrabold text-blueberry dark:text-white whitespace-nowrap">{v > 0 ? formatMoneyCompact(v) : ''}</span>
+                  <div className="w-2 h-2 rounded-full border border-white dark:border-night-sky" style={{ background: '#FFB020' }} />
+                </div>
+              ))}
+            </div>
+
+            {/* Trục hoành: nhãn kỳ/ngày theo từng cột — nằm CÙNG vùng cuộn với phần vẽ cột
+                ở trên nên luôn khớp vị trí, không bị lệch khi kéo cuộn. */}
+            <div className="flex mt-2">
+              {buckets.map((b, bi) => (
+                <div key={bi} className="flex-shrink-0 text-center text-[10px] text-steel dark:text-light-grey whitespace-nowrap truncate px-0.5" style={{ width: bucketWidth }}>{b.label}</div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Legend — mỗi danh mục 1 dòng duy nhất, số tiền là tổng cả khoảng thời gian đang chọn */}
+      <div className={`flex flex-col gap-1.5 mt-4 ${series.length > 6 ? 'max-h-40 overflow-y-auto scrollbar-hide pr-1' : ''}`}>
+        {series.map((c, i) => (
+          <div key={c.id} className="flex items-center gap-2">
+            <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: palette[i % palette.length] }} />
+            <span className="text-blueberry dark:text-white text-xs truncate flex-1 min-w-0 font-semibold">{c.name}</span>
+            <span className="text-blueberry dark:text-white text-xs font-bold flex-shrink-0">{formatMoney(c.total)}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function TrendBarChart({ buckets, maxVal, keyA = 'inc', keyB = 'exp', keyC = null, labelA = 'Thu nhập', labelB = 'Chi tiêu', labelC = 'Tổng', colorA = 'bg-turquoise', colorB = 'bg-cotton-candy', colorC = 'bg-lavender', showYAxis = false }) {
+  const { tip, wrapRef, showTip, hideTip } = useChartTooltip();
+  const [hoverKey, setHoverKey] = useState(null); // `${bucketIndex}:a`/`:b`/`:c` của cột đang hover
+  const yTicks = showYAxis ? [0, 0.25, 0.5, 0.75, 1].map((f) => maxVal * f) : [];
+  // Bề rộng tối thiểu cho MỖI cụm (ngày/tháng) — luôn áp dụng (trước đây chỉ áp dụng
+  // khi buckets.length > 12) để các cột không bao giờ bị ép quá mỏng/dính vào nhau.
+  // Khi tổng bề rộng vượt khung nhìn, overflow-x-auto sẽ tự bật thanh cuộn ngang.
+  const bucketMinWidth = keyC ? 34 : 24;
+  // Chỉ là ước lượng để quyết định có hiện gợi ý "kéo để xem thêm" hay không —
+  // không ảnh hưởng tới việc cuộn (overflow-x-auto luôn hoạt động khi cần).
+  const likelyScrollable = buckets.length * (bucketMinWidth + 12) > 600;
+  const chart = (
+    <div className="flex items-end gap-3 mt-4 h-32 overflow-x-auto chart-scroll-x">
+      {buckets.map((b, i) => {
+        const aKey = `${i}:a`, bKey = `${i}:b`, cKey = `${i}:c`;
+        const aHovered = hoverKey === aKey, bHovered = hoverKey === bKey, cHovered = hoverKey === cKey;
+        const aDimmed = hoverKey !== null && !aHovered;
+        const bDimmed = hoverKey !== null && !bHovered;
+        const cDimmed = hoverKey !== null && !cHovered;
+        const aVal = b[keyA] || 0, bVal = b[keyB] || 0, cVal = keyC ? (b[keyC] || 0) : 0;
+        return (
+          <div
+            key={i}
+            className={`flex-1 flex flex-col items-center gap-1 h-full justify-end rounded-md px-1 ${i % 2 === 1 ? 'bg-blueberry/[0.035] dark:bg-white/[0.05]' : ''}`}
+            style={{ minWidth: bucketMinWidth }}
+          >
+            <div className="w-full flex items-end gap-1 h-full" style={{ overflow: 'visible' }}>
+              <div
+                className={`flex-1 ${colorA} rounded-t-[8px] cursor-pointer`}
+                style={{
+                  height: `${(aVal / maxVal) * 100}%`, minHeight: aVal > 0 ? 4 : 0,
+                  opacity: aDimmed ? 0.35 : 1,
+                  transform: aHovered ? 'scaleX(1.15) translateY(-2px)' : 'scaleX(1)',
+                  transformOrigin: 'bottom',
+                  filter: aHovered ? 'brightness(1.1)' : 'none',
+                  boxShadow: aHovered ? '0 4px 12px rgba(0,0,0,0.18)' : 'none',
+                  position: 'relative', zIndex: aHovered ? 10 : 1,
+                  transition: 'opacity 0.18s ease, transform 0.18s ease, filter 0.18s ease, box-shadow 0.18s ease',
+                }}
+                onMouseMove={(e) => { setHoverKey(aKey); showTip(e, { label: `${labelA} (${b.label})`, value: formatMoney(aVal) }); }}
+                onMouseLeave={() => { setHoverKey(null); hideTip(); }}
+              />
+              <div
+                className={`flex-1 ${colorB} rounded-t-[8px] cursor-pointer`}
+                style={{
+                  height: `${(bVal / maxVal) * 100}%`, minHeight: bVal > 0 ? 4 : 0,
+                  opacity: bDimmed ? 0.35 : 1,
+                  transform: bHovered ? 'scaleX(1.15) translateY(-2px)' : 'scaleX(1)',
+                  transformOrigin: 'bottom',
+                  filter: bHovered ? 'brightness(1.1)' : 'none',
+                  boxShadow: bHovered ? '0 4px 12px rgba(0,0,0,0.18)' : 'none',
+                  position: 'relative', zIndex: bHovered ? 10 : 1,
+                  transition: 'opacity 0.18s ease, transform 0.18s ease, filter 0.18s ease, box-shadow 0.18s ease',
+                }}
+                onMouseMove={(e) => { setHoverKey(bKey); showTip(e, { label: `${labelB} (${b.label})`, value: formatMoney(bVal) }); }}
+                onMouseLeave={() => { setHoverKey(null); hideTip(); }}
+              />
+              {keyC && (
+                <div
+                  className={`flex-1 ${colorC} rounded-t-[8px] cursor-pointer`}
+                  style={{
+                    height: `${(cVal / maxVal) * 100}%`, minHeight: cVal > 0 ? 4 : 0,
+                    opacity: cDimmed ? 0.35 : 1,
+                    transform: cHovered ? 'scaleX(1.15) translateY(-2px)' : 'scaleX(1)',
+                    transformOrigin: 'bottom',
+                    filter: cHovered ? 'brightness(1.1)' : 'none',
+                    boxShadow: cHovered ? '0 4px 12px rgba(0,0,0,0.18)' : 'none',
+                    position: 'relative', zIndex: cHovered ? 10 : 1,
+                    transition: 'opacity 0.18s ease, transform 0.18s ease, filter 0.18s ease, box-shadow 0.18s ease',
+                  }}
+                  onMouseMove={(e) => { setHoverKey(cKey); showTip(e, { label: `${labelC} (${b.label})`, value: formatMoney(cVal) }); }}
+                  onMouseLeave={() => { setHoverKey(null); hideTip(); }}
+                />
+              )}
+            </div>
+            <span className="text-[11px] text-steel dark:text-light-grey whitespace-nowrap">{b.label}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+  return (
+    <div ref={wrapRef} className="relative">
+      <ChartTooltip tip={tip} />
+      {likelyScrollable && (
+        <p className="text-[10px] text-steel dark:text-light-grey text-right mb-0.5 flex items-center justify-end gap-1">
+          <ChevronLeft size={10} className="opacity-60" /> Kéo để xem thêm <ChevronRight size={10} className="opacity-60" />
+        </p>
+      )}
+      {showYAxis ? (
+        <div className="flex">
+          {/* Trục tung — số tiền, từ cao xuống thấp, cùng cách làm với IncomeExpenseComboChart */}
+          <div className="flex flex-col justify-between flex-shrink-0 pr-2 mt-4" style={{ height: 128 }}>
+            {[...yTicks].reverse().map((v, i) => (
+              <span key={i} className="text-[9px] text-steel dark:text-light-grey whitespace-nowrap leading-none">{formatMoneyCompact(v)}</span>
+            ))}
+          </div>
+          <div className="flex-1 min-w-0">{chart}</div>
+        </div>
+      ) : chart}
+    </div>
+  );
+}
+
+function SegmentDonut({ segments, centerLabel, centerValue }) {
+  const { tip, wrapRef, showTip, hideTip } = useChartTooltip();
+  const [hoverId, setHoverId] = useState(null); // id lát đang hover, để lát đó nổi bật + các lát khác mờ đi
+  return (
+    <div ref={wrapRef} className="relative flex-shrink-0">
+      <ChartTooltip tip={tip} />
+      <svg width="120" height="120" viewBox="0 0 150 150" className="-rotate-90">
+        {segments.map((seg, i) => {
+          const isHovered = hoverId === seg.id;
+          const isDimmed = hoverId !== null && !isHovered;
+          return (
+            <circle
+              key={seg.id} cx="75" cy="75" r={radius} fill="none" stroke={palette[i % palette.length]}
+              strokeWidth={isHovered ? 18 : 14}
+              strokeDasharray={`${seg.dash} ${circumference - seg.dash}`} strokeDashoffset={-seg.offset} strokeLinecap="round"
+              className="cursor-pointer"
+              style={{ opacity: isDimmed ? 0.35 : 1, transition: 'opacity 0.18s ease, stroke-width 0.18s ease' }}
+              onMouseMove={(e) => { setHoverId(seg.id); showTip(e, { label: seg.name, value: formatMoney(seg.amount), pct: Math.round(seg.pct * 100) }); }}
+              onMouseLeave={() => { setHoverId(null); hideTip(); }}
+            />
+          );
+        })}
+      </svg>
+      <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+        <span className="text-[10px] text-steel dark:text-light-grey">{centerLabel}</span>
+        <span className="text-xs font-bold text-blueberry dark:text-white">{centerValue}</span>
+      </div>
+    </div>
+  );
+}
+
 function MiniRing({ pct, color, label }) {
   const r = 15, c = 2 * Math.PI * r;
   const dash = (Math.max(0, Math.min(100, pct)) / 100) * c;
@@ -1880,7 +2295,7 @@ function MiniRing({ pct, color, label }) {
    06. LAYOUT COMPONENTS (Sidebar, Header, BottomNav)
    ============================================================================== */
 
-function SidebarDesktop({ screen, setScreen, sidebarCollapsed, toggleSidebar, theme, toggleTheme, appLogoUrl }) {
+function SidebarDesktop({ screen, setScreen, sidebarCollapsed, toggleSidebar, theme, toggleTheme, appLogoUrl, openSettings, settingsSection }) {
   const isDark = theme === 'dark';
   return (
     <aside
@@ -1911,11 +2326,20 @@ function SidebarDesktop({ screen, setScreen, sidebarCollapsed, toggleSidebar, th
 
       <div className="relative flex flex-col gap-1">
         {NAV_ITEMS.map(({ key, icon: Icon, label }) => {
-          const active = screen === key;
+          const active = key === 'settings' ? (screen === key && settingsSection !== 'profile') : screen === key;
+          // Mục "Cài đặt" ở sidebar PHẢI luôn mở màn có thanh tab (Danh mục/Hệ thống/Lịch
+          // sử/Giao diện) — không dùng setScreen('settings') thẳng, vì nếu lần trước người
+          // dùng đang ở "Hồ sơ tài khoản" (mở từ avatar), settingsSection vẫn còn là
+          // 'profile' và Settings sẽ mở lại đúng màn Hồ sơ thay vì màn tab. Gọi
+          // openSettings('categories') để luôn ép về thẻ "Danh mục" mỗi khi bấm từ đây,
+          // tách bạch hẳn với lối vào từ avatar.
+          const handleClick = key === 'settings' && openSettings
+            ? () => openSettings('categories')
+            : () => setScreen(key);
           return (
             <button
               key={key}
-              onClick={() => setScreen(key)}
+              onClick={handleClick}
               title={sidebarCollapsed ? label : undefined}
               className={`flex items-center rounded-xl text-sm font-semibold transition-all duration-200 overflow-hidden ${sidebarCollapsed ? 'justify-center px-0 py-2.5' : 'gap-3 px-3 py-2.5'} ${active ? 'text-turquoise' : 'text-steel dark:text-light-grey hover:bg-white/40 dark:hover:bg-white/[0.06]'}`}
               style={active ? {
@@ -1961,12 +2385,11 @@ function AvatarMenu({ avatarUrl, displayName, openSettings, variant = 'desktop' 
   const [open, setOpen] = useState(false);
   useCloseOnEscape(open, () => setOpen(false));
 
+  // Bấm avatar giờ chỉ hiện đúng 2 việc: xem/sửa "Hồ sơ" (tên, ảnh đại diện, mật khẩu...)
+  // và Đăng xuất — các mục Danh mục/Giao diện/Hệ thống/Lịch sử đã chuyển sang icon Cài đặt
+  // riêng trên thanh nav dưới (xem BottomNavMobile), tránh trùng lặp 2 đường vào Cài đặt.
   const items = [
     { key: 'profile', label: 'Hồ sơ', icon: BadgeCheck },
-    { key: 'categories', label: 'Danh mục', icon: LayoutGrid },
-    { key: 'appearance', label: 'Giao diện', icon: Sun },
-    { key: 'data', label: 'Dữ liệu', icon: CreditCard },
-    { key: 'history', label: 'Lịch sử', icon: Clock },
   ];
 
   function go(section) {
@@ -2214,7 +2637,7 @@ function HeaderDesktop({ onAddClick, displayName, avatarUrl, theme, toggleTheme,
   );
 }
 
-function BottomNavMobile({ screen, setScreen, onAddClick, theme, toggleTheme, openSettings }) {
+function BottomNavMobile({ screen, setScreen, onAddClick, theme, toggleTheme, openSettings, settingsSection }) {
   const isDark = theme === 'dark';
   // "Quản lý" (funds / accounts / goals) floating glass sub-menu
   const [manageOpen, setManageOpen] = useState(false);
@@ -2387,9 +2810,6 @@ function BottomNavMobile({ screen, setScreen, onAddClick, theme, toggleTheme, op
               <button onClick={() => { setQuickMenuOpen(false); onAddClick('expense'); }} className={`w-full flex items-center gap-3 px-5 py-2.5 transition ${isDark ? 'text-white hover:bg-white/10' : 'text-blueberry hover:bg-black/[0.04]'}`}>
                 <TrendingDown size={18} className="text-cotton-candy" /> Chi tiêu
               </button>
-              <button onClick={() => { setQuickMenuOpen(false); onAddClick('transfer'); }} className={`w-full flex items-center gap-3 px-5 py-2.5 transition ${isDark ? 'text-white hover:bg-white/10' : 'text-blueberry hover:bg-black/[0.04]'}`}>
-                <SendHorizontal size={18} className="text-lavender" /> Chuyển khoản
-              </button>
             </div>
           )}
 
@@ -2442,9 +2862,16 @@ function BottomNavMobile({ screen, setScreen, onAddClick, theme, toggleTheme, op
               <span className="w-11 flex-shrink-0" aria-hidden="true" />
 
               <NavIcon icon={BarChart3} label="Báo cáo" active={screen === 'report'} onClick={() => go('report')} />
-              {/* Chỗ trống — trước đây mở "Hồ sơ", giờ chức năng đó đã chuyển vào menu bấm avatar
-                  (mục "Hồ sơ"). Giữ icon này làm chỗ để build tính năng mới sau. */}
-              <NavIcon icon={User} label="Sắp có" active={false} onClick={() => {}} />
+              {/* Icon person cũ ("Sắp có", chưa làm gì) đổi thành icon Cài đặt — mở thẳng màn
+                  Settings với các thẻ Danh mục/Hệ thống/Lịch sử/Giao diện. Chỉ sáng (active)
+                  khi đang ở đúng màn tab này — KHÔNG sáng khi đang ở "Hồ sơ tài khoản" (mở
+                  từ avatar), để 2 lối vào Cài đặt cảm giác tách biệt hẳn như yêu cầu. */}
+              <NavIcon
+                icon={SettingsIcon}
+                label="Cài đặt"
+                active={screen === 'settings' && settingsSection !== 'profile'}
+                onClick={() => { setManageOpen(false); setQuickMenuOpen(false); openSettings && openSettings('categories'); }}
+              />
             </div>
           </div>
         </div>
@@ -3604,8 +4031,10 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
   const incomeCats = categories.filter((c) => c.type === 'income');
   const spentByCat = expenseCats.map((c) => ({ ...c, amount: transactions.filter((t) => t.category_id === c.id && t.type === 'expense').reduce((s, t) => s + Number(t.amount), 0) })).filter((c) => c.amount > 0);
   const total = spentByCat.reduce((s, c) => s + c.amount, 0) || 1;
-  const radius = 60, circumference = 2 * Math.PI * radius;
-  const palette = ['#0DBACC', '#74ACEF', '#F18AB5', '#9F7FE0', '#B4F1F1', '#C1DDFF', '#FFCDDB', '#E3D6FF'];
+  // palette/radius/circumference giờ dùng chung ở module scope (xem ghi chú cạnh
+  // SpendingDonut/CategoryBarChart/TrendBarChart/SegmentDonut ở đầu file) — KHÔNG khai
+  // báo lại ở đây nữa, để tránh các chart đó bị unmount/remount (gây trống trên WebView)
+  // mỗi lần Dashboard re-render.
   const weekDayLabels = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'];
 
   // Buckets + chuỗi số liệu cho từng card — tất cả dùng CHUNG globalFilter (bộ lọc thời
@@ -3677,302 +4106,6 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
   // TxLedgerModal đang dùng ở màn Báo cáo, lấy đúng danh sách giao dịch thô đang được
   // lọc theo bộ lọc thời gian chung (globalFilter) của Dashboard.
   const [ledgerModal, setLedgerModal] = useState(null); // { title, txs } | null
-
-  // Donut "Ngân sách tháng này" — rê chuột vào từng lát cắt để xem tên danh mục,
-  // số tiền và % trên tổng chi tiêu. Giữa vòng tròn hiện "Tổng" + tổng số tiền, giống
-  // cách SegmentDonut đang hiện ở dashboard desktop (card "Tổng thu nhập"/"Tổng chi tiêu").
-  function SpendingDonut({ data, total }) {
-    const { tip, wrapRef, showTip, hideTip } = useChartTooltip();
-    const [hoverId, setHoverId] = useState(null); // id danh mục đang hover, để lát đó nổi bật + các lát khác mờ đi
-    const r = 60, circ = 2 * Math.PI * r;
-    let acc = 0;
-    return (
-      <div ref={wrapRef} className="relative flex items-center gap-6">
-        <ChartTooltip tip={tip} />
-        <div className="relative flex-shrink-0" style={{ width: 150, height: 150 }}>
-          <svg width="150" height="150" viewBox="0 0 150 150" className="-rotate-90">
-            {data.map((cat, i) => {
-              const pct = cat.amount / total;
-              const dash = pct * circ;
-              const offset = acc;
-              acc += dash;
-              const isHovered = hoverId === cat.id;
-              const isDimmed = hoverId !== null && !isHovered;
-              return (
-                <circle
-                  key={cat.id} cx="75" cy="75" r={r} fill="none" stroke={palette[i % palette.length]}
-                  strokeWidth={isHovered ? 18 : 14}
-                  strokeDasharray={`${dash} ${circ - dash}`} strokeDashoffset={-offset} strokeLinecap="round"
-                  className="cursor-pointer"
-                  style={{ opacity: isDimmed ? 0.35 : 1, transition: 'opacity 0.18s ease, stroke-width 0.18s ease' }}
-                  onMouseMove={(e) => { setHoverId(cat.id); showTip(e, { label: cat.name, value: formatMoney(cat.amount), pct: Math.round(pct * 100) }); }}
-                  onMouseLeave={() => { setHoverId(null); hideTip(); }}
-                />
-              );
-            })}
-          </svg>
-          <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-            <span className="text-[11px] text-steel dark:text-light-grey">Tổng</span>
-            <span className="text-sm font-bold text-blueberry dark:text-white">{formatMoney(total)}</span>
-          </div>
-        </div>
-        <div className="flex flex-col gap-2 text-sm min-w-0">
-          {data.map((cat, i) => (
-            <div
-              key={cat.id}
-              className="flex items-center gap-2 cursor-pointer rounded-lg px-1 -mx-1 transition-opacity duration-150"
-              style={{ opacity: hoverId !== null && hoverId !== cat.id ? 0.4 : 1 }}
-              onMouseEnter={() => setHoverId(cat.id)}
-              onMouseLeave={() => setHoverId(null)}
-            >
-              <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: palette[i % palette.length] }} />
-              <span className="text-blueberry dark:text-white font-semibold">{cat.name}</span><span className="text-blueberry dark:text-white font-bold ml-auto">{formatMoney(cat.amount)}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-    );
-  }
-
-  // Biểu đồ CỘT CHỒNG DỌC + đường Tổng cho 2 card "Thu nhập theo danh mục" và "Chi tiêu
-  // theo danh mục" — cùng 1 component, chỉ khác dataset (series) truyền vào. Đúng theo
-  // yêu cầu: mỗi kỳ (theo bộ lọc Tuần/Tháng/Năm, hoặc theo NGÀY nếu filter là ngày) là 1
-  // CỘT dọc duy nhất (trục hoành = thời gian), các danh mục (vd: Ăn uống, Đi lại, Nạp
-  // quỹ...) XẾP CHỒNG lên nhau trong CÙNG 1 cột đó theo chiều dọc, mỗi danh mục 1 màu.
-  // Trục tung = số tiền, maxVal auto-tính theo TỔNG CẢ CỘT (sum theo bucket, xem
-  // incomeCardMax/expenseCardMax) để cột chồng không tràn khung. Đường liền nối đỉnh từng
-  // cột (= tổng của kỳ đó), có nhãn số tiền hiện phía trên mỗi điểm giống ảnh mẫu. Rê
-  // chuột vào từng đoạn màu (hoặc từng điểm trên đường) để xem tên danh mục/kỳ, số liệu
-  // và % (tỷ trọng của danh mục đó trong tổng của kỳ). Legend bên dưới liệt kê mỗi danh
-  // mục đúng 1 lần, số tiền là tổng của cả khoảng thời gian đang chọn.
-  function CategoryBarChart({ series, maxVal, buckets }) {
-    const { tip, wrapRef, showTip, hideTip } = useChartTooltip();
-    const [hoverKey, setHoverKey] = useState(null); // `${bucketIndex}:${categoryId}` của đoạn đang hover, để đoạn đó nổi bật + mờ các đoạn còn lại
-    if (series.length === 0) return null;
-    const chartH = 200; // chiều cao vùng vẽ (px)
-    const labelColW = 40; // độ rộng cột nhãn số tiền bên trái (trục tung)
-    const bucketTotals = buckets.map((b, bi) => series.reduce((s, c) => s + (c.values[bi] || 0), 0));
-    // Trục tung: 4 mốc từ 0 đến maxVal (maxVal đã được tính theo tổng cả cột mỗi kỳ).
-    const yTicks = [0, 0.33, 0.66, 1].map((f) => maxVal * f);
-    const yPct = (v) => Math.min((v / maxVal) * 100, 100); // % chiều cao tính từ đáy lên
-    const xCenter = (bi) => ((bi + 0.5) / buckets.length) * 100; // % vị trí ngang, canh giữa mỗi cột
-    const totalLinePoints = bucketTotals.map((v, bi) => `${xCenter(bi)},${100 - yPct(v)}`).join(' ');
-
-    return (
-      <div ref={wrapRef} className="relative min-w-0">
-        <ChartTooltip tip={tip} />
-        <div className="flex min-w-0">
-          {/* Cột nhãn số tiền bên trái (trục tung), từ cao xuống thấp */}
-          <div className="flex flex-col justify-between flex-shrink-0 pr-2" style={{ height: chartH, width: labelColW }}>
-            {[...yTicks].reverse().map((v, i) => (
-              <span key={i} className="text-[9px] text-steel dark:text-light-grey whitespace-nowrap leading-none">{formatMoneyCompact(v)}</span>
-            ))}
-          </div>
-
-          {/* Vùng vẽ: các cột chồng theo từng kỳ/ngày + đường Tổng (trục hoành = thời gian) */}
-          <div className="flex-1 min-w-0 relative" style={{ height: chartH, overflow: 'visible' }}>
-            {/* Lưới ngang mảnh theo mốc số tiền */}
-            <div className="absolute inset-0 flex flex-col justify-between pointer-events-none">
-              {yTicks.map((_, i) => (
-                <div key={i} className="border-t border-dashed border-steel/20 dark:border-light-grey/15 w-full" />
-              ))}
-            </div>
-
-            {/* Các cột chồng — mỗi cột là 1 kỳ/ngày, mỗi màu là 1 danh mục. Mỗi đoạn được
-                bo góc ở đầu/cuối của cả cột (không bo giữa các đoạn) cho giống dạng "viên
-                thuốc" chồng lên nhau; rê chuột vào 1 đoạn sẽ phóng to nhẹ + sáng lên, các
-                đoạn khác mờ đi để dễ nhìn đoạn đang chọn giữa nhiều thành phần. */}
-            <div className="absolute inset-0 flex items-end">
-              {buckets.map((b, bi) => {
-                const bucketTotal = bucketTotals[bi];
-                const visible = series.map((c, i) => ({ c, i, v: c.values[bi] })).filter((s) => s.v > 0);
-                return (
-                  <div key={bi} className="flex-1 h-full flex flex-col-reverse items-stretch px-1 box-border min-w-0 gap-[2px]">
-                    {visible.map((s, vi) => {
-                      const { c, i, v } = s;
-                      const h = yPct(v);
-                      const pct = bucketTotal > 0 ? Math.round((v / bucketTotal) * 100) : 0;
-                      const key = `${bi}:${c.id}`;
-                      const isHovered = hoverKey === key;
-                      const isDimmed = hoverKey !== null && !isHovered;
-                      const isBottom = vi === 0;
-                      const isTop = vi === visible.length - 1;
-                      return (
-                        <div
-                          key={c.id}
-                          className="w-full cursor-pointer"
-                          style={{
-                            height: `${h}%`,
-                            minHeight: v > 0 ? 3 : 0,
-                            background: palette[i % palette.length],
-                            borderTopLeftRadius: isTop ? 6 : 0,
-                            borderTopRightRadius: isTop ? 6 : 0,
-                            borderBottomLeftRadius: isBottom ? 6 : 0,
-                            borderBottomRightRadius: isBottom ? 6 : 0,
-                            opacity: isDimmed ? 0.35 : 1,
-                            transform: isHovered ? 'scaleX(1.15)' : 'scaleX(1)',
-                            transformOrigin: 'center',
-                            filter: isHovered ? 'brightness(1.12) saturate(1.15)' : 'none',
-                            boxShadow: isHovered ? '0 4px 14px rgba(0,0,0,0.2)' : 'none',
-                            position: 'relative',
-                            zIndex: isHovered ? 10 : 1,
-                            transition: 'opacity 0.18s ease, transform 0.18s ease, filter 0.18s ease, box-shadow 0.18s ease',
-                          }}
-                          onMouseMove={(e) => { setHoverKey(key); showTip(e, { label: `${c.name} (${b.label})`, value: formatMoney(v), pct }); }}
-                          onMouseLeave={() => { setHoverKey(null); hideTip(); }}
-                        />
-                      );
-                    })}
-                  </div>
-                );
-              })}
-            </div>
-
-            {/* Đường liền nối đỉnh từng cột = Tổng của kỳ/ngày đó. zIndex cao hơn hẳn z-index
-                cao nhất của các đoạn cột (kể cả khi hover = 10) để đường LUÔN nổi lên trên
-                cột, không bị cột che mất. Màu đổi sang cam-vàng (#FFB020) thay vì turquoise
-                cũ vì turquoise trùng màu với đoạn cột đầu tiên trong palette (#0DBACC),
-                khiến đường gần như biến mất mỗi khi đi ngang qua đoạn màu đó. */}
-            <svg
-              width="100%" height="100%" viewBox="0 0 100 100" preserveAspectRatio="none"
-              className="absolute inset-0 pointer-events-none overflow-visible"
-              style={{ zIndex: 15 }}
-            >
-              <polyline points={totalLinePoints} fill="none" stroke="#FFB020" strokeWidth="2" vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-
-            {/* Chấm tròn + nhãn số tiền trên mỗi điểm Tổng, giống ảnh mẫu, rê vào xem số liệu.
-                zIndex cao hơn cột (và cao hơn cả svg đường ở trên) để chấm + nhãn luôn hiện rõ. */}
-            {bucketTotals.map((v, bi) => (
-              <div
-                key={bi}
-                className="absolute cursor-default"
-                style={{ left: `${xCenter(bi)}%`, top: `${100 - yPct(v)}%`, transform: 'translate(-50%, -50%)', zIndex: 16 }}
-                onMouseMove={(e) => showTip(e, { label: `Tổng (${buckets[bi].label})`, value: formatMoney(v) })}
-                onMouseLeave={hideTip}
-              >
-                <span className="absolute left-1/2 -translate-x-1/2 bottom-[calc(100%+3px)] text-[10px] font-extrabold text-blueberry dark:text-white whitespace-nowrap">{v > 0 ? formatMoneyCompact(v) : ''}</span>
-                <div className="w-2 h-2 rounded-full border border-white dark:border-night-sky" style={{ background: '#FFB020' }} />
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Trục hoành: nhãn kỳ/ngày theo từng cột */}
-        <div className="flex mt-2" style={{ paddingLeft: labelColW + 8 }}>
-          {buckets.map((b, bi) => (
-            <div key={bi} className="flex-1 text-center text-[10px] text-steel dark:text-light-grey whitespace-nowrap truncate px-0.5">{b.label}</div>
-          ))}
-        </div>
-
-        {/* Legend — mỗi danh mục 1 dòng duy nhất, số tiền là tổng cả khoảng thời gian đang chọn */}
-        <div className={`flex flex-col gap-1.5 mt-4 ${series.length > 6 ? 'max-h-40 overflow-y-auto scrollbar-hide pr-1' : ''}`}>
-          {series.map((c, i) => (
-            <div key={c.id} className="flex items-center gap-2">
-              <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: palette[i % palette.length] }} />
-              <span className="text-blueberry dark:text-white text-xs truncate flex-1 min-w-0 font-semibold">{c.name}</span>
-              <span className="text-blueberry dark:text-white text-xs font-bold flex-shrink-0">{formatMoney(c.total)}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-    );
-  }
-
-  // Biểu đồ cột Thu nhập/Chi tiêu cho card "Tổng quan tài sản" — rê chuột vào từng cột
-  // (xanh = thu nhập, hồng = chi tiêu) để xem số liệu cụ thể theo mốc thời gian, thay vì
-  // chỉ thấy độ cao cột không rõ giá trị.
-  // TrendBarChart tổng quát: 2 cột (keyA/keyB) mỗi mốc thời gian, có thể tuỳ biến nhãn +
-  // màu (dùng chung cho "Biến động tài sản" ở Tổng quan tài sản — Tiền ví/Tiền quỹ — và
-  // "Thu và Chi" ở bản mobile — Thu nhập/Chi tiêu). showYAxis=true sẽ vẽ thêm trục tung
-  // (số tiền) bên trái, theo đúng cách đang làm ở IncomeExpenseComboChart.
-  function TrendBarChart({ buckets, maxVal, keyA = 'inc', keyB = 'exp', keyC = null, labelA = 'Thu nhập', labelB = 'Chi tiêu', labelC = 'Tổng', colorA = 'bg-turquoise', colorB = 'bg-cotton-candy', colorC = 'bg-lavender', showYAxis = false }) {
-    const { tip, wrapRef, showTip, hideTip } = useChartTooltip();
-    const [hoverKey, setHoverKey] = useState(null); // `${bucketIndex}:a`/`:b`/`:c` của cột đang hover
-    const yTicks = showYAxis ? [0, 0.25, 0.5, 0.75, 1].map((f) => maxVal * f) : [];
-    const chart = (
-      <div className="flex items-end gap-3 mt-4 h-32 overflow-x-auto scrollbar-hide">
-        {buckets.map((b, i) => {
-          const aKey = `${i}:a`, bKey = `${i}:b`, cKey = `${i}:c`;
-          const aHovered = hoverKey === aKey, bHovered = hoverKey === bKey, cHovered = hoverKey === cKey;
-          const aDimmed = hoverKey !== null && !aHovered;
-          const bDimmed = hoverKey !== null && !bHovered;
-          const cDimmed = hoverKey !== null && !cHovered;
-          const aVal = b[keyA] || 0, bVal = b[keyB] || 0, cVal = keyC ? (b[keyC] || 0) : 0;
-          return (
-            <div key={i} className="flex-1 flex flex-col items-center gap-1 h-full justify-end" style={{ minWidth: buckets.length > 12 ? (keyC ? 30 : 22) : undefined }}>
-              <div className="w-full flex items-end gap-1 h-full" style={{ overflow: 'visible' }}>
-                <div
-                  className={`flex-1 ${colorA} rounded-t-[8px] cursor-pointer`}
-                  style={{
-                    height: `${(aVal / maxVal) * 100}%`, minHeight: aVal > 0 ? 4 : 0,
-                    opacity: aDimmed ? 0.35 : 1,
-                    transform: aHovered ? 'scaleX(1.15) translateY(-2px)' : 'scaleX(1)',
-                    transformOrigin: 'bottom',
-                    filter: aHovered ? 'brightness(1.1)' : 'none',
-                    boxShadow: aHovered ? '0 4px 12px rgba(0,0,0,0.18)' : 'none',
-                    position: 'relative', zIndex: aHovered ? 10 : 1,
-                    transition: 'opacity 0.18s ease, transform 0.18s ease, filter 0.18s ease, box-shadow 0.18s ease',
-                  }}
-                  onMouseMove={(e) => { setHoverKey(aKey); showTip(e, { label: `${labelA} (${b.label})`, value: formatMoney(aVal) }); }}
-                  onMouseLeave={() => { setHoverKey(null); hideTip(); }}
-                />
-                <div
-                  className={`flex-1 ${colorB} rounded-t-[8px] cursor-pointer`}
-                  style={{
-                    height: `${(bVal / maxVal) * 100}%`, minHeight: bVal > 0 ? 4 : 0,
-                    opacity: bDimmed ? 0.35 : 1,
-                    transform: bHovered ? 'scaleX(1.15) translateY(-2px)' : 'scaleX(1)',
-                    transformOrigin: 'bottom',
-                    filter: bHovered ? 'brightness(1.1)' : 'none',
-                    boxShadow: bHovered ? '0 4px 12px rgba(0,0,0,0.18)' : 'none',
-                    position: 'relative', zIndex: bHovered ? 10 : 1,
-                    transition: 'opacity 0.18s ease, transform 0.18s ease, filter 0.18s ease, box-shadow 0.18s ease',
-                  }}
-                  onMouseMove={(e) => { setHoverKey(bKey); showTip(e, { label: `${labelB} (${b.label})`, value: formatMoney(bVal) }); }}
-                  onMouseLeave={() => { setHoverKey(null); hideTip(); }}
-                />
-                {keyC && (
-                  <div
-                    className={`flex-1 ${colorC} rounded-t-[8px] cursor-pointer`}
-                    style={{
-                      height: `${(cVal / maxVal) * 100}%`, minHeight: cVal > 0 ? 4 : 0,
-                      opacity: cDimmed ? 0.35 : 1,
-                      transform: cHovered ? 'scaleX(1.15) translateY(-2px)' : 'scaleX(1)',
-                      transformOrigin: 'bottom',
-                      filter: cHovered ? 'brightness(1.1)' : 'none',
-                      boxShadow: cHovered ? '0 4px 12px rgba(0,0,0,0.18)' : 'none',
-                      position: 'relative', zIndex: cHovered ? 10 : 1,
-                      transition: 'opacity 0.18s ease, transform 0.18s ease, filter 0.18s ease, box-shadow 0.18s ease',
-                    }}
-                    onMouseMove={(e) => { setHoverKey(cKey); showTip(e, { label: `${labelC} (${b.label})`, value: formatMoney(cVal) }); }}
-                    onMouseLeave={() => { setHoverKey(null); hideTip(); }}
-                  />
-                )}
-              </div>
-              <span className="text-[11px] text-steel dark:text-light-grey whitespace-nowrap">{b.label}</span>
-            </div>
-          );
-        })}
-      </div>
-    );
-    return (
-      <div ref={wrapRef} className="relative">
-        <ChartTooltip tip={tip} />
-        {showYAxis ? (
-          <div className="flex">
-            {/* Trục tung — số tiền, từ cao xuống thấp, cùng cách làm với IncomeExpenseComboChart */}
-            <div className="flex flex-col justify-between flex-shrink-0 pr-2 mt-4" style={{ height: 128 }}>
-              {[...yTicks].reverse().map((v, i) => (
-                <span key={i} className="text-[9px] text-steel dark:text-light-grey whitespace-nowrap leading-none">{formatMoneyCompact(v)}</span>
-              ))}
-            </div>
-            <div className="flex-1 min-w-0">{chart}</div>
-          </div>
-        ) : chart}
-      </div>
-    );
-  }
 
   // Biểu đồ kết hợp CỘT CHỒNG DỌC + đường cho card "Phân tích chi phí" — đúng theo ảnh
   // mẫu: mỗi kỳ (theo bộ lọc Tuần/Tháng/Năm) là 1 CỘT dọc (trục hoành = thời gian theo bộ
@@ -4243,38 +4376,8 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
       return { ...c, pct, dash, offset };
     });
   }
-  // Donut dùng chung cho "Tổng thu nhập" / "Tổng chi tiêu" — segments đã có sẵn
-  // pct/dash/offset từ pieSegments(). Rê chuột vào lát cắt để xem tên, số liệu và %.
-  function SegmentDonut({ segments, centerLabel, centerValue }) {
-    const { tip, wrapRef, showTip, hideTip } = useChartTooltip();
-    const [hoverId, setHoverId] = useState(null); // id lát đang hover, để lát đó nổi bật + các lát khác mờ đi
-    return (
-      <div ref={wrapRef} className="relative flex-shrink-0">
-        <ChartTooltip tip={tip} />
-        <svg width="120" height="120" viewBox="0 0 150 150" className="-rotate-90">
-          {segments.map((seg, i) => {
-            const isHovered = hoverId === seg.id;
-            const isDimmed = hoverId !== null && !isHovered;
-            return (
-              <circle
-                key={seg.id} cx="75" cy="75" r={radius} fill="none" stroke={palette[i % palette.length]}
-                strokeWidth={isHovered ? 18 : 14}
-                strokeDasharray={`${seg.dash} ${circumference - seg.dash}`} strokeDashoffset={-seg.offset} strokeLinecap="round"
-                className="cursor-pointer"
-                style={{ opacity: isDimmed ? 0.35 : 1, transition: 'opacity 0.18s ease, stroke-width 0.18s ease' }}
-                onMouseMove={(e) => { setHoverId(seg.id); showTip(e, { label: seg.name, value: formatMoney(seg.amount), pct: Math.round(seg.pct * 100) }); }}
-                onMouseLeave={() => { setHoverId(null); hideTip(); }}
-              />
-            );
-          })}
-        </svg>
-        <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-          <span className="text-[10px] text-steel dark:text-light-grey">{centerLabel}</span>
-          <span className="text-xs font-bold text-blueberry dark:text-white">{centerValue}</span>
-        </div>
-      </div>
-    );
-  }
+  // SegmentDonut giờ dùng bản chung ở module scope (đầu file) — KHÔNG khai báo lại ở
+  // đây nữa (xem ghi chú cạnh SpendingDonut/CategoryBarChart/TrendBarChart/SegmentDonut).
   const incomeByCatYear = catTotalsForGlobalFilter(incomeCats, 'income');
   const totalIncomeYear = incomeByCatYear.reduce((s, c) => s + c.amount, 0) || 1;
   const incomeYearSegments = pieSegments(incomeByCatYear, totalIncomeYear);
@@ -5015,10 +5118,12 @@ function Funds({ setScreen, categories, transactions, onOpenFund, reload, softDe
     return 0;
   });
 
-  const pageSize = viewMode === 'card' ? 9 : 8;
+  const gridCols = useResponsiveGridColumns();
+  const pageSize = viewMode === 'card' ? gridCols * 2 : 8; // luôn = đúng 2 hàng theo số cột THẬT của màn hình hiện tại (responsive), tránh hụt ô trống rồi nhảy trang dù thu/phóng cửa sổ
   const totalPages = Math.max(1, Math.ceil(displayFunds.length / pageSize));
   const currentPage = Math.min(page, totalPages);
   const pagedFunds = displayFunds.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+  useEffect(() => { setPage(1); }, [gridCols]); // đổi số cột (resize/xoay màn hình) → về trang 1 để không bị lạc vào trang không còn tồn tại
 
   const editingFirstAllocation = editingFund ? findInitialAllocation(transactions, editingFund.id) : null;
   const editingInitialAmount = editingFirstAllocation ? Number(editingFirstAllocation.amount) : 0;
@@ -5191,7 +5296,7 @@ function Funds({ setScreen, categories, transactions, onOpenFund, reload, softDe
             ) : displayFunds.length === 0 ? (
               <p className="text-steel dark:text-light-grey text-sm text-center py-16">Không tìm thấy quỹ nào.</p>
             ) : viewMode === 'card' ? (
-              <div className="grid gap-4 p-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(max(220px, calc((100% - 4*1rem) / 5)), 1fr))' }}>
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 p-4">
                 {pagedFunds.map((f) => {
                   const balance = fundBalanceWithProfit(f, transactions);
                   const target = Number(f.target_amount || 0);
@@ -5383,7 +5488,11 @@ function FundDetail({ category, transactions, categories, accounts, onBack, relo
   // Riêng cho danh sách gộp "Tất cả": vẫn bỏ qua ngày lãi = 0đ để đỡ rác màn hình
   // (tab "Lợi nhuận" riêng ở dailyProfitHistory thì hiện đủ mọi ngày, không ẩn).
   const combinedHistory = [
-    ...allHistory.map(tx => ({ ...tx, type: tx.type, isProfit: false })),
+    // FIX: tính sẵn "số dư sau giao dịch" (balanceAfter) cho từng dòng nạp/rút, dùng chung
+    // hàm fundBalanceAtDate() đã có sẵn trong app (đúng logic cộng dồn lãi suất, đang được
+    // dùng ở sổ giao dịch/ledger) — trước đây chỉ dòng "Lợi nhuận" mới có balanceAfter nên
+    // các dòng Nạp/Rút quỹ không hiện dòng "Số dư: ..." như thiết kế.
+    ...allHistory.map(tx => ({ ...tx, type: tx.type, isProfit: false, balanceAfter: fundBalanceAtDate(category, transactions, historyItemDate(tx)) })),
     ...dailyProfitHistory.filter(d => d.profit > 0).map(d => {
       // Những ngày lợi nhuận trước "kỳ đầu tiên" đều dồn hiển thị vào đúng firstCreditDate;
       // từ firstCreditDate trở đi, lợi nhuận ngày D hiển thị vào ngày D+1 như bình thường
@@ -5617,7 +5726,7 @@ function FundDetail({ category, transactions, categories, accounts, onBack, relo
                           </div>
                           <p className="text-steel dark:text-light-grey text-xs mt-0.5">{itemDate.toLocaleDateString('vi-VN')} · {timeDisplay}</p>
                           {noteText && <p className="text-steel dark:text-light-grey text-xs mt-0.5 truncate">{noteText}</p>}
-                          {item.balanceAfter !== undefined && <p className="text-steel dark:text-light-grey text-xs mt-0.5">Số dư: {formatMoney(item.balanceAfter)}</p>}
+                          {item.balanceAfter !== undefined && item.balanceAfter !== null && <p className="text-steel dark:text-light-grey text-xs mt-0.5">Số dư cuối: {formatMoney(item.balanceAfter)}</p>}
                         </div>
                         {!isProfit && (
                           // Khoản "Nạp quỹ lần đầu" (isInitial) bấm bút chì (hoặc bấm cả dòng) -> mở
@@ -5670,7 +5779,7 @@ function FundDetail({ category, transactions, categories, accounts, onBack, relo
           <div className="flex items-center gap-2">
             <button onClick={() => setQuickMode('allocation')} className="bg-gradient-primary text-white rounded-full px-4 py-2 text-sm font-bold flex items-center gap-1.5 shadow-md shadow-turquoise/30"><TrendingUp size={15} /> Nạp quỹ</button>
             <button onClick={() => setQuickMode('expense')} className="bg-cotton-candy text-white rounded-full px-4 py-2 text-sm font-bold flex items-center gap-1.5 shadow-md shadow-cotton-candy/30"><TrendingDown size={15} /> Rút quỹ</button>
-            <button onClick={() => setShowEdit(true)} className="w-9 h-9 rounded-full bg-white dark:bg-[#2a2a44] flex items-center justify-center shadow-soft"><Pencil size={15} className="text-blueberry dark:text-white" /></button>
+            <button onClick={() => setShowEdit(true)} className="w-9 h-9 rounded-full bg-baby-blue-light/60 dark:bg-baby-blue/15 flex items-center justify-center shadow-soft"><Pencil size={15} className="text-baby-blue" /></button>
             <button onClick={handleDelete} className="w-9 h-9 rounded-full bg-white dark:bg-[#2a2a44] flex items-center justify-center shadow-soft"><Trash2 size={15} className="text-cotton-candy" /></button>
           </div>
         </div>
@@ -5780,7 +5889,7 @@ function FundDetail({ category, transactions, categories, accounts, onBack, relo
                           </div>
                           <p className="text-steel dark:text-light-grey text-xs">{dateTimeLabel}</p>
                           {noteLine && <p className="text-steel dark:text-light-grey text-xs">{noteLine}</p>}
-                          {item.balanceAfter !== undefined && <p className="text-steel dark:text-light-grey text-xs">Số dư: {formatMoney(item.balanceAfter)}</p>}
+                          {item.balanceAfter !== undefined && item.balanceAfter !== null && <p className="text-steel dark:text-light-grey text-xs">Số dư cuối: {formatMoney(item.balanceAfter)}</p>}
                         </div>
                         <p className={`font-bold text-sm flex-shrink-0 ${item.type === 'expense' ? 'text-cotton-candy' : 'text-turquoise'}`}>{item.type === 'expense' ? '-' : '+'}{formatMoney(item.amount)}</p>
                         {!item.isProfit && (
@@ -5845,7 +5954,7 @@ function Accounts({ setScreen, accounts, transactions, onOpenAccount, reload, on
               <button onClick={() => setScreen('dashboard')} className="w-9 h-9 rounded-full frost-inset flex items-center justify-center"><ArrowLeft size={18} className="text-blueberry dark:text-white" /></button>
               <h1 className="text-blueberry dark:text-white text-lg font-bold">Quản lý ví</h1>
             </div>
-            <button onClick={() => setShowCreate(true)} className="w-9 h-9 rounded-full frost-inset flex items-center justify-center"><Plus size={18} className="text-blueberry dark:text-white" /></button>
+            <button onClick={() => setShowCreate(true)} className="w-9 h-9 rounded-full frost-inset flex items-center justify-center"><Plus size={18} className="text-turquoise" /></button>
           </div>
           <div className="px-5 mt-4 text-center">
             <p className="text-steel dark:text-light-grey text-sm font-semibold">Tổng tất cả tài khoản</p>
@@ -6042,7 +6151,7 @@ function AccountDetail({ account, transactions, categories, accounts, onBack, re
                 return (
                   <div key={tx.id} className="flex items-center gap-3 py-3">
                     <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${isDirectSet ? 'bg-ice-cream dark:bg-night-sky' : isPositive ? 'bg-turquoise/10' : 'bg-cotton-candy/10'}`}>
-                      {isDirectSet ? <Pencil size={15} className="text-steel dark:text-light-grey" /> : isPositive ? <TrendingUp size={16} className="text-turquoise" /> : <TrendingDown size={16} className="text-cotton-candy" />}
+                      {isDirectSet ? <Pencil size={15} className="text-baby-blue" /> : isPositive ? <TrendingUp size={16} className="text-turquoise" /> : <TrendingDown size={16} className="text-cotton-candy" />}
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-1.5">
@@ -6083,7 +6192,7 @@ function AccountDetail({ account, transactions, categories, accounts, onBack, re
           </div>
           <div className="flex items-center gap-2">
             <button onClick={() => setShowAdjust(true)} className="bg-gradient-primary text-white rounded-full px-4 py-2 text-sm font-bold flex items-center gap-1.5 shadow-md shadow-turquoise/30"><Pencil size={14} /> Cập nhật số dư</button>
-            <button onClick={() => setShowEdit(true)} className="w-9 h-9 rounded-full bg-white dark:bg-[#2a2a44] flex items-center justify-center shadow-soft"><Pencil size={15} className="text-blueberry dark:text-white" /></button>
+            <button onClick={() => setShowEdit(true)} className="w-9 h-9 rounded-full bg-baby-blue-light/60 dark:bg-baby-blue/15 flex items-center justify-center shadow-soft"><Pencil size={15} className="text-baby-blue" /></button>
             <button onClick={handleDelete} className="w-9 h-9 rounded-full bg-white dark:bg-[#2a2a44] flex items-center justify-center shadow-soft"><Trash2 size={15} className="text-cotton-candy" /></button>
           </div>
         </div>
@@ -6112,7 +6221,7 @@ function AccountDetail({ account, transactions, categories, accounts, onBack, re
                     return (
                       <div key={tx.id} className="flex items-center gap-3 py-3">
                         <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${isDirectSet ? 'frost-inset' : isPositive ? 'bg-turquoise/10' : 'bg-cotton-candy/10'}`}>
-                          {isDirectSet ? <Pencil size={15} className="text-steel dark:text-light-grey" /> : isPositive ? <TrendingUp size={16} className="text-turquoise" /> : <TrendingDown size={16} className="text-cotton-candy" />}
+                          {isDirectSet ? <Pencil size={15} className="text-baby-blue" /> : isPositive ? <TrendingUp size={16} className="text-turquoise" /> : <TrendingDown size={16} className="text-cotton-candy" />}
                         </div>
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-1.5">
@@ -6205,10 +6314,12 @@ function Goals({ setScreen, goals, loadingGoals, reload, softDelete, onAddClick,
     return 0;
   });
 
-  const pageSize = viewMode === 'card' ? 9 : 8;
+  const gridCols = useResponsiveGridColumns();
+  const pageSize = viewMode === 'card' ? gridCols * 2 : 8; // luôn = đúng 2 hàng theo số cột THẬT của màn hình hiện tại (responsive), tránh hụt ô trống rồi nhảy trang dù thu/phóng cửa sổ
   const totalPages = Math.max(1, Math.ceil(displayGoals.length / pageSize));
   const currentPage = Math.min(page, totalPages);
   const pagedGoals = displayGoals.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+  useEffect(() => { setPage(1); }, [gridCols]); // đổi số cột (resize/xoay màn hình) → về trang 1 để không bị lạc vào trang không còn tồn tại
 
   return (
     <>
@@ -6222,7 +6333,7 @@ function Goals({ setScreen, goals, loadingGoals, reload, softDelete, onAddClick,
           <div className="mt-6 px-5 pt-6 pb-6">
             <div className="flex items-center justify-between mb-3">
               <h2 className="text-blueberry dark:text-white font-extrabold text-lg">Mục tiêu của tôi</h2>
-              <button onClick={() => setEditingGoal('new')} className="w-7 h-7 rounded-full bg-ice-cream dark:bg-night-sky flex items-center justify-center"><Plus size={16} className="text-blueberry dark:text-white" /></button>
+              <button onClick={() => setEditingGoal('new')} className="w-7 h-7 rounded-full bg-turquoise-light/60 dark:bg-turquoise/15 flex items-center justify-center"><Plus size={16} className="text-turquoise" /></button>
             </div>
             {loadingGoals ? <div className="flex justify-center py-6"><Loader2 size={22} className="animate-spin text-turquoise" /></div>
               : goals.length === 0 ? <p className="text-steel dark:text-light-grey text-sm text-center py-6">Chưa có mục tiêu nào.</p>
@@ -6355,7 +6466,7 @@ function Goals({ setScreen, goals, loadingGoals, reload, softDelete, onAddClick,
             {loadingGoals ? <div className="flex justify-center py-10"><Loader2 size={24} className="animate-spin text-turquoise" /></div>
               : displayGoals.length === 0 ? <p className="text-steel dark:text-light-grey text-sm text-center py-16">Không tìm thấy mục tiêu nào.</p>
               : viewMode === 'card' ? (
-                <div className="grid gap-4 p-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(max(220px, calc((100% - 4*1rem) / 5)), 1fr))' }}>
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 p-4">
                   {pagedGoals.map((goal) => {
                     const isDone = goal.status === 'Hoàn thành';
                     const pct = isDone ? 100 : (goal.target_amount ? Math.min(100, (goal.current_amount / goal.target_amount) * 100) : 0);
@@ -6506,7 +6617,19 @@ function Goals({ setScreen, goals, loadingGoals, reload, softDelete, onAddClick,
 function Settings({ setScreen, categories, accounts, reload, softDelete, user, onProfileUpdated, onAddClick, theme, toggleTheme, initialSection, openSettings, sidebarCollapsed, toggleSidebar, onResetData, resettingData, logs, logActivity, restoreLog, spendingPoolByPeriod, saveSpendingPoolForPeriod }) {
   const displayName = user?.user_metadata?.first_name || user?.user_metadata?.full_name;
   const avatarUrl = user?.user_metadata?.avatar_url;
-  const [section, setSection] = useState(initialSection || 'profile');
+  // Mặc định mở thẻ "Danh mục" (thẻ đầu tiên còn lại trên thanh tab) — thẻ "Hồ sơ" không
+  // còn hiện trên thanh tab nữa (chỉ mở được qua menu bấm avatar), nên bỏ mặc định 'profile'.
+  const [section, setSection] = useState(initialSection || 'categories');
+  // FIX: màn "Hồ sơ tài khoản" (mở từ avatar) và màn "Cài đặt" (mở từ icon Cài đặt ở nav
+  // bar) đều dùng chung 1 component Settings + chung screen === 'settings', nên khi đang
+  // đứng ở màn này rồi bấm icon/avatar còn lại, component KHÔNG unmount/mount lại — mà
+  // useState(initialSection...) chỉ đọc initialSection ở lần render ĐẦU TIÊN, nên "section"
+  // nội bộ bị kẹt nguyên giá trị cũ dù prop initialSection đã đổi (đây là lý do bấm icon
+  // Cài đặt trong lúc đang ở Hồ sơ không chuyển được sang giao diện tab). Đồng bộ lại bằng
+  // effect này mỗi khi initialSection (điều hướng từ bên ngoài) thực sự đổi giá trị.
+  useEffect(() => {
+    setSection(initialSection || 'categories');
+  }, [initialSection]);
 
   async function handleLogout() {
     await supabase.auth.signOut();
@@ -6688,16 +6811,31 @@ function Settings({ setScreen, categories, accounts, reload, softDelete, user, o
         <div className="w-full min-h-[100dvh] pb-28 relative">
           <div className="px-5 pt-8 flex items-center gap-3">
             <button onClick={() => setScreen('dashboard')} className="w-9 h-9 rounded-full frost-inset flex items-center justify-center"><ArrowLeft size={18} className="text-blueberry dark:text-white" /></button>
-            <h1 className="text-blueberry dark:text-white text-lg font-bold">Cài đặt</h1>
+            {/* Vào từ avatar (mục "Hồ sơ") -> tiêu đề "Hồ sơ tài khoản", KHÔNG hiện thanh tab
+                Danh mục/Hệ thống/Lịch sử/Giao diện. Vào từ icon Cài đặt ở nav bar -> tiêu đề
+                "Cài đặt", hiện đủ thanh tab như bình thường. */}
+            <h1 className="text-blueberry dark:text-white text-lg font-bold">{section === 'profile' ? 'Hồ sơ tài khoản' : 'Cài đặt'}</h1>
           </div>
 
-          <div className="px-5 mt-4 flex gap-2 overflow-x-auto scrollbar-hide">
-            <button onClick={() => setSection('profile')} className={`flex-shrink-0 px-4 py-2 rounded-full text-sm font-bold ${section === 'profile' ? 'bg-white dark:bg-[#2a2a44] text-blueberry dark:text-white shadow' : 'bg-white/30 text-blueberry dark:text-white'}`}>Hồ sơ</button>
-            <button onClick={() => setSection('categories')} className={`flex-shrink-0 px-4 py-2 rounded-full text-sm font-bold ${section === 'categories' ? 'bg-white dark:bg-[#2a2a44] text-blueberry dark:text-white shadow' : 'bg-white/30 text-blueberry dark:text-white'}`}>Danh mục</button>
-            <button onClick={() => setSection('appearance')} className={`flex-shrink-0 px-4 py-2 rounded-full text-sm font-bold ${section === 'appearance' ? 'bg-white dark:bg-[#2a2a44] text-blueberry dark:text-white shadow' : 'bg-white/30 text-blueberry dark:text-white'}`}>Giao diện</button>
-            <button onClick={() => setSection('data')} className={`flex-shrink-0 px-4 py-2 rounded-full text-sm font-bold ${section === 'data' ? 'bg-white dark:bg-[#2a2a44] text-blueberry dark:text-white shadow' : 'bg-white/30 text-blueberry dark:text-white'}`}>Dữ liệu</button>
-            <button onClick={() => setSection('history')} className={`flex-shrink-0 px-4 py-2 rounded-full text-sm font-bold ${section === 'history' ? 'bg-white dark:bg-[#2a2a44] text-blueberry dark:text-white shadow' : 'bg-white/30 text-blueberry dark:text-white'}`}>Lịch sử</button>
-          </div>
+          {section !== 'profile' && (
+            /* FIX: hàng tab này nằm trong trang cuộn dọc (min-h-[100dvh]) nên trên các WebView
+                nhúng (Zalo Mini App...) cử chỉ vuốt ngang hay bị khung cuộn dọc "nuốt mất",
+                khiến tab bị che/cắt mà không vuốt ngang được — thêm touchAction: 'pan-x' +
+                WebkitOverflowScrolling: 'touch' (đã dùng ở carousel mục tiêu bên Dashboard)
+                để trình duyệt biết vuốt ngang thuộc về hàng này, không phải trang. Đồng thời
+                bỏ thẻ "Hồ sơ" khỏi thanh tab (giờ chỉ mở qua menu bấm avatar) và đổi tên
+                "Dữ liệu" -> "Hệ thống" theo đúng thứ tự yêu cầu: Danh mục, Hệ thống, Lịch sử,
+                Giao diện. */
+            <div
+              className="px-5 mt-4 flex gap-2 overflow-x-auto scrollbar-hide"
+              style={{ WebkitOverflowScrolling: 'touch', touchAction: 'pan-x' }}
+            >
+              <button onClick={() => setSection('categories')} className={`flex-shrink-0 px-4 py-2 rounded-full text-sm font-bold ${section === 'categories' ? 'bg-white dark:bg-[#2a2a44] text-blueberry dark:text-white shadow' : 'bg-white/30 text-blueberry dark:text-white'}`}>Danh mục</button>
+              <button onClick={() => setSection('data')} className={`flex-shrink-0 px-4 py-2 rounded-full text-sm font-bold ${section === 'data' ? 'bg-white dark:bg-[#2a2a44] text-blueberry dark:text-white shadow' : 'bg-white/30 text-blueberry dark:text-white'}`}>Hệ thống</button>
+              <button onClick={() => setSection('history')} className={`flex-shrink-0 px-4 py-2 rounded-full text-sm font-bold ${section === 'history' ? 'bg-white dark:bg-[#2a2a44] text-blueberry dark:text-white shadow' : 'bg-white/30 text-blueberry dark:text-white'}`}>Lịch sử</button>
+              <button onClick={() => setSection('appearance')} className={`flex-shrink-0 px-4 py-2 rounded-full text-sm font-bold ${section === 'appearance' ? 'bg-white dark:bg-[#2a2a44] text-blueberry dark:text-white shadow' : 'bg-white/30 text-blueberry dark:text-white'}`}>Giao diện</button>
+            </div>
+          )}
 
           <div className="mt-4 px-5 pt-6 pb-6 scrollbar-hide">
             {section === 'profile' && <ProfileSection user={user} onUpdated={onProfileUpdated} logActivity={logActivity} />}
@@ -6711,17 +6849,18 @@ function Settings({ setScreen, categories, accounts, reload, softDelete, user, o
 
       <div className="hidden md:block">
         <div className="flex items-center justify-between mb-6">
-          <h1 className="text-blueberry dark:text-white text-2xl font-extrabold">Cài đặt</h1>
+          <h1 className="text-blueberry dark:text-white text-2xl font-extrabold">{section === 'profile' ? 'Hồ sơ tài khoản' : 'Cài đặt'}</h1>
           <button onClick={handleLogout} className="flex items-center gap-2 bg-white dark:bg-[#2a2a44] text-cotton-candy rounded-full px-4 py-2 text-sm font-bold shadow-soft border-0 dark:border dark:border-[rgba(189,189,203,0.1)]"><LogOut size={15} /> Đăng xuất</button>
         </div>
 
-        <div className="flex gap-2 mb-6">
-          <button onClick={() => setSection('profile')} className={`px-5 py-2 rounded-full text-sm font-bold ${section === 'profile' ? 'bg-gradient-primary text-white shadow-md shadow-turquoise/30' : 'bg-white dark:bg-[#2a2a44] text-steel dark:text-light-grey border-0 dark:border dark:border-[rgba(189,189,203,0.1)]'}`}>Hồ sơ</button>
-          <button onClick={() => setSection('categories')} className={`px-5 py-2 rounded-full text-sm font-bold ${section === 'categories' ? 'bg-gradient-primary text-white shadow-md shadow-turquoise/30' : 'bg-white dark:bg-[#2a2a44] text-steel dark:text-light-grey border-0 dark:border dark:border-[rgba(189,189,203,0.1)]'}`}>Danh mục</button>
-          <button onClick={() => setSection('appearance')} className={`px-5 py-2 rounded-full text-sm font-bold ${section === 'appearance' ? 'bg-gradient-primary text-white shadow-md shadow-turquoise/30' : 'bg-white dark:bg-[#2a2a44] text-steel dark:text-light-grey border-0 dark:border dark:border-[rgba(189,189,203,0.1)]'}`}>Giao diện</button>
-          <button onClick={() => setSection('data')} className={`px-5 py-2 rounded-full text-sm font-bold ${section === 'data' ? 'bg-gradient-primary text-white shadow-md shadow-turquoise/30' : 'bg-white dark:bg-[#2a2a44] text-steel dark:text-light-grey border-0 dark:border dark:border-[rgba(189,189,203,0.1)]'}`}>Dữ liệu</button>
-          <button onClick={() => setSection('history')} className={`px-5 py-2 rounded-full text-sm font-bold ${section === 'history' ? 'bg-gradient-primary text-white shadow-md shadow-turquoise/30' : 'bg-white dark:bg-[#2a2a44] text-steel dark:text-light-grey border-0 dark:border dark:border-[rgba(189,189,203,0.1)]'}`}>Lịch sử</button>
-        </div>
+        {section !== 'profile' && (
+          <div className="flex gap-2 mb-6">
+            <button onClick={() => setSection('categories')} className={`px-5 py-2 rounded-full text-sm font-bold ${section === 'categories' ? 'bg-gradient-primary text-white shadow-md shadow-turquoise/30' : 'bg-white dark:bg-[#2a2a44] text-steel dark:text-light-grey border-0 dark:border dark:border-[rgba(189,189,203,0.1)]'}`}>Danh mục</button>
+            <button onClick={() => setSection('data')} className={`px-5 py-2 rounded-full text-sm font-bold ${section === 'data' ? 'bg-gradient-primary text-white shadow-md shadow-turquoise/30' : 'bg-white dark:bg-[#2a2a44] text-steel dark:text-light-grey border-0 dark:border dark:border-[rgba(189,189,203,0.1)]'}`}>Hệ thống</button>
+            <button onClick={() => setSection('history')} className={`px-5 py-2 rounded-full text-sm font-bold ${section === 'history' ? 'bg-gradient-primary text-white shadow-md shadow-turquoise/30' : 'bg-white dark:bg-[#2a2a44] text-steel dark:text-light-grey border-0 dark:border dark:border-[rgba(189,189,203,0.1)]'}`}>Lịch sử</button>
+            <button onClick={() => setSection('appearance')} className={`px-5 py-2 rounded-full text-sm font-bold ${section === 'appearance' ? 'bg-gradient-primary text-white shadow-md shadow-turquoise/30' : 'bg-white dark:bg-[#2a2a44] text-steel dark:text-light-grey border-0 dark:border dark:border-[rgba(189,189,203,0.1)]'}`}>Giao diện</button>
+          </div>
+        )}
 
  <div className="frost-card rounded-3xl p-6">
           {section === 'profile' && <ProfileSection user={user} onUpdated={onProfileUpdated} logActivity={logActivity} />}
@@ -6866,7 +7005,7 @@ function ProfileSection({ user, onUpdated, logActivity }) {
       </div>
 
       <div>
-        <p className="text-blueberry dark:text-white font-bold text-sm mb-3 flex items-center gap-2"><KeyRound size={15} /> Đổi mật khẩu</p>
+        <p className="text-blueberry dark:text-white font-bold text-sm mb-3 flex items-center gap-2"><KeyRound size={15} className="text-lavender" /> Đổi mật khẩu</p>
         <div className="flex flex-col gap-3 max-w-sm">
           <input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} placeholder="Mật khẩu mới (tối thiểu 6 ký tự)" className="bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none dark:text-white dark:placeholder:text-light-grey text-blueberry" />
           <input type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} placeholder="Nhập lại mật khẩu mới" className="bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none dark:text-white dark:placeholder:text-light-grey text-blueberry" />
@@ -7100,7 +7239,7 @@ function CategorySection({ categories, reload, softDelete, spendingPoolByPeriod,
           </button>
         ))}
       </div>
-      <button onClick={startNew} className="w-full border-2 border-dashed border-[rgba(126,127,144,0.4)] dark:border-[rgba(189,189,203,0.2)] rounded-2xl py-3 text-sm text-steel dark:text-light-grey font-bold mb-4 flex items-center justify-center gap-2 hover:border-turquoise dark:hover:border-turquoise transition"><Plus size={16} /> Thêm danh mục mới</button>
+      <button onClick={startNew} className="w-full border-2 border-dashed border-[rgba(126,127,144,0.4)] dark:border-[rgba(189,189,203,0.2)] rounded-2xl py-3 text-sm text-steel dark:text-light-grey font-bold mb-4 flex items-center justify-center gap-2 hover:border-turquoise dark:hover:border-turquoise transition"><Plus size={16} className="text-turquoise" /> Thêm danh mục mới</button>
       <div className="flex flex-col gap-2">
         {list.length === 0 ? (
           <p className="text-steel dark:text-light-grey text-sm text-center py-4">Không có danh mục nào phù hợp bộ lọc.</p>
@@ -7127,8 +7266,8 @@ function CategorySection({ categories, reload, softDelete, spendingPoolByPeriod,
                 {cat.interest_rate > 0 ? `Lãi ${cat.interest_rate}%/năm` : ''}
               </p>
             </div>
-            <button onClick={() => startEdit(cat)} className="w-8 h-8 rounded-full bg-white dark:bg-[#2a2a44] flex items-center justify-center"><Pencil size={14} className="text-blueberry dark:text-white" /></button>
-            <button onClick={() => handleDelete(cat.id)} className="w-8 h-8 rounded-full bg-white dark:bg-[#2a2a44] flex items-center justify-center"><Trash2 size={14} className="text-cotton-candy" /></button>
+            <button onClick={() => startEdit(cat)} className="w-8 h-8 rounded-full bg-baby-blue-light/60 dark:bg-baby-blue/15 flex items-center justify-center"><Pencil size={14} className="text-baby-blue" /></button>
+            <button onClick={() => handleDelete(cat.id)} className="w-8 h-8 rounded-full bg-cotton-candy-light/60 dark:bg-cotton-candy/15 flex items-center justify-center"><Trash2 size={14} className="text-cotton-candy" /></button>
           </div>
         ))}
       </div>
@@ -8935,7 +9074,7 @@ function MainApp({ user, theme, toggleTheme }) {
   const appLogoUrl = appLogoAsset;
   const [settingsSection, setSettingsSection] = useState(() => initialNav.settingsSection || 'profile');
   function goToSettings(section) {
-    const s = section || 'profile';
+    const s = section || 'categories';
     setSettingsSection(s); saveNavState({ settingsSection: s });
     setScreen('settings');
   }
@@ -9060,7 +9199,12 @@ function MainApp({ user, theme, toggleTheme }) {
     if (screen === 'funds') return <Funds setScreen={setScreen} categories={categories} transactions={transactions} onOpenFund={openFund} reload={loadAll} softDelete={softDelete} onAddClick={() => setShowAdd(true)} displayName={displayName} avatarUrl={avatarUrl} theme={theme} toggleTheme={toggleTheme} openSettings={goToSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} />;
     if (screen === 'goals') return <Goals setScreen={setScreen} goals={goals} loadingGoals={loadingGoals} reload={loadAll} softDelete={softDelete} onAddClick={() => setShowAdd(true)} displayName={displayName} avatarUrl={avatarUrl} theme={theme} toggleTheme={toggleTheme} openSettings={goToSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} categories={categories} transactions={transactions} />;
     if (screen === 'accounts') return <Accounts setScreen={setScreen} accounts={accounts} transactions={transactions} onOpenAccount={openAccount} reload={loadAll} onAddClick={() => setShowAdd(true)} displayName={displayName} avatarUrl={avatarUrl} theme={theme} toggleTheme={toggleTheme} openSettings={goToSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} />;
-    if (screen === 'settings') return <Settings setScreen={setScreen} categories={categories} accounts={accounts} reload={loadAll} softDelete={softDelete} user={currentUser} onProfileUpdated={refreshUser} onAddClick={() => setShowAdd(true)} theme={theme} toggleTheme={toggleTheme} initialSection={settingsSection} openSettings={goToSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} onResetData={resetAllData} resettingData={resettingData} logs={logs} logActivity={logActivity} restoreLog={restoreLog} spendingPoolByPeriod={spendingPoolByPeriod} saveSpendingPoolForPeriod={saveSpendingPoolForPeriod} />;
+    // key: ép React unmount/mount lại hẳn Settings mỗi khi chuyển qua lại giữa "Hồ sơ tài
+    // khoản" (settingsSection === 'profile', mở từ avatar) và "Cài đặt" (các thẻ Danh
+    // mục/Hệ thống/Lịch sử/Giao diện, mở từ icon Cài đặt) — kể cả khi đang đứng sẵn ở màn
+    // Cài đặt rồi bấm "Hồ sơ" (hoặc ngược lại) thì cũng chắc chắn đổi đúng giao diện, không
+    // phụ thuộc timing của effect đồng bộ state bên trong Settings nữa.
+    if (screen === 'settings') return <Settings key={settingsSection === 'profile' ? 'settings-profile' : 'settings-tabs'} setScreen={setScreen} categories={categories} accounts={accounts} reload={loadAll} softDelete={softDelete} user={currentUser} onProfileUpdated={refreshUser} onAddClick={() => setShowAdd(true)} theme={theme} toggleTheme={toggleTheme} initialSection={settingsSection} openSettings={goToSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} onResetData={resetAllData} resettingData={resettingData} logs={logs} logActivity={logActivity} restoreLog={restoreLog} spendingPoolByPeriod={spendingPoolByPeriod} saveSpendingPoolForPeriod={saveSpendingPoolForPeriod} />;
     if (screen === 'report') return <Report setScreen={setScreen} transactions={transactions} categories={categories} accounts={accounts} goals={goals} onAddClick={() => setShowAdd(true)} displayName={displayName} avatarUrl={avatarUrl} theme={theme} toggleTheme={toggleTheme} openSettings={goToSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} spendingPoolByPeriod={spendingPoolByPeriod} saveSpendingPoolForPeriod={saveSpendingPoolForPeriod} reload={loadAll} softDelete={softDelete} openFund={openFund} />;
     // Dashboard default
     return <Dashboard setScreen={setScreen} transactions={transactions} categories={categories} accounts={accounts} goals={goals} loading={loading} displayName={displayName} avatarUrl={avatarUrl} onAddClick={() => setShowAdd(true)} theme={theme} toggleTheme={toggleTheme} onOpenFund={openFund} onOpenAccount={openAccount} reload={loadAll} softDelete={softDelete} openSettings={goToSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} spendingPoolByPeriod={spendingPoolByPeriod} saveSpendingPoolForPeriod={saveSpendingPoolForPeriod} />;
@@ -9084,6 +9228,8 @@ function MainApp({ user, theme, toggleTheme }) {
         theme={theme}
         toggleTheme={toggleTheme}
         appLogoUrl={appLogoUrl}
+        openSettings={goToSettings}
+        settingsSection={settingsSection}
       />
 
       {/* AppBody — flex: 1, min-width: 0 so it never gets pushed wider than the viewport */}
@@ -9119,6 +9265,7 @@ function MainApp({ user, theme, toggleTheme }) {
         theme={theme}
         toggleTheme={toggleTheme}
         openSettings={goToSettings}
+        settingsSection={settingsSection}
       />
 
       {/* AddTransaction Modal - rendered globally */}
