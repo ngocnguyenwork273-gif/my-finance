@@ -93,6 +93,7 @@ export default function DateTimeField({
   const calInstanceRef = useRef(null);
   const hourListRef = useRef(null);
   const minuteListRef = useRef(null);
+  const wheelLockRef = useRef(false); // chặn dồn nhiều bước tháng trong 1 lần lướt chuột/trackpad
 
   const { date: dateVal, hour: hourVal, minute: minuteVal } = splitValue(value);
 
@@ -168,6 +169,34 @@ export default function DateTimeField({
       calInstanceRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  // FIX: rê chuột vào lịch rồi lướt (wheel/trackpad) để chuyển qua lại tháng trước/sau,
+  // thay vì phải bấm mũi tên < >. Gắn listener NATIVE (không dùng onWheel của React) với
+  // { passive: false } vì kể từ React 17, listener wheel gắn qua onWheel bị coi là passive
+  // theo mặc định -> gọi preventDefault() bên trong sẽ bị trình duyệt bỏ qua (và log warning),
+  // khiến trang phía sau vẫn bị cuộn theo. wheelLockRef dùng để mỗi lần lướt chuột/trackpad
+  // (thường bắn ra rất nhiều sự kiện wheel liên tiếp chỉ trong 1 cái lướt) chỉ đổi đúng 1
+  // tháng, tránh vọt qua nhiều tháng cùng lúc. Chỉ gắn trên calElRef (vùng lịch) nên không
+  // ảnh hưởng đến việc cuộn chọn Giờ/Phút bên dưới (2 khối đó nằm ngoài calElRef).
+  useEffect(() => {
+    const el = calElRef.current;
+    if (!open || !el) return;
+    function handleWheel(e) {
+      e.preventDefault();
+      if (wheelLockRef.current) return;
+      const cal = calInstanceRef.current;
+      if (!cal) return;
+      wheelLockRef.current = true;
+      let month = cal.context.selectedMonth + (e.deltaY > 0 ? 1 : -1);
+      let year = cal.context.selectedYear;
+      if (month < 0) { month = 11; year -= 1; }
+      else if (month > 11) { month = 0; year += 1; }
+      cal.set({ selectedMonth: month, selectedYear: year });
+      setTimeout(() => { wheelLockRef.current = false; }, 280);
+    }
+    el.addEventListener('wheel', handleWheel, { passive: false });
+    return () => el.removeEventListener('wheel', handleWheel);
   }, [open]);
 
   // Cuộn 2 cột giờ/phút tới vị trí đang chọn mỗi khi mở popup

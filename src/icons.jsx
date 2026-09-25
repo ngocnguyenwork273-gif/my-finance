@@ -22,12 +22,17 @@
    ============================================================================== */
 import { Icon } from '@iconify/react';
 
-// Đổi 1 chỗ này để đổi "độ nổi khối" của TOÀN BỘ icon trong app:
-//   'bold-duotone' -> nổi khối, 2 tông màu (mặc định, đúng ý "nổi nổi màu sắc")
+// Đổi 1 chỗ này để đổi "độ nổi khối" MẶC ĐỊNH của icon trong app (áp dụng cho MỌI
+// icon KHÔNG có weight riêng ở nơi gọi — xem phần override cho sidebar bên dưới):
+//   'linear'       -> outline mảnh, thanh mảnh (mặc định — theo góp ý là đẹp hơn ở
+//                      hầu hết chỗ so với bold-duotone)
+//   'bold-duotone' -> nổi khối, 2 tông màu
 //   'bold'         -> đặc 1 khối, 1 màu (đậm, mạnh)
-//   'linear'       -> outline mảnh (gần giống lucide cũ)
 //   'broken'       -> outline nét đứt, phong cách nhẹ nhàng
-const DEFAULT_WEIGHT = 'bold-duotone';
+const DEFAULT_WEIGHT = 'linear';
+// Sidebar menu bên trái (Trang chủ, Quản lý quỹ...) vẫn giữ style nổi khối vì đã
+// ưng — set riêng weight này ngay tại nơi gọi <Home weight="bold-duotone" /> (xem
+// component Sidebar trong App.jsx), KHÔNG cần sửa gì ở file này.
 
 // factory: tạo 1 component icon Solar, API giống hệt lucide-react
 //   <Wallet size={20} className="text-blueberry dark:text-white" />

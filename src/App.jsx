@@ -1,7 +1,7 @@
 /* ==============================================================================
    01. IMPORTS
    ============================================================================== */
-import { useState, useEffect, useLayoutEffect, useRef, Fragment, Children } from 'react';
+import { useState, useEffect, useLayoutEffect, useRef, useMemo, Fragment, Children } from 'react';
 import { createPortal } from 'react-dom';
 import { supabase } from './supabaseClient';
 import {
@@ -624,13 +624,34 @@ function ImageUploader({
     setZoom(1);
   }
 
-  function handleConfirm() {
-    if (!imageRef.current || !crop || !crop.width || !crop.height) return;
+  // Đợi 1 <img> thực sự đã có bitmap sẵn sàng để drawImage() — không chỉ dựa vào 1 tín
+  // hiệu duy nhất (complete/onload/decode()), vì trên WebView của bản xuất APK, từng tín
+  // hiệu riêng lẻ này có thể báo "xong" sớm hơn thực tế (bitmap GPU chưa kịp sẵn sàng),
+  // khiến drawImage() vẽ ra khung trống rồi canvas.toBlob(...,'image/jpeg') xuất thành
+  // màu ĐEN đặc (JPEG không có kênh alpha) — đúng hiện tượng "đổi ảnh bìa ra màu đen".
+  async function waitForImageReady(image) {
+    if (!(image.complete && image.naturalWidth)) {
+      await new Promise((resolve, reject) => {
+        image.onload = resolve;
+        image.onerror = reject;
+      });
+    }
+    try {
+      if (typeof image.decode === 'function') await image.decode();
+    } catch (err) {
+      // Một số WebView cũ không hỗ trợ đầy đủ decode() — bỏ qua, đã có onload/complete
+      // ở trên đảm bảo ảnh sẵn sàng, không cần dừng hẳn vì lỗi này.
+    }
+    // Đợi thêm 2 khung vẽ (requestAnimationFrame) — khoảng đệm nhỏ để bitmap thực sự
+    // được trình duyệt/WebView đẩy lên sẵn sàng cho drawImage(), phòng trường hợp
+    // complete/decode() báo xong nhưng khung hình kế tiếp mới thực sự vẽ được.
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+  }
+
+  // Vẽ vùng đã crop lên canvas theo toạ độ pixel của ẢNH GỐC (naturalWidth/naturalHeight)
+  // — không phụ thuộc kích thước đang hiển thị (đã bị zoom to/nhỏ) — rồi trả về canvas đó.
+  function drawCroppedCanvas(image) {
     const canvas = document.createElement('canvas');
-    const image = imageRef.current;
-    // crop ở đơn vị % nên quy đổi thẳng sang toạ độ pixel của ẢNH GỐC (naturalWidth/
-    // naturalHeight) — không phụ thuộc kích thước đang hiển thị (đã bị zoom to/nhỏ),
-    // nhờ vậy ảnh xuất ra luôn đúng vùng đã chọn dù trước đó có zoom bao nhiêu đi nữa.
     const cropX = (crop.x / 100) * image.naturalWidth;
     const cropY = (crop.y / 100) * image.naturalHeight;
     const cropWidth = (crop.width / 100) * image.naturalWidth;
@@ -639,6 +660,54 @@ function ImageUploader({
     canvas.height = cropHeight;
     const ctx = canvas.getContext('2d');
     ctx.drawImage(image, cropX, cropY, cropWidth, cropHeight, 0, 0, cropWidth, cropHeight);
+    return canvas;
+  }
+
+  // Kiểm tra canvas vừa vẽ có bị "trống → đen tuyền" hay không, bằng cách lấy mẫu vài
+  // điểm ảnh. Nếu drawImage() âm thầm không vẽ được gì thì toàn bộ điểm mẫu sẽ là (0,0,0,0)
+  // hoặc (0,0,0,255) — dấu hiệu chắc chắn của đúng lỗi "ảnh bìa xuất ra màu đen".
+  function isCanvasLikelyBlank(canvas) {
+    try {
+      const ctx = canvas.getContext('2d');
+      const w = canvas.width, h = canvas.height;
+      if (!w || !h) return true;
+      const points = [[0, 0], [w - 1, 0], [0, h - 1], [w - 1, h - 1], [Math.floor(w / 2), Math.floor(h / 2)]];
+      return points.every(([x, y]) => {
+        const [r, g, b] = ctx.getImageData(x, y, 1, 1).data;
+        return r === 0 && g === 0 && b === 0;
+      });
+    } catch (err) {
+      return false; // không đọc được pixel (vd canvas bị taint) — bỏ qua, không chặn luồng lưu ảnh
+    }
+  }
+
+  async function handleConfirm() {
+    if (!imageRef.current || !crop || !crop.width || !crop.height) return;
+    // Dùng lại thẻ <img> đang hiển thị trong editor để lấy toạ độ crop, nhưng dựng THÊM
+    // 1 ảnh MỚI, tải thẳng từ dataURL gốc (imgSrc) để vẽ — vì thẻ <img> trong editor đang
+    // bị co giãn bằng CSS (zoom) và có thể là ảnh trình duyệt "tái chế" lại, không đáng tin
+    // cậy bằng 1 ảnh mới tinh khi cần đảm bảo bitmap đã thực sự sẵn sàng.
+    const freshImage = new window.Image();
+    freshImage.src = imgSrc;
+    try {
+      await waitForImageReady(freshImage);
+    } catch (err) {
+      console.error('Không thể tải/giải mã ảnh trước khi cắt:', err);
+      return;
+    }
+    if (!freshImage.naturalWidth || !freshImage.naturalHeight) return; // ảnh hỏng/rỗng — không có gì để vẽ
+
+    let canvas = drawCroppedCanvas(freshImage);
+    if (isCanvasLikelyBlank(canvas)) {
+      // Vẽ ra toàn màu đen ngay cả sau khi đã đợi sẵn sàng — thử lại thêm 1 lần sau khi
+      // đợi thêm 1 nhịp, thay vì âm thầm xuất ra file đen coi như đã xong.
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+      canvas = drawCroppedCanvas(freshImage);
+      if (isCanvasLikelyBlank(canvas)) {
+        console.error('Ảnh xuất ra bị trống/đen sau khi thử lại — huỷ lưu để tránh lưu nhầm ảnh hỏng.');
+        return;
+      }
+    }
     canvas.toBlob((blob) => {
       if (!blob) return;
       const file = new File([blob], 'image.jpg', { type: 'image/jpeg' });
@@ -945,6 +1014,34 @@ function findInitialAllocation(transactions, categoryId) {
   return allocations.find((t) => t.is_initial === true) || allocations.find(isInitialAllocationTx) || null;
 }
 
+// FIX: "date" của giao dịch được lưu dạng .toISOString().slice(0,16) — chỉ có độ chính xác
+// TỚI PHÚT, không có giây. Khi 2 giao dịch cùng danh mục/ví được tạo trong cùng 1 phút, so
+// sánh "new Date(a.date) - new Date(b.date)" bị HÒA (tie) → thứ tự hiển thị và cách tính
+// "số dư cuối" (fundBalanceAtDate/accountBalanceAtDate) không phân biệt được giao dịch nào
+// thực sự xảy ra trước, dẫn tới số dư cuối hiển thị sai (gồm luôn cả giao dịch xảy ra SAU nó).
+//
+// compareTxTime() phá tie bằng created_at (luôn có đủ giây/mili giây) khi 2 "date" bằng nhau.
+// LƯU Ý: so sánh bằng HIỆU SỐ NGUYÊN trực tiếp (createdA - createdB), KHÔNG cộng/chia thập
+// phân vào timestamp gốc — vì nếu tie-break của 2 dòng rơi vào 2 PHÚT khác nhau của created_at
+// (vd 1 dòng lúc 19:20:58, dòng kia 19:21:03, dù "date" cả 2 đều lưu là "19:20" hoặc "19:21")
+// thì cách lấy "phần dư trong phút" (modulo) sẽ so sai vì không biết dòng nào thuộc phút nào —
+// so hiệu số nguyên tuyệt đối luôn cho kết quả đúng trong mọi trường hợp.
+// Nếu created_at CŨNG trùng nhau tuyệt đối (thường gặp với data seed thủ công/script, insert
+// hàng loạt cùng lúc) thì fallback cuối cùng sang "seq" — cột bigserial tăng tự động ở DB, do
+// chính Postgres cấp lúc insert nên KHÔNG BAO GIỜ trùng, phản ánh đúng thứ tự vật lý dòng được
+// tạo ra. Cần: `alter table transactions add column seq bigserial;` và thêm "seq" vào câu
+// select transactions ở loadAll().
+// Dùng hàm này ở MỌI chỗ cần sắp xếp hoặc xác định thứ tự trước/sau giữa 2 giao dịch.
+function compareTxTime(a, b) {
+  const baseA = new Date(a.date || a.created_at).getTime();
+  const baseB = new Date(b.date || b.created_at).getTime();
+  if (baseA !== baseB) return baseA - baseB;
+  const createdA = new Date(a.created_at || a.date).getTime();
+  const createdB = new Date(b.created_at || b.date).getTime();
+  if (createdA !== createdB) return createdA - createdB;
+  return (a.seq || 0) - (b.seq || 0);
+}
+
 function fundBalance(categoryId, transactions) {
   return transactions
     .filter((t) => t.category_id === categoryId)
@@ -979,7 +1076,7 @@ function _computeFundBalanceWithProfit(category, transactions) {
   const rate = Number(category.interest_rate || 0);
   const history = transactions
     .filter((t) => t.category_id === category.id && (t.type === 'allocation' || t.type === 'expense'))
-    .sort((a, b) => new Date(a.date || a.created_at) - new Date(b.date || b.created_at));
+    .sort((a, b) => compareTxTime(a, b));
 
   if (history.length === 0) return 0;
 
@@ -1029,38 +1126,47 @@ function _computeFundBalanceWithProfit(category, transactions) {
 // (mỗi quỹ x nhiều mốc ngày), nếu không cache thì vòng lặp từng-ngày chạy lại liên tục gây lag.
 const _fundBalanceAtDateCache = new WeakMap();
 
-function fundBalanceAtDate(category, transactions, cutoffDate) {
+function fundBalanceAtDate(category, transactions, cutoffDate, cutoffTx = null) {
   let cacheForTx = _fundBalanceAtDateCache.get(transactions);
   if (!cacheForTx) {
     cacheForTx = new Map();
     _fundBalanceAtDateCache.set(transactions, cacheForTx);
   }
   const cutoffKey = new Date(cutoffDate).toDateString();
-  const cacheKey = `${category.id}_${category.interest_rate}_${cutoffKey}`;
+  // FIX: thêm id của cutoffTx vào cache key — nếu không, 2 giao dịch khác nhau cùng ngày sẽ
+  // vô tình dùng chung 1 kết quả cache (kết quả của giao dịch được tính trước).
+  const cacheKey = `${category.id}_${category.interest_rate}_${cutoffKey}_${cutoffTx ? cutoffTx.id : 'day-end'}`;
   if (cacheForTx.has(cacheKey)) return cacheForTx.get(cacheKey);
 
-  const result = _computeFundBalanceAtDate(category, transactions, cutoffDate);
+  const result = _computeFundBalanceAtDate(category, transactions, cutoffDate, cutoffTx);
   cacheForTx.set(cacheKey, result);
   return result;
 }
 
-function _computeFundBalanceAtDate(category, transactions, cutoffDate) {
+function _computeFundBalanceAtDate(category, transactions, cutoffDate, cutoffTx = null) {
   const rate = Number(category.interest_rate || 0);
   const dailyRate = rate / 100 / 365;
   const history = transactions
     .filter((t) => t.category_id === category.id && (t.type === 'allocation' || t.type === 'expense'))
-    .sort((a, b) => new Date(a.date || a.created_at) - new Date(b.date || b.created_at));
+    .sort((a, b) => compareTxTime(a, b));
 
   if (history.length === 0) return 0;
 
   const toDay = (d) => { const x = new Date(d); x.setHours(0, 0, 0, 0); return x; };
   const startDate = toDay(history[0].date || history[0].created_at);
   const endDate = toDay(cutoffDate); // inclusive? we process until endDate (including that day)
+  // FIX: khi biết chính xác giao dịch nào đang được tính "số dư cuối" (cutoffTx), dùng
+  // compareTxTime() để loại các giao dịch xảy ra SAU nó trong CÙNG NGÀY — trước đây gộp cả ngày
+  // thành 1 cục nên 2 giao dịch cùng ngày (nhất là cùng phút) luôn ra cùng 1 số dư cuối, kể cả
+  // giao dịch xảy ra sau (điều này khiến dòng hiển thị trước có số dư đã trừ/cộng nhầm phần
+  // của giao dịch xảy ra sau nó).
 
   const changesByDay = {};
   const eligibleChangesByDay = {};
   history.forEach((t) => {
-    const key = toDay(t.date || t.created_at).getTime();
+    const day = toDay(t.date || t.created_at).getTime();
+    if (cutoffTx && day === endDate.getTime() && compareTxTime(t, cutoffTx) > 0) return;
+    const key = day;
     const delta = t.type === 'allocation' ? Number(t.amount) : -Number(t.amount);
     changesByDay[key] = (changesByDay[key] || 0) + delta;
     const eligibleKey = t.type === 'allocation'
@@ -1085,10 +1191,33 @@ function _computeFundBalanceAtDate(category, transactions, cutoffDate) {
   return balance;
 }
 
-function accountBalanceAtDate(account, transactions, cutoffDate) {
+const _accountBalanceAtDateCache = new WeakMap();
+function accountBalanceAtDate(account, transactions, cutoffDate, cutoffTx = null) {
+  // FIX HIỆU NĂNG: trước đây hàm này KHÔNG cache — mỗi lần gọi đều lọc lại TOÀN BỘ mảng
+  // transactions. Riêng chart "Biến động tài sản" ở Trang chủ gọi hàm này cho MỖI ví × MỖI
+  // ngày trong tháng (vd 5 ví × 30 ngày = 150 lần quét), và khối tính toán đó lại KHÔNG bọc
+  // useMemo nên chạy lại mỗi khi Trang chủ re-render (đổi theme, hover thẻ...) — đây chính là
+  // lý do biểu đồ này load/hiện chậm hơn hẳn các thẻ khác. Cache theo cùng kiểu WeakMap như
+  // fundBalanceAtDate: khoá theo chính mảng transactions (tự "sạch" cache khi mảng đổi tham
+  // chiếu, tức sau khi reload/thêm giao dịch) + account.id + ngày cutoff.
+  let cacheForTx = _accountBalanceAtDateCache.get(transactions);
+  if (!cacheForTx) {
+    cacheForTx = new Map();
+    _accountBalanceAtDateCache.set(transactions, cacheForTx);
+  }
+  const cutoffKey = new Date(cutoffDate).toISOString();
+  // FIX: thêm id của cutoffTx vào cache key, giống fundBalanceAtDate.
+  const cacheKey = `${account.id}_${cutoffKey}_${cutoffTx ? cutoffTx.id : 'plain-date'}`;
+  if (cacheForTx.has(cacheKey)) return cacheForTx.get(cacheKey);
+
+  // FIX: nếu biết chính xác giao dịch đang xét (cutoffTx), so sánh bằng compareTxTime() — có
+  // tie-break theo created_at — thay vì so trực tiếp "d <= cutoffDate". Trước đây khi 2 giao
+  // dịch trùng NHAU tới phút (date chỉ lưu chính xác tới phút), cả 2 đều thoả "d <= cutoffDate"
+  // nên số dư cuối của giao dịch xảy ra TRƯỚC lại vô tình cộng luôn cả giao dịch xảy ra SAU nó.
   const delta = transactions
     .filter((t) => {
       if (t.account_id !== account.id) return false;
+      if (cutoffTx) return compareTxTime(t, cutoffTx) <= 0;
       const d = new Date(t.date || t.created_at);
       return d <= cutoffDate;
     })
@@ -1097,7 +1226,9 @@ function accountBalanceAtDate(account, transactions, cutoffDate) {
       if (t.type === 'expense' || t.type === 'allocation') return s - Number(t.amount); // tiền rời khỏi ví
       return s + Number(t.amount); // adjustment
     }, 0);
-  return Number(account.initial_balance || 0) + delta;
+  const result = Number(account.initial_balance || 0) + delta;
+  cacheForTx.set(cacheKey, result);
+  return result;
 }
 
 function fundTransactionsWithBalance(category, transactions) {
@@ -1105,7 +1236,7 @@ function fundTransactionsWithBalance(category, transactions) {
   const dailyRate = rate / 100 / 365;
   const txs = transactions
     .filter((t) => t.category_id === category.id && (t.type === 'allocation' || t.type === 'expense'))
-    .sort((a, b) => new Date(a.date || a.created_at) - new Date(b.date || b.created_at));
+    .sort((a, b) => compareTxTime(a, b));
   if (txs.length === 0) return [];
 
   const toDay = (d) => { const x = new Date(d); x.setHours(0, 0, 0, 0); return x; };
@@ -1155,7 +1286,7 @@ function fundDailyProfitHistory(category, transactions) {
   const rate = Number(category.interest_rate || 0);
   const history = transactions
     .filter((t) => t.category_id === category.id && (t.type === 'allocation' || t.type === 'expense'))
-    .sort((a, b) => new Date(a.date || a.created_at) - new Date(b.date || b.created_at));
+    .sort((a, b) => compareTxTime(a, b));
 
   if (history.length === 0 || rate <= 0) return [];
 
@@ -1299,6 +1430,57 @@ function currentPeriodKey(today = new Date()) {
 function transactionPeriodKey(t) {
   return parsePeriodTag(t.note) || dateToPeriodKey(t.date || t.created_at);
 }
+
+// ==== TỰ ĐỘNG TÍNH & NẠP "TÍCH LŨY TRƯỚC CHI" =====================================
+// Quy tắc nghiệp vụ (theo xác nhận của người dùng):
+//   Tích lũy trước chi (của 1 kỳ) = Tổng "Lương cơ bản" thực nhận trong kỳ
+//                                   + "Tiền cơm" CỐ ĐỊNH mỗi kỳ (không lấy từ giao dịch thật,
+//                                     vì tiền cơm thường được trả gộp vài tháng 1 lần)
+//                                   − "Thu nhập được chi" (số người dùng tự cài đặt cho kỳ đó)
+// Số này được TỰ ĐỘNG nạp (allocation, nguồn = Thu nhập, account_id = null) vào quỹ
+// "Tích lũy trước chi" — không cần thao tác tay. Nếu công thức ra ≤ 0 thì không nạp gì
+// (và tự xoá khoản đã nạp trước đó nếu thu nhập được chi tăng lên làm số cần tích lũy về 0).
+//
+// ⚠️ QUAN TRỌNG: 2 tên category dưới đây phải khớp CHÍNH XÁC (kể cả hoa/thường, dấu cách)
+// với tên bạn đã đặt trong Danh mục. Nếu tên thực tế khác, sửa lại 2 hằng số này.
+const MEAL_ALLOWANCE_FIXED_PER_PERIOD = 600000; // "Tiền cơm" cố định mỗi kỳ
+const BASE_SALARY_CATEGORY_NAME = 'Lương cơ bản';
+const ACCUMULATION_FUND_CATEGORY_NAME = 'Tích lũy trước chi';
+// Note để nhận diện đây là giao dịch DO CODE TỰ TẠO (không phải người dùng tự nạp tay) —
+// nhờ vậy lần đồng bộ sau tìm lại đúng giao dịch cũ để SỬA thay vì tạo trùng thêm 1 dòng mới.
+const AUTO_ACCUM_NOTE = 'Tự động: Tích lũy trước chi';
+
+// Tính số tiền ĐÚNG (theo công thức) cần có trong quỹ "Tích lũy trước chi" của 1 kỳ.
+// Trả về null nếu chưa đủ điều kiện để tính (chưa có category "Lương cơ bản", hoặc kỳ đó
+// chưa cài đặt "Thu nhập được chi") — null nghĩa là "chưa biết", KHÔNG phải là 0.
+function computeAccumulationBeforeSpendTarget(periodKey, transactions, categories, spendingPoolByPeriod) {
+  const baseSalaryCat = (categories || []).find((c) => c.name === BASE_SALARY_CATEGORY_NAME);
+  if (!baseSalaryCat) return null;
+  const spendingPool = spendingPoolByPeriod ? spendingPoolByPeriod[periodKey] : undefined;
+  if (spendingPool == null || spendingPool === '') return null;
+  const baseSalaryTotal = (transactions || [])
+    .filter((t) => !t.deleted_at && t.type === 'income' && t.category_id === baseSalaryCat.id && transactionPeriodKey(t) === periodKey)
+    .reduce((s, t) => s + Number(t.amount), 0);
+  return Math.max(baseSalaryTotal + MEAL_ALLOWANCE_FIXED_PER_PERIOD - Number(spendingPool), 0);
+}
+
+// Trả về created_at của giao dịch "Lương cơ bản" GẦN NHẤT trong kỳ (nếu có). Dùng để đặt
+// giờ cho dòng "nạp tự động" ngay SAU thời điểm đó, thay vì luôn lấy giờ hiện tại lúc effect
+// chạy (vd mở lại app vài ngày sau) — tránh dòng tự động bị xếp lệch giờ/thứ tự trong Lịch sử.
+function latestBaseSalaryTimestamp(periodKey, transactions, categories) {
+  const baseSalaryCat = (categories || []).find((c) => c.name === BASE_SALARY_CATEGORY_NAME);
+  if (!baseSalaryCat) return null;
+  const salaryTxs = (transactions || []).filter(
+    (t) => !t.deleted_at && t.type === 'income' && t.category_id === baseSalaryCat.id && transactionPeriodKey(t) === periodKey
+  );
+  if (salaryTxs.length === 0) return null;
+  const latestMs = salaryTxs.reduce((max, t) => {
+    const ms = new Date(t.created_at || t.date).getTime();
+    return ms > max ? ms : max;
+  }, 0);
+  return new Date(latestMs + 1000); // +1 giây để chắc chắn đứng SAU dòng lương (tie-break theo created_at)
+}
+
 function periodPool(transactions, periodKey) {
   const total = transactions.filter((t) => t.type === 'income' && parsePeriodTag(t.note) === periodKey).reduce((s, t) => s + Number(t.amount), 0);
   const used = transactions.filter((t) => (t.type === 'allocation' || t.type === 'expense') && parsePeriodTag(t.note) === periodKey).reduce((s, t) => s + Number(t.amount), 0);
@@ -1810,6 +1992,72 @@ function MoneyInput({ value, onChange, placeholder, className }) {
 }
 
 // ==============================================================================
+// MULTI SELECT FILTER — giống CustomSelect nhưng cho phép tick chọn NHIỀU giá trị cùng lúc
+// (vd bộ lọc "Loại giao dịch": chọn cả Chi tiêu + Nạp quỹ). selected là mảng giá trị đang
+// chọn (rỗng = "tất cả"/không lọc). onChange(nextArray) nhận mảng mới sau khi tick/bỏ tick.
+// ==============================================================================
+function MultiSelectFilter({ label, options, selected, onChange, triggerClassName = '', align = 'left' }) {
+  const [open, setOpen] = useState(false);
+  const allSelected = selected.length === 0;
+  function toggle(v) {
+    onChange(selected.includes(v) ? selected.filter((x) => x !== v) : [...selected, v]);
+  }
+  const displayLabel = allSelected
+    ? label
+    : (selected.length === 1
+      ? (options.find((o) => o.value === selected[0])?.label || label)
+      : `${label.replace(/^Tất cả /, '')} (${selected.length})`);
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className={`${triggerClassName} flex items-center justify-between gap-2 text-left`}
+      >
+        <span className="truncate">{displayLabel}</span>
+        <ChevronDown size={14} className={`flex-shrink-0 opacity-60 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
+          <div style={{ position: 'absolute' }} className={`z-40 mt-1 ${align === 'right' ? 'right-0' : 'left-0'} min-w-full frost-card rounded-2xl shadow-card overflow-hidden`}>
+            <div className="pointer-events-none absolute -top-8 -left-8 w-28 h-28 rounded-full bg-turquoise/25 blur-2xl" />
+            <div className="pointer-events-none absolute -bottom-8 -right-8 w-28 h-28 rounded-full bg-lavender/25 blur-2xl" />
+            <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/80 dark:via-white/25 to-transparent" />
+            <div className="relative max-h-64 overflow-y-auto overflow-x-hidden scrollbar-hide py-1">
+              <button
+                type="button"
+                onClick={() => onChange([])}
+                className={`w-full text-left px-4 py-2.5 text-sm whitespace-nowrap hover:bg-white/40 dark:hover:bg-white/10 transition ${allSelected ? 'text-turquoise font-bold' : 'text-blueberry dark:text-white'}`}
+              >
+                {label}
+              </button>
+              {options.map((o) => {
+                const checked = selected.includes(o.value);
+                return (
+                  <button
+                    key={o.value}
+                    type="button"
+                    onClick={() => toggle(o.value)}
+                    className="w-full flex items-center gap-2.5 text-left px-4 py-2.5 text-sm whitespace-nowrap hover:bg-white/40 dark:hover:bg-white/10 transition"
+                  >
+                    <span className={`flex-shrink-0 w-4 h-4 rounded flex items-center justify-center border transition ${checked ? 'bg-turquoise border-turquoise' : 'border-steel/50 dark:border-light-grey/40'}`}>
+                      {checked && <Check size={11} className="text-white" />}
+                    </span>
+                    <span className={checked ? 'text-turquoise font-bold' : 'text-blueberry dark:text-white'}>{o.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ==============================================================================
 // CUSTOM SELECT — thay thế thẻ select gốc của trình duyệt dùng chung toàn app.
 // Lý do: danh sách lựa chọn của select gốc do hệ điều hành/trình duyệt tự vẽ
 // (native picker), không thể tô theo theme sáng/tối của app — trên mobile
@@ -1902,6 +2150,50 @@ function ChartTooltip({ tip }) {
     </div>
   );
 }
+// Cho phép giữ chuột trái + kéo ngang để cuộn 1 vùng overflow-x-auto — mặc định trình
+// duyệt desktop KHÔNG hỗ trợ kiểu kéo này (chỉ cuộn được qua thanh scrollbar hoặc
+// trackpad/lăn chuột ngang), nên khi đã ẩn thanh scrollbar (scrollbar-hide) thì cần tự
+// bắt sự kiện chuột để mô phỏng "kéo để cuộn" giống cảm giác vuốt trên điện thoại.
+// Gắn ref trả về vào ĐÚNG phần tử có class overflow-x-auto.
+function useDragScroll() {
+  const ref = useRef(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    let isDown = false;
+    let startX = 0;
+    let startScrollLeft = 0;
+    function onDown(e) {
+      // Chỉ bắt chuột trái, bỏ qua nếu đang bấm vào 1 nút/link bên trong (để không phá
+      // các hành động click khác đặt trong vùng biểu đồ).
+      if (e.button !== 0) return;
+      isDown = true;
+      startX = e.clientX;
+      startScrollLeft = el.scrollLeft;
+      el.style.cursor = 'grabbing';
+      el.style.userSelect = 'none';
+    }
+    function onMove(e) {
+      if (!isDown) return;
+      el.scrollLeft = startScrollLeft - (e.clientX - startX);
+    }
+    function onUp() {
+      if (!isDown) return;
+      isDown = false;
+      el.style.cursor = 'grab';
+      el.style.userSelect = '';
+    }
+    el.addEventListener('mousedown', onDown);
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => {
+      el.removeEventListener('mousedown', onDown);
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+  }, []);
+  return ref;
+}
 function useChartTooltip() {
   const [tip, setTip] = useState(null);
   const wrapRef = useRef(null);
@@ -1990,6 +2282,7 @@ function SpendingDonut({ data, total }) {
 
 function CategoryBarChart({ series, maxVal, buckets }) {
   const { tip, wrapRef, showTip, hideTip } = useChartTooltip();
+  const dragRef = useDragScroll();
   const [hoverKey, setHoverKey] = useState(null); // `${bucketIndex}:${categoryId}` của đoạn đang hover, để đoạn đó nổi bật + mờ các đoạn còn lại
   if (series.length === 0) return null;
   const chartH = 200; // chiều cao vùng vẽ (px)
@@ -2009,7 +2302,11 @@ function CategoryBarChart({ series, maxVal, buckets }) {
   const totalLinePoints = bucketTotals.map((v, bi) => `${xCenter(bi)},${yPx(v)}`).join(' ');
 
   return (
-    <div ref={wrapRef} className="relative min-w-0">
+    // FIX: khoảng đệm trên (trước là pt-4) tính lại vẫn còn thiếu ~5px so với chiều cao
+    // thực tế của nhãn (font 10px + line-height mặc định của trình duyệt + khoảng cách 3px
+    // + nửa đường kính chấm tròn) nên nhãn của điểm cao nhất vẫn hơi đè lên viền trên/tiêu
+    // đề card. Tăng lên pt-6 (24px) để luôn đủ chỗ, kể cả khi Tổng chạm đúng mốc cao nhất.
+    <div ref={wrapRef} className="relative min-w-0 pt-6">
       <ChartTooltip tip={tip} />
       <div className="flex min-w-0">
         {/* Cột nhãn số tiền bên trái (trục tung) — cố định, không cuộn theo */}
@@ -2021,7 +2318,7 @@ function CategoryBarChart({ series, maxVal, buckets }) {
 
         {/* Vùng cuộn ngang — chứa CẢ phần vẽ cột lẫn nhãn trục hoành bên dưới, để 2 phần
             luôn khớp cột với nhau dù kéo cuộn tới đâu. */}
-        <div className="flex-1 min-w-0 overflow-x-auto chart-scroll-x">
+        <div ref={dragRef} className="flex-1 min-w-0 overflow-x-auto scrollbar-hide cursor-grab">
           <div style={{ width: plotWidth, minWidth: '100%' }}>
             {/* Vùng vẽ: các cột chồng theo từng kỳ/ngày + đường Tổng (trục hoành = thời gian) */}
             <div className="relative" style={{ height: chartH, overflow: 'visible' }}>
@@ -2141,17 +2438,15 @@ function CategoryBarChart({ series, maxVal, buckets }) {
 
 function TrendBarChart({ buckets, maxVal, keyA = 'inc', keyB = 'exp', keyC = null, labelA = 'Thu nhập', labelB = 'Chi tiêu', labelC = 'Tổng', colorA = 'bg-turquoise', colorB = 'bg-cotton-candy', colorC = 'bg-lavender', showYAxis = false }) {
   const { tip, wrapRef, showTip, hideTip } = useChartTooltip();
+  const dragRef = useDragScroll();
   const [hoverKey, setHoverKey] = useState(null); // `${bucketIndex}:a`/`:b`/`:c` của cột đang hover
   const yTicks = showYAxis ? [0, 0.25, 0.5, 0.75, 1].map((f) => maxVal * f) : [];
   // Bề rộng tối thiểu cho MỖI cụm (ngày/tháng) — luôn áp dụng (trước đây chỉ áp dụng
   // khi buckets.length > 12) để các cột không bao giờ bị ép quá mỏng/dính vào nhau.
   // Khi tổng bề rộng vượt khung nhìn, overflow-x-auto sẽ tự bật thanh cuộn ngang.
   const bucketMinWidth = keyC ? 34 : 24;
-  // Chỉ là ước lượng để quyết định có hiện gợi ý "kéo để xem thêm" hay không —
-  // không ảnh hưởng tới việc cuộn (overflow-x-auto luôn hoạt động khi cần).
-  const likelyScrollable = buckets.length * (bucketMinWidth + 12) > 600;
   const chart = (
-    <div className="flex items-end gap-3 mt-4 h-32 overflow-x-auto chart-scroll-x">
+    <div ref={dragRef} className="flex items-end gap-3 mt-4 h-32 overflow-x-auto scrollbar-hide cursor-grab">
       {buckets.map((b, i) => {
         const aKey = `${i}:a`, bKey = `${i}:b`, cKey = `${i}:c`;
         const aHovered = hoverKey === aKey, bHovered = hoverKey === bKey, cHovered = hoverKey === cKey;
@@ -2223,11 +2518,6 @@ function TrendBarChart({ buckets, maxVal, keyA = 'inc', keyB = 'exp', keyC = nul
   return (
     <div ref={wrapRef} className="relative">
       <ChartTooltip tip={tip} />
-      {likelyScrollable && (
-        <p className="text-[10px] text-steel dark:text-light-grey text-right mb-0.5 flex items-center justify-end gap-1">
-          <ChevronLeft size={10} className="opacity-60" /> Kéo để xem thêm <ChevronRight size={10} className="opacity-60" />
-        </p>
-      )}
       {showYAxis ? (
         <div className="flex">
           {/* Trục tung — số tiền, từ cao xuống thấp, cùng cách làm với IncomeExpenseComboChart */}
@@ -2350,7 +2640,7 @@ function SidebarDesktop({ screen, setScreen, sidebarCollapsed, toggleSidebar, th
                 boxShadow: isDark ? 'inset 0 1px 0 rgba(255,255,255,0.08)' : 'inset 0 1px 0 rgba(255,255,255,0.7)',
               } : undefined}
             >
-              <Icon size={17} className="flex-shrink-0" />
+              <Icon size={17} weight="bold-duotone" className="flex-shrink-0" />
               <span className={`whitespace-nowrap overflow-hidden transition-all duration-200 ${sidebarCollapsed ? 'max-w-0 opacity-0' : 'max-w-[160px] opacity-100'}`}>{label}</span>
             </button>
           );
@@ -2713,7 +3003,7 @@ function BottomNavMobile({ screen, setScreen, onAddClick, theme, toggleTheme, op
       )}
       <Icon
         size={20}
-        strokeWidth={2.1}
+        weight="bold-duotone"
         style={{ color: active ? '#0DBACC' : isDark ? 'rgba(255,255,255,0.72)' : 'rgba(48,49,80,0.55)' }}
       />
     </button>
@@ -3028,10 +3318,16 @@ function AddTransaction({ onClose, accounts, categories, transactions, onSaved, 
           <div className="w-9 h-9" />
         </div>
         <div className="px-5 mt-6">
+          {/* FIX: trạng thái active trước đây chỉ khác biệt bằng nền trắng (bg-white) trên nền
+              ice-cream — 2 màu này rất gần nhau (đều gần trắng) nên nhìn không rõ tab nào
+              đang chọn. Giờ thêm ring màu turquoise + đậm chữ (font-extrabold) + shadow rõ
+              hơn để tab active nổi bật hẳn so với 2 tab còn lại. Đồng thời bổ sung icon cho
+              cả 3 tab (trước đây chỉ có chữ) — đồng bộ với bộ icon đã dùng ở menu "+" nhanh
+              trên mobile (TrendingUp/PiggyBank/TrendingDown), cho nhất quán trong toàn app. */}
           <div className="flex bg-ice-cream dark:bg-night-sky rounded-full p-1">
-            <button onClick={() => handleTypeChange('income')} className={`flex-1 py-2 rounded-full text-xs sm:text-sm font-semibold transition ${type === 'income' ? 'bg-white dark:bg-[#2a2a44] text-turquoise shadow' : 'text-steel dark:text-light-grey'}`}>Thu nhập</button>
-            <button onClick={() => handleTypeChange('allocation')} className={`flex-1 py-2 rounded-full text-xs sm:text-sm font-semibold transition ${type === 'allocation' ? 'bg-white dark:bg-[#2a2a44] text-turquoise shadow' : 'text-steel dark:text-light-grey'}`}>Nạp quỹ</button>
-            <button onClick={() => handleTypeChange('expense')} className={`flex-1 py-2 rounded-full text-xs sm:text-sm font-semibold transition ${type === 'expense' ? 'bg-white dark:bg-[#2a2a44] text-turquoise shadow' : 'text-steel dark:text-light-grey'}`}>Chi tiêu</button>
+            <button onClick={() => handleTypeChange('income')} className={`flex-1 py-2 rounded-full text-xs sm:text-sm transition flex items-center justify-center gap-1 ${type === 'income' ? 'bg-white dark:bg-[#2a2a44] text-turquoise font-extrabold shadow-md shadow-turquoise/15 ring-1 ring-turquoise/30' : 'text-steel dark:text-light-grey font-semibold'}`}><TrendingUp size={14} className="flex-shrink-0" /> Thu nhập</button>
+            <button onClick={() => handleTypeChange('allocation')} className={`flex-1 py-2 rounded-full text-xs sm:text-sm transition flex items-center justify-center gap-1 ${type === 'allocation' ? 'bg-white dark:bg-[#2a2a44] text-turquoise font-extrabold shadow-md shadow-turquoise/15 ring-1 ring-turquoise/30' : 'text-steel dark:text-light-grey font-semibold'}`}><PiggyBank size={14} className="flex-shrink-0" /> Nạp quỹ</button>
+            <button onClick={() => handleTypeChange('expense')} className={`flex-1 py-2 rounded-full text-xs sm:text-sm transition flex items-center justify-center gap-1 ${type === 'expense' ? 'bg-white dark:bg-[#2a2a44] text-turquoise font-extrabold shadow-md shadow-turquoise/15 ring-1 ring-turquoise/30' : 'text-steel dark:text-light-grey font-semibold'}`}><TrendingDown size={14} className="flex-shrink-0" /> Chi tiêu</button>
           </div>
           {type === 'allocation' && <p className="text-steel dark:text-light-grey text-xs mt-2 text-center">Nạp quỹ từ Thu nhập của 1 Kỳ, hoặc chuyển thẳng từ 1 ví/tài khoản.</p>}
           {type === 'income' && <p className="text-steel dark:text-light-grey text-xs mt-2 text-center">Thu nhập được gom theo Kỳ — nhiều khoản thu trong cùng 1 Kỳ sẽ được cộng dồn lại.</p>}
@@ -3296,10 +3592,13 @@ function EditTransaction({ transaction, onClose, accounts, categories, transacti
           <div className="w-9 h-9" />
         </div>
         <div className="px-5 mt-6">
+          {/* FIX: cùng vấn đề active-state mờ nhạt + thiếu icon như modal "Thêm giao dịch" —
+              thêm ring + font-extrabold + shadow rõ hơn cho tab đang chọn, và bổ sung icon
+              cho cả 3 tab để đồng bộ với menu "+" nhanh trên mobile. */}
           <div className="flex bg-ice-cream dark:bg-night-sky rounded-full p-1">
-            <button onClick={() => handleTypeChange('income')} className={`flex-1 py-2 rounded-full text-xs sm:text-sm font-semibold transition ${type === 'income' ? 'bg-white dark:bg-[#2a2a44] text-turquoise shadow' : 'text-steel dark:text-light-grey'}`}>Thu nhập</button>
-            <button onClick={() => handleTypeChange('allocation')} className={`flex-1 py-2 rounded-full text-xs sm:text-sm font-semibold transition ${type === 'allocation' ? 'bg-white dark:bg-[#2a2a44] text-turquoise shadow' : 'text-steel dark:text-light-grey'}`}>Nạp quỹ</button>
-            <button onClick={() => handleTypeChange('expense')} className={`flex-1 py-2 rounded-full text-xs sm:text-sm font-semibold transition ${type === 'expense' ? 'bg-white dark:bg-[#2a2a44] text-turquoise shadow' : 'text-steel dark:text-light-grey'}`}>Chi tiêu</button>
+            <button onClick={() => handleTypeChange('income')} className={`flex-1 py-2 rounded-full text-xs sm:text-sm transition flex items-center justify-center gap-1 ${type === 'income' ? 'bg-white dark:bg-[#2a2a44] text-turquoise font-extrabold shadow-md shadow-turquoise/15 ring-1 ring-turquoise/30' : 'text-steel dark:text-light-grey font-semibold'}`}><TrendingUp size={14} className="flex-shrink-0" /> Thu nhập</button>
+            <button onClick={() => handleTypeChange('allocation')} className={`flex-1 py-2 rounded-full text-xs sm:text-sm transition flex items-center justify-center gap-1 ${type === 'allocation' ? 'bg-white dark:bg-[#2a2a44] text-turquoise font-extrabold shadow-md shadow-turquoise/15 ring-1 ring-turquoise/30' : 'text-steel dark:text-light-grey font-semibold'}`}><PiggyBank size={14} className="flex-shrink-0" /> Nạp quỹ</button>
+            <button onClick={() => handleTypeChange('expense')} className={`flex-1 py-2 rounded-full text-xs sm:text-sm transition flex items-center justify-center gap-1 ${type === 'expense' ? 'bg-white dark:bg-[#2a2a44] text-turquoise font-extrabold shadow-md shadow-turquoise/15 ring-1 ring-turquoise/30' : 'text-steel dark:text-light-grey font-semibold'}`}><TrendingDown size={14} className="flex-shrink-0" /> Chi tiêu</button>
           </div>
         </div>
         <div className="px-5 mt-8 text-center">
@@ -3438,8 +3737,15 @@ function EditAccountModal({ account, onClose, onSaved, isNew }) {
     onSaved(); onClose();
   }
 
-  return (
-    <div className="fixed inset-0 bg-black/40 flex items-end md:items-center md:justify-center z-30" onClick={onClose}>
+  // FIX: modal này thường được mở từ bên trong 1 .frost-card (vd card "Ví" ở Dashboard),
+  // mà .frost-card có backdrop-filter -> theo spec CSS, backdrop-filter/filter tạo ra
+  // containing block mới cho các phần tử con dùng position: fixed. Kết quả là div
+  // "fixed inset-0" bên dưới bị neo theo khung của .frost-card thay vì theo viewport,
+  // nên form "Thêm ví mới" bị lệch ra góc/không nằm giữa màn hình như mong đợi.
+  // Dùng createPortal để render thẳng ra document.body, thoát khỏi mọi ancestor có
+  // filter/backdrop-filter/transform, giống cách các modal khác trong file (vd EditCategoryModal) đã làm.
+  return createPortal(
+    <div className="fixed inset-0 bg-black/40 flex items-end md:items-center md:justify-center z-[999]" onClick={onClose}>
       <div className="bg-white dark:bg-[#1e1e32] w-full md:max-w-sm rounded-t-3xl md:rounded-3xl p-5" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-4">
           <h3 className="font-bold text-blueberry dark:text-white">{isNew ? 'Thêm ví mới' : 'Sửa tài khoản'}</h3>
@@ -3455,7 +3761,8 @@ function EditAccountModal({ account, onClose, onSaved, isNew }) {
           {saving ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />} Lưu
         </button>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
@@ -3750,9 +4057,11 @@ function QuickAdjustBalanceForm({ account, currentBalance, onClose, onSaved }) {
           <h3 className="font-bold text-blueberry dark:text-white">Cập nhật số dư — {account.name}</h3>
           <button onClick={onClose}><X size={18} className="text-steel dark:text-light-grey" /></button>
         </div>
+        {/* FIX: cùng lỗi active-state mờ + thiếu icon như các tab khác — thêm ring rõ hơn
+            và icon TrendingUp/TrendingDown (tăng/giảm số dư) cho nhất quán toàn app. */}
         <div className="flex bg-ice-cream dark:bg-night-sky rounded-full p-1 mb-2">
-          <button onClick={() => { setMode(mode === 'increase' ? null : 'increase'); setAmount(''); }} className={`flex-1 py-2 rounded-full text-sm font-semibold transition ${mode === 'increase' ? 'bg-white dark:bg-[#2a2a44] text-turquoise shadow' : 'text-steel dark:text-light-grey'}`}>Tăng số dư</button>
-          <button onClick={() => { setMode(mode === 'decrease' ? null : 'decrease'); setAmount(''); }} className={`flex-1 py-2 rounded-full text-sm font-semibold transition ${mode === 'decrease' ? 'bg-white dark:bg-[#2a2a44] text-cotton-candy shadow' : 'text-steel dark:text-light-grey'}`}>Giảm số dư</button>
+          <button onClick={() => { setMode(mode === 'increase' ? null : 'increase'); setAmount(''); }} className={`flex-1 py-2 rounded-full text-sm transition flex items-center justify-center gap-1.5 ${mode === 'increase' ? 'bg-white dark:bg-[#2a2a44] text-turquoise font-extrabold shadow-md shadow-turquoise/15 ring-1 ring-turquoise/30' : 'text-steel dark:text-light-grey font-semibold'}`}><TrendingUp size={15} className="flex-shrink-0" /> Tăng số dư</button>
+          <button onClick={() => { setMode(mode === 'decrease' ? null : 'decrease'); setAmount(''); }} className={`flex-1 py-2 rounded-full text-sm transition flex items-center justify-center gap-1.5 ${mode === 'decrease' ? 'bg-white dark:bg-[#2a2a44] text-cotton-candy font-extrabold shadow-md shadow-cotton-candy/15 ring-1 ring-cotton-candy/30' : 'text-steel dark:text-light-grey font-semibold'}`}><TrendingDown size={15} className="flex-shrink-0" /> Giảm số dư</button>
         </div>
         <p className="text-xs text-steel dark:text-light-grey mb-3">{mode ? 'Nhập số tiền muốn tăng/giảm.' : 'Không chọn gì cả — nhập thẳng số dư mới, hệ thống tự tính chênh lệch.'}</p>
         <MoneyInput value={amount} onChange={setAmount} placeholder={mode ? 'Số tiền' : 'Số dư mới'} className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-lg font-bold outline-none mb-3 dark:text-white dark:placeholder:text-light-grey text-blueberry" />
@@ -3888,7 +4197,7 @@ function EditGoalForm({ goal, onClose, onSaved, isNew, softDelete, categories = 
 /* ==============================================================================
    08. DASHBOARD
    ============================================================================== */
-function Dashboard({ setScreen, transactions, categories, accounts, goals, loading, displayName, avatarUrl, onAddClick, theme, toggleTheme, onOpenFund, onOpenAccount, reload, softDelete, openSettings, sidebarCollapsed, toggleSidebar, spendingPoolByPeriod, saveSpendingPoolForPeriod }) {
+function Dashboard({ setScreen, transactions, categories, accounts, goals, loading, initialLoadDone, displayName, avatarUrl, onAddClick, theme, toggleTheme, onOpenFund, onOpenAccount, reload, softDelete, openSettings, sidebarCollapsed, toggleSidebar, spendingPoolByPeriod, saveSpendingPoolForPeriod }) {
   async function handleDeleteTx(tx) {
     if (!confirm('Xóa giao dịch này? Bạn có thể khôi phục trong 30 ngày ở mục Lịch sử.')) return;
     const { error } = await softDelete('transactions', tx.id, txDeleteDescription(tx, categories), 'delete_transaction');
@@ -4118,6 +4427,7 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
   // chi của kỳ) ngay trong cột đó.
   function IncomeExpenseComboChart({ buckets, series, incomeTotals, maxVal }) {
     const { tip, wrapRef, showTip, hideTip } = useChartTooltip();
+    const dragRef = useDragScroll();
     const [hoverKey, setHoverKey] = useState(null); // `${bucketIndex}:${categoryId}` của đoạn đang hover
     if (buckets.length === 0) return null;
     const chartH = 220; // chiều cao vùng vẽ (px)
@@ -4126,105 +4436,133 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
     // Trục tung: 5 mốc từ 0 đến maxVal (maxVal = tổng thu nhập cao nhất, xem costMaxVal).
     const yTicks = [0, 0.25, 0.5, 0.75, 1].map((f) => maxVal * f);
     const yPct = (v) => Math.min((v / maxVal) * 100, 100); // % chiều cao tính từ đáy lên
-    const xCenter = (bi) => ((bi + 0.5) / buckets.length) * 100; // % vị trí ngang, canh giữa mỗi cột
-    const totalLinePoints = bucketTotals.map((v, bi) => `${xCenter(bi)},${100 - yPct(v)}`).join(' ');
-    const incomeLinePoints = incomeTotals.map((v, bi) => `${xCenter(bi)},${100 - yPct(v)}`).join(' ');
+    // Bề rộng CỐ ĐỊNH cho mỗi cột kỳ (px) — cùng cách làm với CategoryBarChart: trước đây
+    // chia đều 100%/số-kỳ nên ít kỳ (vd 5 tuần) thì cột to/mập gần hết bề ngang, và nhãn số
+    // tiền phía trên đỉnh cột đôi khi bị các đoạn màu (quá sát mép) đè lên. Giờ mỗi cột có
+    // bề rộng cố định, thon gọn; nhiều kỳ vượt khung nhìn thì tự cuộn ngang thay vì ép nhỏ.
+    const bucketWidth = 56;
+    const plotWidth = Math.max(buckets.length * bucketWidth, 1);
+    const xCenter = (bi) => (bi + 0.5) * bucketWidth; // toạ độ px, canh giữa mỗi cột
+    const yPx = (v) => chartH - (yPct(v) / 100) * chartH;
+    const totalLinePoints = bucketTotals.map((v, bi) => `${xCenter(bi)},${yPx(v)}`).join(' ');
+    const incomeLinePoints = incomeTotals.map((v, bi) => `${xCenter(bi)},${yPx(v)}`).join(' ');
     return (
-      <div ref={wrapRef} className="relative">
+      // FIX: cùng lỗi "số bị che" như CategoryBarChart — nhãn số tiền của điểm Tổng chi
+      // cao nhất bị đặt sát mép trên vùng vẽ (top: 0%) rồi đẩy lên thêm qua
+      // "bottom: calc(100% + 3px)", nên đè lên viền trên/tiêu đề card khi Tổng chạm mốc cao
+      // nhất. Thêm pt-6 (24px) để luôn đủ chỗ hiển thị trọn vẹn.
+      <div ref={wrapRef} className="relative min-w-0 pt-6">
         <ChartTooltip tip={tip} />
-        <div className="flex">
-          {/* Cột nhãn số tiền bên trái (trục tung), từ cao xuống thấp */}
+        <div className="flex min-w-0">
+          {/* Cột nhãn số tiền bên trái (trục tung) — cố định, không cuộn theo */}
           <div className="flex flex-col justify-between flex-shrink-0 pr-2" style={{ height: chartH, width: labelColW }}>
             {[...yTicks].reverse().map((v, i) => (
               <span key={i} className="text-[9px] text-steel dark:text-light-grey whitespace-nowrap leading-none">{formatMoneyCompact(v)}</span>
             ))}
           </div>
 
-          {/* Vùng vẽ: các cột chồng theo từng kỳ + 2 đường xu hướng (trục hoành = thời gian) */}
-          <div className="flex-1 min-w-0 relative" style={{ height: chartH, overflow: 'visible' }}>
-            {/* Lưới ngang mảnh theo mốc số tiền */}
-            <div className="absolute inset-0 flex flex-col justify-between pointer-events-none">
-              {yTicks.map((_, i) => (
-                <div key={i} className="border-t border-dashed border-steel/20 dark:border-light-grey/15 w-full" />
-              ))}
-            </div>
+          {/* Vùng cuộn ngang — chứa CẢ phần vẽ cột lẫn nhãn trục hoành bên dưới, để 2 phần
+              luôn khớp cột với nhau dù kéo cuộn tới đâu. Không hiện thanh cuộn (scrollbar-hide)
+              — vẫn kéo được bình thường bằng chuột/trackpad, chỉ là không có thanh mảnh hiện ra. */}
+          <div ref={dragRef} className="flex-1 min-w-0 overflow-x-auto scrollbar-hide cursor-grab">
+            <div style={{ width: plotWidth, minWidth: '100%' }}>
+              {/* Vùng vẽ: các cột chồng theo từng kỳ + 2 đường xu hướng (trục hoành = thời gian) */}
+              <div className="relative" style={{ height: chartH, overflow: 'visible' }}>
+                {/* Lưới ngang mảnh theo mốc số tiền */}
+                <div className="absolute inset-0 flex flex-col justify-between pointer-events-none">
+                  {yTicks.map((_, i) => (
+                    <div key={i} className="border-t border-dashed border-steel/20 dark:border-light-grey/15 w-full" />
+                  ))}
+                </div>
 
-            {/* Các cột chồng — mỗi cột là 1 kỳ thời gian, mỗi màu là 1 loại chi tiêu. Bo
-                góc đầu/cuối cột (không bo giữa các đoạn) + rê chuột vào 1 đoạn sẽ phóng to
-                nhẹ, sáng lên, các đoạn khác mờ đi để dễ phân biệt giữa nhiều thành phần. */}
-            <div className="absolute inset-0 flex items-end">
-              {buckets.map((b, bi) => {
-                const bucketTotal = bucketTotals[bi];
-                const visible = series.map((c, i) => ({ c, i, v: c.values[bi] })).filter((s) => s.v > 0);
-                return (
-                  <div key={bi} className="flex-1 h-full flex flex-col-reverse items-stretch px-1.5 box-border min-w-0 gap-[2px]">
-                    {visible.map((s, vi) => {
-                      const { c, i, v } = s;
-                      const h = yPct(v);
-                      const pct = bucketTotal > 0 ? Math.round((v / bucketTotal) * 100) : 0;
-                      const key = `${bi}:${c.id}`;
-                      const isHovered = hoverKey === key;
-                      const isDimmed = hoverKey !== null && !isHovered;
-                      const isBottom = vi === 0;
-                      const isTop = vi === visible.length - 1;
-                      return (
-                        <div
-                          key={c.id}
-                          className="w-full cursor-pointer"
-                          style={{
-                            height: `${h}%`,
-                            minHeight: v > 0 ? 3 : 0,
-                            background: palette[i % palette.length],
-                            borderTopLeftRadius: isTop ? 6 : 0,
-                            borderTopRightRadius: isTop ? 6 : 0,
-                            borderBottomLeftRadius: isBottom ? 6 : 0,
-                            borderBottomRightRadius: isBottom ? 6 : 0,
-                            opacity: isDimmed ? 0.35 : 1,
-                            transform: isHovered ? 'scaleX(1.15)' : 'scaleX(1)',
-                            transformOrigin: 'center',
-                            filter: isHovered ? 'brightness(1.12) saturate(1.15)' : 'none',
-                            boxShadow: isHovered ? '0 4px 14px rgba(0,0,0,0.2)' : 'none',
-                            position: 'relative',
-                            zIndex: isHovered ? 10 : 1,
-                            transition: 'opacity 0.18s ease, transform 0.18s ease, filter 0.18s ease, box-shadow 0.18s ease',
-                          }}
-                          onMouseMove={(e) => { setHoverKey(key); showTip(e, { label: `${c.name} (${b.label})`, value: formatMoney(v), pct }); }}
-                          onMouseLeave={() => { setHoverKey(null); hideTip(); }}
-                        />
-                      );
-                    })}
+                {/* Các cột chồng — mỗi cột là 1 kỳ thời gian, mỗi màu là 1 loại chi tiêu, bề
+                    rộng cố định (bucketWidth) + đệm ngang cho thon gọn. Bo góc đầu/cuối cột
+                    (không bo giữa các đoạn) + rê chuột vào 1 đoạn sẽ phóng to nhẹ, sáng lên,
+                    các đoạn khác mờ đi để dễ phân biệt giữa nhiều thành phần. */}
+                <div className="absolute inset-0 flex items-end">
+                  {buckets.map((b, bi) => {
+                    const bucketTotal = bucketTotals[bi];
+                    const visible = series.map((c, i) => ({ c, i, v: c.values[bi] })).filter((s) => s.v > 0);
+                    return (
+                      <div key={bi} className="h-full flex flex-col-reverse items-stretch px-2.5 box-border flex-shrink-0 gap-[2px]" style={{ width: bucketWidth }}>
+                        {visible.map((s, vi) => {
+                          const { c, i, v } = s;
+                          const h = yPct(v);
+                          const pct = bucketTotal > 0 ? Math.round((v / bucketTotal) * 100) : 0;
+                          const key = `${bi}:${c.id}`;
+                          const isHovered = hoverKey === key;
+                          const isDimmed = hoverKey !== null && !isHovered;
+                          const isBottom = vi === 0;
+                          const isTop = vi === visible.length - 1;
+                          return (
+                            <div
+                              key={c.id}
+                              className="w-full cursor-pointer"
+                              style={{
+                                height: `${h}%`,
+                                minHeight: v > 0 ? 3 : 0,
+                                background: palette[i % palette.length],
+                                borderTopLeftRadius: isTop ? 6 : 0,
+                                borderTopRightRadius: isTop ? 6 : 0,
+                                borderBottomLeftRadius: isBottom ? 6 : 0,
+                                borderBottomRightRadius: isBottom ? 6 : 0,
+                                opacity: isDimmed ? 0.35 : 1,
+                                transform: isHovered ? 'scaleX(1.15)' : 'scaleX(1)',
+                                transformOrigin: 'center',
+                                filter: isHovered ? 'brightness(1.12) saturate(1.15)' : 'none',
+                                boxShadow: isHovered ? '0 4px 14px rgba(0,0,0,0.2)' : 'none',
+                                position: 'relative',
+                                zIndex: isHovered ? 10 : 1,
+                                transition: 'opacity 0.18s ease, transform 0.18s ease, filter 0.18s ease, box-shadow 0.18s ease',
+                              }}
+                              onMouseMove={(e) => { setHoverKey(key); showTip(e, { label: `${c.name} (${b.label})`, value: formatMoney(v), pct }); }}
+                              onMouseLeave={() => { setHoverKey(null); hideTip(); }}
+                            />
+                          );
+                        })}
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* 2 đường xu hướng: liền = Tổng chi, nét đứt = Thu nhập. ViewBox tính bằng px
+                    (khớp bề rộng cuộn thực tế) thay vì % như trước, để đường luôn thẳng hàng
+                    với cột dù đang cuộn ngang, và zIndex cao hơn mọi đoạn cột (kể cả hover). */}
+                <svg
+                  width={plotWidth} height={chartH} viewBox={`0 0 ${plotWidth} ${chartH}`} preserveAspectRatio="none"
+                  className="absolute inset-0 pointer-events-none overflow-visible"
+                  style={{ zIndex: 15 }}
+                >
+                  <polyline points={incomeLinePoints} fill="none" stroke="currentColor" className="text-steel/50 dark:text-light-grey/50" strokeWidth="1.5" strokeDasharray="5 4" vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeLinejoin="round" />
+                  <polyline points={totalLinePoints} fill="none" stroke="#0DBACC" strokeWidth="2" vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+
+                {/* Chấm tròn + nhãn số tiền trên mỗi điểm "Tổng chi", rê vào xem số liệu. zIndex
+                    cao hơn cả đường xu hướng để nhãn KHÔNG BAO GIỜ bị đường/cột đè lên — đây là
+                    nguyên nhân khiến số tiền phía trên đỉnh cột trước đây thỉnh thoảng bị che. */}
+                {bucketTotals.map((v, bi) => (
+                  <div
+                    key={bi}
+                    className="absolute cursor-default"
+                    style={{ left: xCenter(bi), top: `${100 - yPct(v)}%`, transform: 'translate(-50%, -50%)', zIndex: 16 }}
+                    onMouseMove={(e) => showTip(e, { label: `Tổng chi (${buckets[bi].label})`, value: formatMoney(v) })}
+                    onMouseLeave={hideTip}
+                  >
+                    <span className="absolute left-1/2 -translate-x-1/2 bottom-[calc(100%+3px)] text-[10px] font-extrabold text-blueberry dark:text-white whitespace-nowrap">{v > 0 ? formatMoneyCompact(v) : ''}</span>
+                    <div className="w-2 h-2 rounded-full bg-turquoise border border-white dark:border-night-sky" />
                   </div>
-                );
-              })}
-            </div>
-
-            {/* 2 đường xu hướng: liền = Tổng chi, nét đứt = Thu nhập */}
-            <svg width="100%" height="100%" viewBox="0 0 100 100" preserveAspectRatio="none" className="absolute inset-0 pointer-events-none overflow-visible">
-              <polyline points={incomeLinePoints} fill="none" stroke="currentColor" className="text-steel/50 dark:text-light-grey/50" strokeWidth="1.5" strokeDasharray="5 4" vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeLinejoin="round" />
-              <polyline points={totalLinePoints} fill="none" stroke="#0DBACC" strokeWidth="2" vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-
-            {/* Chấm tròn + nhãn số tiền trên mỗi điểm "Tổng chi", giống ảnh mẫu, rê vào xem số liệu */}
-            {bucketTotals.map((v, bi) => (
-              <div
-                key={bi}
-                className="absolute cursor-default"
-                style={{ left: `${xCenter(bi)}%`, top: `${100 - yPct(v)}%`, transform: 'translate(-50%, -50%)' }}
-                onMouseMove={(e) => showTip(e, { label: `Tổng chi (${buckets[bi].label})`, value: formatMoney(v) })}
-                onMouseLeave={hideTip}
-              >
-                <span className="absolute left-1/2 -translate-x-1/2 bottom-[calc(100%+3px)] text-[10px] font-extrabold text-blueberry dark:text-white whitespace-nowrap">{v > 0 ? formatMoneyCompact(v) : ''}</span>
-                <div className="w-2 h-2 rounded-full bg-turquoise border border-white dark:border-night-sky" />
+                ))}
               </div>
-            ))}
-          </div>
-        </div>
 
-        {/* Trục hoành: nhãn thời gian theo từng cột (T5/2025, T6/2025... giống ảnh mẫu) */}
-        <div className="flex mt-2" style={{ paddingLeft: labelColW + 8 }}>
-          {buckets.map((b, bi) => (
-            <div key={bi} className="flex-1 text-center text-[10px] text-steel dark:text-light-grey whitespace-nowrap truncate px-0.5">{b.label}</div>
-          ))}
+              {/* Trục hoành: nhãn thời gian theo từng cột — nằm CÙNG vùng cuộn với phần vẽ cột
+                  ở trên nên luôn khớp vị trí, không bị lệch khi kéo cuộn. */}
+              <div className="flex mt-2">
+                {buckets.map((b, bi) => (
+                  <div key={bi} className="flex-shrink-0 text-center text-[10px] text-steel dark:text-light-grey whitespace-nowrap truncate px-0.5" style={{ width: bucketWidth }}>{b.label}</div>
+                ))}
+              </div>
+            </div>
+          </div>
         </div>
 
         <div className="flex items-center gap-4 mt-3 text-xs flex-wrap">
@@ -4304,9 +4642,14 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
   // (Tuần/Tháng/Năm) của widget lọc chung. Mỗi cột là SỐ DƯ LUỸ KẾ của Tiền ví và Tiền
   // quỹ TÍNH ĐẾN cuối mốc đó (snapshot tài sản tại thời điểm đó) — khác với thu/chi phát
   // sinh trong kỳ — để đúng nghĩa "biến động tài sản" theo thời gian.
-  const walletBalanceAt = (cutoff) => accounts.reduce((s, a) => s + accountBalanceAtDate(a, transactions, cutoff), 0);
-  const fundBalanceAtCutoff = (cutoff) => fundCategories.reduce((s, c) => s + fundBalanceAtDate(c, transactions, cutoff), 0);
-  const trendBuckets = (() => {
+  // FIX HIỆU NĂNG: đây là khối tính toán NẶNG nhất Trang chủ (lặp qua từng ví × từng
+  // quỹ × từng ngày trong kỳ). Trước đây KHÔNG bọc useMemo nên chạy lại từ đầu ở MỌI lần
+  // Trang chủ re-render (đổi theme, hover 1 thẻ bất kỳ...), khiến biểu đồ có cảm giác
+  // "load" lâu hơn hẳn các thẻ khác dù dữ liệu đã tải xong. Giờ chỉ tính lại khi 1 trong
+  // các giá trị phụ thuộc thực sự đổi.
+  const trendBuckets = useMemo(() => {
+    const walletBalanceAt = (cutoff) => accounts.reduce((s, a) => s + accountBalanceAtDate(a, transactions, cutoff), 0);
+    const fundBalanceAtCutoff = (cutoff) => fundCategories.reduce((s, c) => s + fundBalanceAtDate(c, transactions, cutoff), 0);
     if (globalPeriod === 'year') {
       return Array.from({ length: 12 }, (_, i) => {
         const cutoff = new Date(globalYear, i + 1, 0, 23, 59, 59, 999);
@@ -4316,7 +4659,7 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
     }
     if (globalPeriod === 'month') {
       return Array.from({ length: daysInMonth }, (_, i) => {
-        const d = last7Date(i);
+        const d = new Date(curPeriodStart); d.setDate(d.getDate() + i);
         const cutoff = new Date(d); cutoff.setHours(23, 59, 59, 999);
         const wallet = walletBalanceAt(cutoff), fund = fundBalanceAtCutoff(cutoff);
         return { label: String(d.getDate()), wallet, fund, total: wallet + fund };
@@ -4329,7 +4672,7 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
       const wallet = walletBalanceAt(b.end), fund = fundBalanceAtCutoff(b.end);
       return { label: b.label, wallet, fund, total: wallet + fund };
     });
-  })();
+  }, [globalPeriod, globalYear, daysInMonth, curPeriodStart, accounts, transactions, fundCategories, globalWeekStart, globalWeekEnd]);
   // maxTrend tính theo total (luôn là giá trị lớn nhất mỗi cột) để đủ chỗ cho cột "Tổng" mới
   const maxTrend = Math.max(...trendBuckets.map((b) => b.total), 1);
   const fmtDMY = (iso) => { const [y, m, d] = String(iso).split('-'); return `${d}/${m}`; };
@@ -4429,7 +4772,7 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
       const rangeEnd = new Date(globalFilter.weekEnd); rangeEnd.setHours(23, 59, 59, 999);
       list = transactions.filter((t) => { const d = new Date(t.date || t.created_at); return d >= rangeStart && d <= rangeEnd; });
     }
-    return [...list].sort((a, b) => new Date(b.date || b.created_at) - new Date(a.date || a.created_at)).slice(0, 5);
+    return [...list].sort((a, b) => compareTxTime(b, a)).slice(0, 5);
   })();
 
   const groupedRecentTx = groupTransactionsByDate(recentTxList);
@@ -4494,6 +4837,21 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
   );
 
   // Remove outer layout wrapper, just return the content
+  // FIX: trước đây Dashboard render NGAY cả khi dữ liệu (transactions/accounts/quỹ...)
+  // CHƯA tải xong (mảng rỗng mặc định) — trong khoảnh khắc đó, các biểu đồ tính toán
+  // trên dữ liệu rỗng (maxVal về mặc định 1, tổng = 0...) nên hiện ra bị "vỡ"/trông kỳ
+  // (cột gần như biến mất, đường xu hướng chạy sát đáy...), rồi mới "giật" về đúng khi
+  // dữ liệu thật load xong — đúng như cảm giác "có gì đó che/vỡ lúc mới load trang".
+  // Giờ chặn lại: đợi tải xong dữ liệu mới vẽ toàn bộ Trang chủ, tránh hiện trạng thái
+  // vỡ/trung gian đó.
+  if (loading && !initialLoadDone) {
+    return (
+      <div className="flex items-center justify-center min-h-[70vh]">
+        <Loader2 size={28} className="animate-spin text-turquoise" />
+      </div>
+    );
+  }
+
   return (
     <>
       {/* Mobile version */}
@@ -4660,7 +5018,7 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
                           const isDirectSet = tx.type === 'adjustment' && (tx.note || '').startsWith('[SET]');
                           const isPositive = tx.type === 'income' || (tx.type === 'adjustment' && Number(tx.amount) > 0);
                           const label = tx.type === 'adjustment' ? 'Cập nhật số dư ví' : (cat?.name || (tx.type === 'income' ? 'Thu nhập' : 'Chi tiêu'));
-                          const balanceAfter = isDirectSet ? accountBalanceAtDate(accounts.find((a) => a.id === tx.account_id), transactions, new Date(tx.date || tx.created_at)) : null;
+                          const balanceAfter = isDirectSet ? accountBalanceAtDate(accounts.find((a) => a.id === tx.account_id), transactions, new Date(tx.date || tx.created_at), tx) : null;
                           const noteText = isDirectSet ? `Số dư mới: ${formatMoney(balanceAfter)}` : (stripPeriodTag(tx.note) || new Date(tx.created_at || tx.date).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }));
                           return (
                             <div key={tx.id} onClick={() => setEditingTx(tx)} className="flex items-center gap-3 py-3 first:pt-0 last:pb-0 cursor-pointer hover:bg-ice-cream dark:hover:bg-night-sky/30 rounded-xl -mx-2 px-2 transition">
@@ -4886,7 +5244,7 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
                             const isDirectSet = tx.type === 'adjustment' && (tx.note || '').startsWith('[SET]');
                             const isPositive = tx.type === 'income' || (tx.type === 'adjustment' && Number(tx.amount) > 0);
                             const label = tx.type === 'adjustment' ? 'Cập nhật số dư ví' : (cat?.name || (tx.type === 'income' ? 'Thu nhập' : 'Chi tiêu'));
-                            const balanceAfter = isDirectSet ? accountBalanceAtDate(accounts.find((a) => a.id === tx.account_id), transactions, new Date(tx.date || tx.created_at)) : null;
+                            const balanceAfter = isDirectSet ? accountBalanceAtDate(accounts.find((a) => a.id === tx.account_id), transactions, new Date(tx.date || tx.created_at), tx) : null;
                             const timeOrNote = isDirectSet ? `Số dư mới: ${formatMoney(balanceAfter)}` : new Date(tx.created_at || tx.date).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
                             return (
                               <div key={tx.id} onClick={() => setEditingTx(tx)} className="flex items-center gap-3 py-2.5 first:pt-0 last:pb-0 cursor-pointer hover:bg-ice-cream dark:hover:bg-night-sky/30 rounded-xl -mx-2 px-2 transition">
@@ -5471,7 +5829,7 @@ function FundDetail({ category, transactions, categories, accounts, onBack, relo
   // Lấy tất cả giao dịch nạp/rút, sắp xếp theo thời gian tăng dần
   const allHistory = transactions
     .filter((t) => t.category_id === category.id && (t.type === 'allocation' || t.type === 'expense'))
-    .sort((a, b) => new Date(a.date || a.created_at) - new Date(b.date || b.created_at));
+    .sort((a, b) => compareTxTime(a, b));
 
   // FIX: xác định "khoản nạp ban đầu" qua cờ is_initial, không suy luận theo ngày sớm nhất
   const firstAllocation = findInitialAllocation(transactions, category.id);
@@ -5492,7 +5850,7 @@ function FundDetail({ category, transactions, categories, accounts, onBack, relo
     // hàm fundBalanceAtDate() đã có sẵn trong app (đúng logic cộng dồn lãi suất, đang được
     // dùng ở sổ giao dịch/ledger) — trước đây chỉ dòng "Lợi nhuận" mới có balanceAfter nên
     // các dòng Nạp/Rút quỹ không hiện dòng "Số dư: ..." như thiết kế.
-    ...allHistory.map(tx => ({ ...tx, type: tx.type, isProfit: false, balanceAfter: fundBalanceAtDate(category, transactions, historyItemDate(tx)) })),
+    ...allHistory.map(tx => ({ ...tx, type: tx.type, isProfit: false, balanceAfter: fundBalanceAtDate(category, transactions, historyItemDate(tx), tx) })),
     ...dailyProfitHistory.filter(d => d.profit > 0).map(d => {
       // Những ngày lợi nhuận trước "kỳ đầu tiên" đều dồn hiển thị vào đúng firstCreditDate;
       // từ firstCreditDate trở đi, lợi nhuận ngày D hiển thị vào ngày D+1 như bình thường
@@ -5524,7 +5882,12 @@ function FundDetail({ category, transactions, categories, accounts, onBack, relo
     // Sắp theo đúng NGÀY nghiệp vụ (từ "date", không phải created_at — created_at có thể
     // khác ngày nghiệp vụ nếu nhập bù/chỉnh sửa sau), nhưng vẫn ưu tiên GIỜ từ created_at
     // để các dòng cùng ngày sắp đúng theo giờ người dùng đã chọn (xem historyItemDate).
-    return historyItemDate(a) - historyItemDate(b);
+    // FIX: nếu historyItemDate() ra bằng nhau tuyệt đối (2 giao dịch trùng cả ngày lẫn
+    // giờ:phút:giây trong created_at), phá tie cuối cùng bằng "seq" (bigserial ở DB, không
+    // bao giờ trùng) để thứ tự luôn nhất quán, không phụ thuộc thứ tự ngẫu nhiên DB trả về.
+    const diff = historyItemDate(a) - historyItemDate(b);
+    if (diff !== 0) return diff;
+    return (a.seq || 0) - (b.seq || 0);
   });
 
   // Lọc theo filter
@@ -6085,7 +6448,7 @@ function AccountDetail({ account, transactions, categories, accounts, onBack, re
 
   const history = transactions
     .filter((t) => t.account_id === account.id && (t.type === 'income' || t.type === 'expense' || t.type === 'adjustment' || t.type === 'allocation'))
-    .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    .sort((a, b) => compareTxTime(b, a));
   const balance = accountBalance(account, transactions);
   const typeLabel = ACCOUNT_TYPES.find((t) => t.value === account.type)?.label || account.type;
 
@@ -6146,7 +6509,7 @@ function AccountDetail({ account, transactions, categories, accounts, onBack, re
                 const isOverLimit = (tx.note || '').includes('[Vượt hạn mức]');
                 // [SET] Đặt số dư mới: thay chữ tĩnh "Đặt số dư mới" bằng số dư thực tế đã
                 // đặt, và hiện thêm "Số dư cuối" cạnh chênh lệch (+/-) để rõ ràng hơn.
-                const balanceAfter = isDirectSet ? accountBalanceAtDate(account, transactions, new Date(tx.date || tx.created_at)) : null;
+                const balanceAfter = isDirectSet ? accountBalanceAtDate(account, transactions, new Date(tx.date || tx.created_at), tx) : null;
                 const subtitleNote = isDirectSet ? `Số dư mới: ${formatMoney(balanceAfter)}` : displayNote;
                 return (
                   <div key={tx.id} className="flex items-center gap-3 py-3">
@@ -6216,7 +6579,7 @@ function AccountDetail({ account, transactions, categories, accounts, onBack, re
                     const isOverLimit = (tx.note || '').includes('[Vượt hạn mức]');
                     // [SET] Đặt số dư mới: thay chữ tĩnh "Đặt số dư mới" bằng số dư thực tế đã
                     // đặt, và hiện thêm "Số dư cuối" cạnh chênh lệch (+/-) để rõ ràng hơn.
-                    const balanceAfter = isDirectSet ? accountBalanceAtDate(account, transactions, new Date(tx.date || tx.created_at)) : null;
+                    const balanceAfter = isDirectSet ? accountBalanceAtDate(account, transactions, new Date(tx.date || tx.created_at), tx) : null;
                     const subtitleNote = isDirectSet ? `Số dư mới: ${formatMoney(balanceAfter)}` : displayNote;
                     return (
                       <div key={tx.id} className="flex items-center gap-3 py-3">
@@ -7199,9 +7562,12 @@ function CategorySection({ categories, reload, softDelete, spendingPoolByPeriod,
 
   return (
     <>
+      {/* FIX: cùng lỗi active-state mờ + thiếu icon như các tab loại giao dịch khác trong
+          app — thêm ring + font-extrabold rõ hơn cho tab đang chọn, và bổ sung icon
+          TrendingDown/TrendingUp để đồng bộ với các nơi khác. */}
       <div className="flex bg-ice-cream dark:bg-night-sky rounded-full p-1 mb-4">
-        <button onClick={() => setTab('expense')} className={`flex-1 py-2 rounded-full text-sm font-bold ${tab === 'expense' ? 'bg-white dark:bg-[#2a2a44] text-turquoise shadow' : 'text-steel dark:text-light-grey'}`}>Chi tiêu</button>
-        <button onClick={() => setTab('income')} className={`flex-1 py-2 rounded-full text-sm font-bold ${tab === 'income' ? 'bg-white dark:bg-[#2a2a44] text-turquoise shadow' : 'text-steel dark:text-light-grey'}`}>Thu nhập</button>
+        <button onClick={() => setTab('expense')} className={`flex-1 py-2 rounded-full text-sm font-bold transition flex items-center justify-center gap-1.5 ${tab === 'expense' ? 'bg-white dark:bg-[#2a2a44] text-turquoise shadow-md shadow-turquoise/15 ring-1 ring-turquoise/30' : 'text-steel dark:text-light-grey font-semibold'}`}><TrendingDown size={15} className="flex-shrink-0" /> Chi tiêu</button>
+        <button onClick={() => setTab('income')} className={`flex-1 py-2 rounded-full text-sm font-bold transition flex items-center justify-center gap-1.5 ${tab === 'income' ? 'bg-white dark:bg-[#2a2a44] text-turquoise shadow-md shadow-turquoise/15 ring-1 ring-turquoise/30' : 'text-steel dark:text-light-grey font-semibold'}`}><TrendingUp size={15} className="flex-shrink-0" /> Thu nhập</button>
       </div>
 
       {tab === 'income' && (
@@ -7443,6 +7809,9 @@ function HoverDetailCard({ className, children, detail, align = 'left' }) {
         // bằng inline style để không bao giờ lặp lại lỗi này dù thứ tự CSS có đổi.
         className={`${align === 'right' ? 'right-0' : 'left-0'} top-[calc(100%+8px)] z-40 w-72 max-w-[85vw] bg-white/85 dark:bg-[#1e1e32]/75 backdrop-blur-xl backdrop-saturate-150 border-0 dark:border dark:border-[rgba(189,189,203,0.1)] rounded-2xl shadow-card p-4 max-h-72 overflow-y-auto overflow-x-hidden scrollbar-hide transition-all duration-150 origin-top isolate ${open ? 'opacity-100 scale-100 translate-y-0 pointer-events-auto' : 'opacity-0 scale-95 -translate-y-1 pointer-events-none'}`}
       >
+        {/* Mũi tên nhỏ (caret) nối popup với vị trí đã bấm/rê, để thẻ trông "gắn liền"
+            với trigger thay vì như đang trôi lệch qua 1 bên không rõ gốc từ đâu. */}
+        <div className={`pointer-events-none absolute -top-1.5 ${align === 'right' ? 'right-6' : 'left-6'} w-3 h-3 rotate-45 bg-white/85 dark:bg-[#1e1e32] border-0 dark:border dark:border-[rgba(189,189,203,0.1)]`} />
         <div className="pointer-events-none absolute -top-8 -left-8 w-24 h-24 rounded-full bg-turquoise/20 blur-2xl -z-10" />
         <div className="pointer-events-none absolute -bottom-8 -right-8 w-24 h-24 rounded-full bg-lavender/20 blur-2xl -z-10" />
         <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/80 dark:via-white/25 to-transparent -z-10" />
@@ -7522,11 +7891,7 @@ function poolBalanceAfterTx(tx, allTx, categories, spendingPoolByPeriod) {
       if (t.type === 'expense') { const c = catById.get(t.category_id); return !(c && c.is_fund) && t.account_id === null; }
       return false;
     })
-    .sort((a, b) => {
-      const da = new Date(a.date || a.created_at), db = new Date(b.date || b.created_at);
-      if (da - db !== 0) return da - db;
-      return new Date(a.created_at || a.date) - new Date(b.created_at || b.date);
-    });
+    .sort(compareTxTime);
   let cumulative = 0;
   for (const t of poolTxs) {
     cumulative += Number(t.amount);
@@ -7535,21 +7900,15 @@ function poolBalanceAfterTx(tx, allTx, categories, spendingPoolByPeriod) {
   return financials.spendingPool - cumulative;
 }
 
-// Với 1 khoản THU NHẬP được tính vào Thu nhập được chi (include_in_spending_pool !== false),
-// "số dư nguồn sau GD" thể hiện tổng đã cộng dồn vào Thu nhập được chi của kỳ tính đến
-// đúng giao dịch này (theo thứ tự thời gian) — giúp thấy Thu nhập được chi đang được
-// "lấp đầy" tới đâu qua từng khoản thu.
-function poolIncomeCumulativeAfterTx(tx, allTx, categories) {
+// Với 1 khoản THU NHẬP, "số dư nguồn sau GD" thể hiện TỔNG THU NHẬP đã cộng dồn trong kỳ
+// tính đến đúng giao dịch này (theo thứ tự thời gian) — cộng TẤT CẢ khoản thu trong kỳ,
+// không chỉ riêng phần được tính vào "Thu nhập được chi" (vd: Thu nhập đặc biệt vẫn được
+// cộng vào đây, dù không cộng vào pool chi tiêu).
+function totalIncomeCumulativeAfterTx(tx, allTx) {
   const periodKey = transactionPeriodKey(tx);
-  const catById = new Map(categories.map((c) => [c.id, c]));
   const incomeTxs = allTx
     .filter((t) => transactionPeriodKey(t) === periodKey && t.type === 'income')
-    .filter((t) => { const c = catById.get(t.category_id); return c ? c.include_in_spending_pool !== false : true; })
-    .sort((a, b) => {
-      const da = new Date(a.date || a.created_at), db = new Date(b.date || b.created_at);
-      if (da - db !== 0) return da - db;
-      return new Date(a.created_at || a.date) - new Date(b.created_at || b.date);
-    });
+    .sort(compareTxTime);
   let cumulative = 0;
   for (const t of incomeTxs) {
     cumulative += Number(t.amount);
@@ -7569,17 +7928,17 @@ function TxLedgerRow({ tx, categories, accounts, allTx, spendingPoolByPeriod, on
   let balanceAfter = null;
   if (source.key.startsWith('fund:')) {
     const cat = categories.find((c) => c.id === tx.category_id);
-    balanceAfter = fundBalanceAtDate(cat, allTx, txDate);
+    balanceAfter = fundBalanceAtDate(cat, allTx, txDate, tx);
   } else if (source.key.startsWith('account:')) {
     const account = accounts.find((a) => a.id === tx.account_id);
-    balanceAfter = accountBalanceAtDate(account, allTx, txDate);
+    balanceAfter = accountBalanceAtDate(account, allTx, txDate, tx);
   } else if (source.key === 'pool') {
     // "Thu nhập được chi" (pool): với khoản CHI/nạp quỹ trừ vào pool, hiện số dư còn lại
     // sau giao dịch; với khoản THU NHẬP cộng vào pool, hiện tổng đã cộng dồn tính đến
     // giao dịch này (không có "số dư sau khi trừ" vì đây là chiều cộng vào, không phải trừ ra).
     const isPoolDeduction = (tx.type === 'expense') || (tx.type === 'allocation' && !isInitialAllocationTx(tx));
     if (isPoolDeduction) balanceAfter = poolBalanceAfterTx(tx, allTx, categories, spendingPoolByPeriod);
-    else if (tx.type === 'income') balanceAfter = poolIncomeCumulativeAfterTx(tx, allTx, categories);
+    else if (tx.type === 'income') balanceAfter = totalIncomeCumulativeAfterTx(tx, allTx);
   }
   // source.key === 'special-income' (Thu nhập đặc biệt): không có số dư nguồn liên quan, giữ '—'.
 
@@ -7625,7 +7984,7 @@ function TxLedgerModal({ title, txs, categories, accounts, allTx, spendingPoolBy
     if (sourceFilter !== 'all' && txSourceInfo(t, categories, accounts).key !== sourceFilter) return false;
     return true;
   });
-  const sorted = [...filtered].sort((a, b) => new Date(b.date || b.created_at) - new Date(a.date || a.created_at));
+  const sorted = [...filtered].sort((a, b) => compareTxTime(b, a));
   const total = sorted.reduce((s, t) => s + Number(t.amount), 0);
   const hasActiveFilter = dateFrom || dateTo || sourceFilter !== 'all';
 
@@ -7830,7 +8189,9 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
   const [editingTx, setEditingTx] = useState(null);
   // Bộ lọc "Hoạt động gần đây": lọc theo Loại giao dịch trước (Thu nhập / Chi tiêu /
   // Nạp quỹ / Rút quỹ / Chuyển khoản...), sau đó lọc thêm theo Danh mục cụ thể bên trong loại đó.
-  const [activityKindFilter, setActivityKindFilter] = useState('all');
+  // FIX: đổi từ string đơn sang mảng để cho phép chọn NHIỀU loại cùng lúc (vd Chi tiêu + Nạp
+  // quỹ). Mảng rỗng = "Tất cả loại" (giữ đúng hành vi mặc định như trước).
+  const [activityKindFilters, setActivityKindFilters] = useState([]);
   const [activityCategoryFilter, setActivityCategoryFilter] = useState('all');
 
   // Neo vị trí card "Hoạt động gần đây" khi đổi filter, tránh giật layout.
@@ -7861,7 +8222,7 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
       if (delta) findScrollableAncestor(el).scrollBy(0, delta);
     }
     activityScrollAnchorRef.current = null;
-  }, [activityKindFilter, activityCategoryFilter]);
+  }, [activityKindFilters, activityCategoryFilter]);
 
   async function handleDeleteTx(tx) {
     if (!confirm('Xóa giao dịch này? Bạn có thể khôi phục trong 30 ngày ở mục Lịch sử.')) return;
@@ -7987,7 +8348,7 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
     }
     return { label: 'Thu nhập kỳ' };
   }
-  const allPeriodTxsSorted = [...periodTxs].sort((a, b) => new Date(b.date || b.created_at) - new Date(a.date || a.created_at));
+  const allPeriodTxsSorted = [...periodTxs].sort((a, b) => compareTxTime(b, a));
   function groupTxsByDate(txs) {
     const groups = {};
     txs.forEach((tx) => {
@@ -8004,6 +8365,19 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
     if (date.toDateString() === today.toDateString()) return 'Hôm nay';
     if (date.toDateString() === yesterday.toDateString()) return 'Hôm qua';
     return date.toLocaleDateString('vi-VN', { weekday: 'long', day: 'numeric', month: 'short', year: 'numeric' });
+  }
+  // Nhãn "Tháng .../Năm ..." dùng làm dòng ngăn cách giữa các tháng trong danh sách
+  // "Hoạt động gần đây" — giúp dễ nhận biết ranh giới tháng khi danh sách kéo dài nhiều tháng.
+  function formatTxMonthLabel(dateStr) {
+    const date = new Date(dateStr);
+    return `Tháng ${date.getMonth() + 1}/${date.getFullYear()}`;
+  }
+  // So 2 key ngày (toDateString) có cùng tháng+năm hay không — dùng để quyết định có
+  // chèn dòng ngăn cách tháng phía trên nhóm ngày đang xét hay không.
+  function isSameTxMonth(keyA, keyB) {
+    if (!keyA || !keyB) return false;
+    const a = new Date(keyA), b = new Date(keyB);
+    return a.getMonth() === b.getMonth() && a.getFullYear() === b.getFullYear();
   }
   // (đã thay bằng groupedFilteredTxs/sortedFilteredTxKeys bên dưới, có áp thêm bộ lọc)
 
@@ -8029,20 +8403,21 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
   // Chỉ liệt kê những Loại thực sự có giao dịch trong kỳ đang xem, theo đúng thứ tự cố định.
   const activityKindsPresent = ['income', 'expense', 'fund_withdraw', 'allocation', 'transfer', 'adjustment']
     .filter((k) => allPeriodTxsSorted.some((tx) => getTxKind(tx) === k));
-  // Danh mục cụ thể bên trong Loại đang chọn (rỗng với Chuyển khoản / Cập nhật số dư — không có danh mục).
-  const activityCategoryOptions = activityKindFilter === 'all' ? [] : (() => {
+  // Danh mục cụ thể bên trong (các) Loại đang chọn (rỗng khi chọn "Tất cả loại", hoặc khi
+  // (các) loại đang chọn không có danh mục như Chuyển khoản / Cập nhật số dư).
+  const activityCategoryOptions = activityKindFilters.length === 0 ? [] : (() => {
     const seen = new Map();
     allPeriodTxsSorted
-      .filter((tx) => getTxKind(tx) === activityKindFilter && tx.category_id)
+      .filter((tx) => activityKindFilters.includes(getTxKind(tx)) && tx.category_id)
       .forEach((tx) => {
         const cat = categories.find((c) => c.id === tx.category_id);
         if (cat && !seen.has(cat.id)) seen.set(cat.id, cat);
       });
     return Array.from(seen.values());
   })();
-  function handleActivityKindChange(nextKind) {
+  function handleActivityKindChange(nextKinds) {
     captureActivityScrollAnchor();
-    setActivityKindFilter(nextKind);
+    setActivityKindFilters(nextKinds);
     setActivityCategoryFilter('all');
   }
   function handleActivityCategoryChange(nextCat) {
@@ -8050,7 +8425,7 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
     setActivityCategoryFilter(nextCat);
   }
   const filteredActivityTxs = allPeriodTxsSorted.filter((tx) => {
-    if (activityKindFilter !== 'all' && getTxKind(tx) !== activityKindFilter) return false;
+    if (activityKindFilters.length > 0 && !activityKindFilters.includes(getTxKind(tx))) return false;
     if (activityCategoryFilter !== 'all' && tx.category_id !== activityCategoryFilter) return false;
     return true;
   });
@@ -8061,16 +8436,13 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
   function ActivityFilterBar({ compact = false }) {
     return (
       <div className={`flex items-center gap-2 flex-wrap ${compact ? '' : 'mb-4'}`}>
-        <CustomSelect
-          value={activityKindFilter}
-          onChange={(e) => handleActivityKindChange(e.target.value)}
+        <MultiSelectFilter
+          label="Tất cả loại"
+          options={activityKindsPresent.map((k) => ({ value: k, label: ACTIVITY_KIND_LABELS[k] }))}
+          selected={activityKindFilters}
+          onChange={handleActivityKindChange}
           triggerClassName={`frost-inset rounded-full font-bold outline-none text-blueberry dark:text-white ${compact ? 'text-xs px-3 py-1.5' : 'text-sm px-4 py-2'}`}
-        >
-          <option value="all">Tất cả loại</option>
-          {activityKindsPresent.map((k) => (
-            <option key={k} value={k}>{ACTIVITY_KIND_LABELS[k]}</option>
-          ))}
-        </CustomSelect>
+        />
         {activityCategoryOptions.length > 0 && (
           <CustomSelect
             value={activityCategoryFilter}
@@ -8097,14 +8469,14 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
     const sourceKeyInfo = txSourceInfo(tx, categories, accounts);
     let balanceAfter = null;
     if (sourceKeyInfo.key.startsWith('fund:')) {
-      balanceAfter = fundBalanceAtDate(cat, transactions, txDate);
+      balanceAfter = fundBalanceAtDate(cat, transactions, txDate, tx);
     } else if (sourceKeyInfo.key.startsWith('account:')) {
       const account = accounts.find((a) => a.id === tx.account_id);
-      balanceAfter = accountBalanceAtDate(account, transactions, txDate);
+      balanceAfter = accountBalanceAtDate(account, transactions, txDate, tx);
     } else if (sourceKeyInfo.key === 'pool') {
       const isPoolDeduction = (tx.type === 'expense') || (tx.type === 'allocation' && !isInitialAllocationTx(tx));
       if (isPoolDeduction) balanceAfter = poolBalanceAfterTx(tx, transactions, categories, spendingPoolByPeriod);
-      else if (tx.type === 'income') balanceAfter = poolIncomeCumulativeAfterTx(tx, transactions, categories);
+      else if (tx.type === 'income') balanceAfter = totalIncomeCumulativeAfterTx(tx, transactions);
     }
     // [SET] Đặt số dư mới: ghi chú hiển thị con số thực tế "Số dư mới" thay vì
     // chữ tĩnh "Đặt số dư mới" chung chung, để người dùng biết ngay giá trị đã đặt.
@@ -8269,6 +8641,17 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
     const progress = target > 0 ? Math.min(100, (balanceNow / target) * 100) : 0;
     return { ...c, balanceNow, contributed, withdrawn, target, progress };
   }).filter(f => f.contributed > 0 || f.withdrawn > 0 || f.balanceNow > 0).sort((a,b) => b.contributed - a.contributed);
+  // FIX "% sau mỗi dòng quỹ lên tới vài trăm %": % này trước đây lấy contributed (nạp quỹ
+  // CỦA RIÊNG quỹ đó trong kỳ, tính TẤT CẢ nguồn — kể cả nạp lần đầu và nạp thẳng từ ví)
+  // chia cho `allocation` = financials.allocationFromSpendingPool, vốn là một con số KHÁC
+  // hẳn về bản chất: chỉ tính phần nạp quỹ lấy từ "Thu nhập được chi" của kỳ, và CỐ Ý loại
+  // trừ khoản nạp lần đầu lẫn khoản nạp thẳng từ ví/tài khoản (xem định nghĩa ở
+  // calculatePeriodFinancials). Vì 2 con số đo 2 phạm vi khác nhau (không phải tử số luôn
+  // là 1 phần của mẫu số), tỉ lệ này hoàn toàn có thể vượt 100%, thậm chí vài trăm % —
+  // không phải lỗi hiển thị nhỏ mà là sai bản chất phép tính. Đổi mẫu số thành tổng
+  // "contributed" của TẤT CẢ quỹ trong kỳ — đúng ý nghĩa "quỹ này chiếm bao nhiêu % trong
+  // tổng tiền đã nạp vào mọi quỹ kỳ này", luôn ở khoảng 0-100% và cộng dồn lại ra đúng 100%.
+  const totalContributedAllFunds = fundData.reduce((s, f) => s + f.contributed, 0);
 
   // Trends: if year, show 12 tháng (kỳ tài chính); if quarter/6month, show các tháng trong đó.
   // Luôn tính theo financial period (21 → 20), không dùng tháng lịch.
@@ -8382,7 +8765,7 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
   function openDrilldown(categoryId, txType = 'expense') {
     const cat = categories.find(c => c.id === categoryId);
     const txs = periodTxs.filter(t => t.category_id === categoryId && t.type === txType)
-      .sort((a,b) => new Date(b.date || b.created_at) - new Date(a.date || a.created_at));
+      .sort((a,b) => compareTxTime(b, a));
     setDrilldownCategory(cat);
     setDrilldownTransactions(txs);
     setShowDrilldown(true);
@@ -8580,13 +8963,21 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
               </p>
             ) : (
               <div className="flex flex-col gap-3">
-                {sortedFilteredTxKeys.map((key) => (
-                  <div key={key}>
-                    <p className="text-xs font-bold text-steel dark:text-light-grey mb-1">{formatTxDateLabel(key)}</p>
-                    <div className="flex flex-col divide-y divide-[rgba(189,189,203,0.2)] dark:divide-[rgba(189,189,203,0.1)]">
-                      {groupedFilteredTxs[key].map((tx) => <TxDetailRow key={tx.id} tx={tx} />)}
+                {sortedFilteredTxKeys.map((key, i) => (
+                  <Fragment key={key}>
+                    {!isSameTxMonth(key, sortedFilteredTxKeys[i - 1]) && (
+                      <div className="flex items-center gap-2 mt-1 first:mt-0">
+                        <span className="text-[11px] font-extrabold uppercase tracking-wide text-turquoise whitespace-nowrap">{formatTxMonthLabel(key)}</span>
+                        <div className="flex-1 h-px bg-[rgba(189,189,203,0.25)]" />
+                      </div>
+                    )}
+                    <div>
+                      <p className="text-xs font-bold text-steel dark:text-light-grey mb-1">{formatTxDateLabel(key)}</p>
+                      <div className="flex flex-col divide-y divide-[rgba(189,189,203,0.2)] dark:divide-[rgba(189,189,203,0.1)]">
+                        {groupedFilteredTxs[key].map((tx) => <TxDetailRow key={tx.id} tx={tx} />)}
+                      </div>
                     </div>
-                  </div>
+                  </Fragment>
                 ))}
               </div>
             )}
@@ -8760,18 +9151,51 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
           </div>
         </div>
 
- <div className="frost-card rounded-3xl p-6 mb-6">
-          <h2 className="text-blueberry dark:text-white font-extrabold text-lg mb-4">Thu nhập theo danh mục</h2>
-          {incomeBreakdown.length === 0 ? <p className="text-steel dark:text-light-grey">Không có thu nhập.</p> : (
-            <div className="grid grid-cols-2 gap-2">
-              {incomeBreakdown.map(c => (
-                <button key={c.id} onClick={() => openDrilldown(c.id, 'income')} className="flex justify-between frost-inset rounded-xl px-4 py-2 text-left hover:bg-turquoise/10 transition">
-                  <span>{c.icon} {c.name}</span>
-                  <span className="font-bold text-turquoise">{formatMoney(c.amount)}</span>
-                </button>
-              ))}
-            </div>
-          )}
+ {/* Thu nhập theo danh mục & Chi tiêu theo danh mục — đặt ngang hàng nhau (grid 2 cột
+            trên desktop, xếp dọc trên màn hẹp) thay vì tách rời như trước. */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+          <div className="frost-card rounded-3xl p-6 min-w-0">
+            <h2 className="text-blueberry dark:text-white font-extrabold text-lg mb-4">Thu nhập theo danh mục</h2>
+            {incomeBreakdown.length === 0 ? <p className="text-steel dark:text-light-grey">Không có thu nhập.</p> : (
+              <div className="grid grid-cols-2 gap-2">
+                {incomeBreakdown.map(c => (
+                  <button key={c.id} onClick={() => openDrilldown(c.id, 'income')} className="flex justify-between frost-inset rounded-xl px-4 py-2 text-left hover:bg-turquoise/10 transition">
+                    <span>{c.icon} {c.name}</span>
+                    <span className="font-bold text-turquoise">{formatMoney(c.amount)}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="frost-card rounded-3xl p-6 min-w-0">
+            <h2 className="text-blueberry dark:text-white font-extrabold text-lg mb-4">Chi tiêu theo danh mục</h2>
+            {expenseBreakdown.length === 0 ? <p className="text-steel dark:text-light-grey">Không có chi tiêu.</p> : (
+              <div className="grid grid-cols-1 gap-3">
+                {expenseBreakdown.map(c => {
+                  const total = c.fromIncome + c.fromWallet;
+                  const nonFundTotal = expenseFromIncome + agg.expenseFromWallet;
+                  const pct = nonFundTotal > 0 ? Math.round((total / nonFundTotal) * 100) : 0;
+                  return (
+                    <button key={c.id} onClick={() => openDrilldown(c.id)} className="frost-inset rounded-xl px-4 py-3 text-left hover:bg-turquoise/10 transition">
+                      <div className="flex justify-between items-center">
+                        <span className="font-bold text-blueberry dark:text-white">{c.icon} {c.name}</span>
+                        <span className="font-bold text-cotton-candy">{formatMoney(total)}</span>
+                      </div>
+                      <div className="w-full h-1.5 bg-light-grey/30 rounded-full mt-1">
+                        <div className="h-full bg-cotton-candy rounded-full" style={{ width: `${Math.min(pct, 100)}%` }} />
+                      </div>
+                      <div className="flex justify-between text-xs text-steel dark:text-light-grey mt-1">
+                        <span>{pct}%</span>
+                        <span>{c.fromIncome > 0 ? `Từ thu nhập: ${formatMoney(c.fromIncome)}` : ''}</span>
+                        <span>{c.fromWallet > 0 ? `Từ ví: ${formatMoney(c.fromWallet)}` : ''}</span>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </div>
 
  <div className="frost-card rounded-3xl p-6 mb-6">
@@ -8783,7 +9207,7 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
                   <button key={f.id} onClick={() => openFund(f.id, 'report')} className="w-full flex items-center justify-between border-b last:border-0 py-2 text-left hover:bg-turquoise/5 transition rounded-lg px-1">
                     <div><p className="font-bold text-blueberry dark:text-white">{f.icon} {f.name}</p><p className="text-xs text-steel dark:text-light-grey">Số dư hiện tại: {formatMoney(f.balanceNow)}</p></div>
                     <div className="text-right">
-                      {f.contributed > 0 && <p className="text-sm text-turquoise">+{formatMoney(f.contributed)} {allocation > 0 && <span className="text-xs font-semibold">({Math.round((f.contributed/allocation)*100)}%)</span>}</p>}
+                      {f.contributed > 0 && <p className="text-sm text-turquoise">+{formatMoney(f.contributed)} {totalContributedAllFunds > 0 && <span className="text-xs font-semibold">({Math.round((f.contributed/totalContributedAllFunds)*100)}%)</span>}</p>}
                       {f.withdrawn > 0 && <p className="text-sm text-cotton-candy">-{formatMoney(f.withdrawn)}</p>}
                       {f.target > 0 && <p className="text-xs text-steel dark:text-light-grey">{Math.round(f.progress)}% mục tiêu</p>}
                     </div>
@@ -8796,35 +9220,6 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
                 )}
               </div>
             </>
-          )}
-        </div>
-
- <div className="frost-card rounded-3xl p-6 mb-6">
-          <h2 className="text-blueberry dark:text-white font-extrabold text-lg mb-4">Chi tiêu theo danh mục</h2>
-          {expenseBreakdown.length === 0 ? <p className="text-steel dark:text-light-grey">Không có chi tiêu.</p> : (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {expenseBreakdown.map(c => {
-                const total = c.fromIncome + c.fromWallet;
-                const nonFundTotal = expenseFromIncome + agg.expenseFromWallet;
-                const pct = nonFundTotal > 0 ? Math.round((total / nonFundTotal) * 100) : 0;
-                return (
-                  <button key={c.id} onClick={() => openDrilldown(c.id)} className="frost-inset rounded-xl px-4 py-3 text-left hover:bg-turquoise/10 transition">
-                    <div className="flex justify-between items-center">
-                      <span className="font-bold text-blueberry dark:text-white">{c.icon} {c.name}</span>
-                      <span className="font-bold text-cotton-candy">{formatMoney(total)}</span>
-                    </div>
-                    <div className="w-full h-1.5 bg-light-grey/30 rounded-full mt-1">
-                      <div className="h-full bg-cotton-candy rounded-full" style={{ width: `${Math.min(pct, 100)}%` }} />
-                    </div>
-                    <div className="flex justify-between text-xs text-steel dark:text-light-grey mt-1">
-                      <span>{pct}%</span>
-                      <span>{c.fromIncome > 0 ? `Từ thu nhập: ${formatMoney(c.fromIncome)}` : ''}</span>
-                      <span>{c.fromWallet > 0 ? `Từ ví: ${formatMoney(c.fromWallet)}` : ''}</span>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
           )}
         </div>
 
@@ -8949,13 +9344,21 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
             </p>
           ) : (
             <div className="flex flex-col gap-4 max-h-[600px] overflow-y-auto scrollbar-hide pr-1">
-              {sortedFilteredTxKeys.map((key) => (
-                <div key={key}>
+              {sortedFilteredTxKeys.map((key, i) => (
+                <Fragment key={key}>
+                  {!isSameTxMonth(key, sortedFilteredTxKeys[i - 1]) && (
+                    <div className="flex items-center gap-2 mt-1 first:mt-0">
+                      <span className="text-[11px] font-extrabold uppercase tracking-wide text-turquoise whitespace-nowrap">{formatTxMonthLabel(key)}</span>
+                      <div className="flex-1 h-px bg-[rgba(189,189,203,0.25)]" />
+                    </div>
+                  )}
+                <div>
                   <p className="text-xs font-bold text-steel dark:text-light-grey mb-2">{formatTxDateLabel(key)}</p>
                   <div className="flex flex-col divide-y divide-[rgba(189,189,203,0.2)] dark:divide-[rgba(189,189,203,0.1)]">
                     {groupedFilteredTxs[key].map((tx) => <TxDetailRow key={tx.id} tx={tx} />)}
                   </div>
                 </div>
+                </Fragment>
               ))}
             </div>
           )}
@@ -9057,6 +9460,10 @@ function MainApp({ user, theme, toggleTheme }) {
     return true;
   }
   const [loading, setLoading] = useState(true);
+  // Riêng biến này để phân biệt "đang tải LẦN ĐẦU" (chưa có gì để hiện, nên chặn cả trang
+  // chờ) với "đang tải LẠI" (sau khi thêm/sửa/xoá gì đó — loadAll() set loading=true mỗi
+  // lần gọi) — lúc tải lại thì dữ liệu cũ vẫn còn đó, không cần che hết màn hình đi.
+  const [initialLoadDone, setInitialLoadDone] = useState(false);
   const [loadingGoals, setLoadingGoals] = useState(true);
   const [currentUser, setCurrentUser] = useState(user);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => (typeof window !== 'undefined' && localStorage.getItem('sidebarCollapsed') === '1'));
@@ -9105,7 +9512,7 @@ function MainApp({ user, theme, toggleTheme }) {
       // Chỉ lấy các cột thực sự đang dùng trong app thay vì '*' (giảm dung lượng response).
       // Lưu ý: KHÔNG thêm .limit() ở đây — fundBalanceWithProfit() cần TOÀN BỘ lịch sử
       // giao dịch của từng quỹ để tính lãi kép đúng, giới hạn số dòng sẽ làm sai số dư quỹ.
-      supabase.from('transactions').select('id, account_id, category_id, type, amount, date, created_at, note').is('deleted_at', null).order('created_at', { ascending: false }),
+      supabase.from('transactions').select('id, account_id, category_id, type, amount, date, created_at, note, seq').is('deleted_at', null).order('created_at', { ascending: false }),
       supabase.from('goals').select('*').is('deleted_at', null).order('created_at', { ascending: false }),
     ]);
     // Mục tiêu có liên kết quỹ (fund_id) thì "Số tiền hiện có" luôn lấy trực tiếp từ số dư quỹ đó,
@@ -9117,12 +9524,94 @@ function MainApp({ user, theme, toggleTheme }) {
       return { ...g, current_amount: fundBalanceWithProfit(fund, txData || []) };
     });
     setAccounts(accData || []); setCategories(catData || []); setTransactions(txData || []); setGoals(syncedGoals);
-    setLoading(false); setLoadingGoals(false);
+    setLoading(false); setLoadingGoals(false); setInitialLoadDone(true);
     loadLogs();
     loadSpendingPoolSettings();
   }
 
   useEffect(() => { loadAll(); }, []);
+
+  // TÍNH NĂNG MỚI: tự động tính & nạp "Tích lũy trước chi" (công thức + cách đổi tên category
+  // nếu cần: xem computeAccumulationBeforeSpendTarget ở đầu file). Effect này chạy lại mỗi khi
+  // transactions/categories/spendingPoolByPeriod đổi — tức mỗi khi bạn thêm/sửa/xoá giao dịch
+  // "Lương cơ bản", hoặc cài đặt lại "Thu nhập được chi" — nhờ vậy tự ĐIỀU CHỈNH lại khoản đã
+  // nạp trước đó (sửa số tiền, hoặc xoá nếu không còn cần) mà không cần thao tác tay.
+  // Nhận diện đúng giao dịch tự tạo trước đó qua note = AUTO_ACCUM_NOTE (xem hằng số ở đầu file)
+  // — không đụng tới giao dịch bạn tự nạp tay vào quỹ này (nếu note khác).
+  const accumSyncRunningRef = useRef(false);
+  useEffect(() => {
+    if (!initialLoadDone) return; // chờ load xong dữ liệu ban đầu mới bắt đầu đối chiếu
+    if (accumSyncRunningRef.current) return; // tránh chạy chồng lấn nếu effect bắn liên tiếp
+    const fundCat = categories.find((c) => c.name === ACCUMULATION_FUND_CATEGORY_NAME && c.is_fund);
+    if (!fundCat) return; // chưa có quỹ "Tích lũy trước chi" trong Danh mục -> bỏ qua, không tự tạo category giúp
+    const periodKeys = Object.keys(spendingPoolByPeriod || {});
+    if (periodKeys.length === 0) return; // chưa kỳ nào cài đặt "Thu nhập được chi" -> chưa có gì để tính
+
+    (async () => {
+      accumSyncRunningRef.current = true;
+      try {
+        let didWrite = false;
+        for (const periodKey of periodKeys) {
+          const target = computeAccumulationBeforeSpendTarget(periodKey, transactions, categories, spendingPoolByPeriod);
+          if (target == null) continue; // thiếu category "Lương cơ bản" -> chưa tính được, bỏ qua kỳ này
+
+          // TẤT CẢ khoản đã nạp vào quỹ này cho đúng kỳ này (không phân biệt note) — để nhận ra
+          // cả khoản bạn đã TỰ TAY nạp trước khi bật tính năng tự động, tránh nạp lặp thêm 1 dòng.
+          const candidates = transactions.filter((t) =>
+            t.type === 'allocation' &&
+            t.category_id === fundCat.id &&
+            t.account_id === null &&
+            !t.deleted_at &&
+            transactionPeriodKey(t) === periodKey
+          );
+          const autoExisting = candidates.find((t) => stripPeriodTag(t.note || '').trim() === AUTO_ACCUM_NOTE);
+          const manualExisting = candidates.find((t) => t !== autoExisting);
+
+          if (target <= 0) {
+            // Thu nhập được chi đã đủ/vượt (Lương cơ bản + Tiền cơm) -> không cần tích lũy nữa,
+            // xoá mềm khoản CODE ĐÃ TỰ NẠP trước đó (nếu có). Không đụng vào khoản bạn tự tay nạp.
+            if (autoExisting) {
+              await softDelete('transactions', autoExisting.id, `Tự động xoá "Tích lũy trước chi" kỳ ${periodKey} (Thu nhập được chi đã đủ)`, 'auto_accumulation_remove');
+              didWrite = true;
+            }
+            continue;
+          }
+
+          if (manualExisting) {
+            // Bạn đã tự tay nạp cho kỳ này rồi -> không tạo thêm dòng tự động nữa (tôn trọng
+            // khoản bạn đã tự nhập, kể cả khi số tiền không khớp 100% với công thức).
+            continue;
+          }
+
+          if (autoExisting) {
+            if (Number(autoExisting.amount) !== target) {
+              const { error } = await supabase.from('transactions').update({ amount: target }).eq('id', autoExisting.id);
+              if (!error) didWrite = true;
+            }
+            continue;
+          }
+
+          // Chưa có dòng nào (tự động lẫn tự tay) cho kỳ này -> tạo mới. Đặt giờ NGAY SAU giao
+          // dịch "Lương cơ bản" gần nhất của kỳ (nếu có), thay vì luôn lấy giờ hiện tại lúc effect
+          // chạy — để dòng tự động luôn nằm đúng vị trí, ngay sau khi bạn nhập lương, trong Lịch sử.
+          const insertAt = latestBaseSalaryTimestamp(periodKey, transactions, categories) || new Date();
+          const { error } = await supabase.from('transactions').insert({
+            category_id: fundCat.id,
+            type: 'allocation',
+            account_id: null,
+            amount: target,
+            date: insertAt.toISOString().slice(0, 10),
+            created_at: insertAt.toISOString(),
+            note: tagPeriodNote(periodKey, AUTO_ACCUM_NOTE),
+          });
+          if (!error) didWrite = true;
+        }
+        if (didWrite) await loadAll(); // chỉ tải lại nếu thật sự có thay đổi, tránh vòng lặp thừa
+      } finally {
+        accumSyncRunningRef.current = false;
+      }
+    })();
+  }, [transactions, categories, spendingPoolByPeriod, initialLoadDone]);
 
   const [resettingData, setResettingData] = useState(false);
   async function resetAllData() {
@@ -9188,12 +9677,22 @@ function MainApp({ user, theme, toggleTheme }) {
   function renderScreenContent() {
     if (screen === 'fund-detail') {
       const cat = categories.find((c) => c.id === selectedFundId);
-      if (!cat) { setScreen('dashboard'); return null; }
+      if (!cat) {
+        // FIX: lúc mới F5, categories còn rỗng vì loadAll() chưa chạy xong (async) — đừng
+        // vội kết luận "không tìm thấy quỹ" và đá về dashboard. Chỉ đá về khi đã load xong
+        // dữ liệu (initialLoadDone) mà vẫn không thấy (quỹ bị xoá thật).
+        if (initialLoadDone) { setScreen('dashboard'); return null; }
+        return null;
+      }
       return <FundDetail category={cat} transactions={transactions} categories={categories} accounts={accounts} onBack={() => setScreen(fundReturnScreen)} reload={loadAll} softDelete={softDelete} setScreen={setScreen} onAddClick={() => setShowAdd(true)} displayName={displayName} avatarUrl={avatarUrl} theme={theme} toggleTheme={toggleTheme} openSettings={goToSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} spendingPoolByPeriod={spendingPoolByPeriod} />;
     }
     if (screen === 'account-detail') {
       const acc = accounts.find((a) => a.id === selectedAccountId);
-      if (!acc) { setScreen('accounts'); return null; }
+      if (!acc) {
+        // FIX: tương tự fund-detail — không đá về accounts khi dữ liệu chưa kịp load xong.
+        if (initialLoadDone) { setScreen('accounts'); return null; }
+        return null;
+      }
       return <AccountDetail account={acc} transactions={transactions} categories={categories} accounts={accounts} onBack={() => setScreen(accountReturnScreen)} reload={loadAll} softDelete={softDelete} setScreen={setScreen} onAddClick={() => setShowAdd(true)} displayName={displayName} avatarUrl={avatarUrl} theme={theme} toggleTheme={toggleTheme} openSettings={goToSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} spendingPoolByPeriod={spendingPoolByPeriod} />;
     }
     if (screen === 'funds') return <Funds setScreen={setScreen} categories={categories} transactions={transactions} onOpenFund={openFund} reload={loadAll} softDelete={softDelete} onAddClick={() => setShowAdd(true)} displayName={displayName} avatarUrl={avatarUrl} theme={theme} toggleTheme={toggleTheme} openSettings={goToSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} />;
@@ -9207,7 +9706,7 @@ function MainApp({ user, theme, toggleTheme }) {
     if (screen === 'settings') return <Settings key={settingsSection === 'profile' ? 'settings-profile' : 'settings-tabs'} setScreen={setScreen} categories={categories} accounts={accounts} reload={loadAll} softDelete={softDelete} user={currentUser} onProfileUpdated={refreshUser} onAddClick={() => setShowAdd(true)} theme={theme} toggleTheme={toggleTheme} initialSection={settingsSection} openSettings={goToSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} onResetData={resetAllData} resettingData={resettingData} logs={logs} logActivity={logActivity} restoreLog={restoreLog} spendingPoolByPeriod={spendingPoolByPeriod} saveSpendingPoolForPeriod={saveSpendingPoolForPeriod} />;
     if (screen === 'report') return <Report setScreen={setScreen} transactions={transactions} categories={categories} accounts={accounts} goals={goals} onAddClick={() => setShowAdd(true)} displayName={displayName} avatarUrl={avatarUrl} theme={theme} toggleTheme={toggleTheme} openSettings={goToSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} spendingPoolByPeriod={spendingPoolByPeriod} saveSpendingPoolForPeriod={saveSpendingPoolForPeriod} reload={loadAll} softDelete={softDelete} openFund={openFund} />;
     // Dashboard default
-    return <Dashboard setScreen={setScreen} transactions={transactions} categories={categories} accounts={accounts} goals={goals} loading={loading} displayName={displayName} avatarUrl={avatarUrl} onAddClick={() => setShowAdd(true)} theme={theme} toggleTheme={toggleTheme} onOpenFund={openFund} onOpenAccount={openAccount} reload={loadAll} softDelete={softDelete} openSettings={goToSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} spendingPoolByPeriod={spendingPoolByPeriod} saveSpendingPoolForPeriod={saveSpendingPoolForPeriod} />;
+    return <Dashboard setScreen={setScreen} transactions={transactions} categories={categories} accounts={accounts} goals={goals} loading={loading} initialLoadDone={initialLoadDone} displayName={displayName} avatarUrl={avatarUrl} onAddClick={() => setShowAdd(true)} theme={theme} toggleTheme={toggleTheme} onOpenFund={openFund} onOpenAccount={openAccount} reload={loadAll} softDelete={softDelete} openSettings={goToSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} spendingPoolByPeriod={spendingPoolByPeriod} saveSpendingPoolForPeriod={saveSpendingPoolForPeriod} />;
   }
 
   // Layout wrapper — true flex-row App Shell (Sidebar is a real flex item,
