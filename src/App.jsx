@@ -19,7 +19,7 @@ import DateTimeField from './DateTimeField';
 // Logo app đặt sẵn trong code (src/assets/app-logo.png) — dùng chung cho MỌI tài khoản,
 // không cần upload qua Settings/Supabase Storage nữa nên nhẹ và luôn đồng bộ.
 // Copy file logo thật vào src/assets/app-logo.png (đè lên) là xong, không cần sửa gì thêm.
-import appLogoAsset from './assets/app-logo.png';
+import appLogoAsset from './assets/app-logo.svg';
 
 // Layout app dùng <main className="overflow-y-auto"> làm vùng cuộn thật sự (cả mobile lẫn
 // desktop) chứ KHÔNG phải window/document — nên các chỗ "neo vị trí card, cuộn bù lại"
@@ -1332,8 +1332,12 @@ function fundDailyProfitHistory(category, transactions) {
 }
 
 function accountBalance(acc, transactions) {
+  // Số dư HIỆN TẠI của ví: chỉ tính giao dịch có ngày ≤ hết hôm nay (cut-off). Giao dịch ghi ngày
+  // tương lai chưa phát sinh nên chưa tính — giống quỹ (fundBalanceWithProfit cũng bỏ qua ngày
+  // tương lai) và khớp walletBalanceAsOf(hôm nay) của Báo cáo, để mọi màn hình ra cùng 1 số.
+  const endOfToday = new Date(); endOfToday.setHours(23, 59, 59, 999);
   const delta = transactions
-    .filter((t) => t.account_id === acc.id && (t.type === 'income' || t.type === 'expense' || t.type === 'adjustment' || t.type === 'allocation'))
+    .filter((t) => t.account_id === acc.id && (t.type === 'income' || t.type === 'expense' || t.type === 'adjustment' || t.type === 'allocation') && new Date(t.date || t.created_at) <= endOfToday)
     .reduce((s, t) => {
       if (t.type === 'income') return s + Number(t.amount);
       if (t.type === 'expense' || t.type === 'allocation') return s - Number(t.amount); // tiền rời khỏi ví (chi tiêu hoặc chuyển sang quỹ)
@@ -1387,6 +1391,12 @@ const PERIOD_TAG_RE = /^\[KY:(\d{4}-\d{2})\]\s?/;
 function tagPeriodNote(periodKey, note) { return periodKey ? `[KY:${periodKey}] ${note || ''}`.trim() : (note || null); }
 function parsePeriodTag(note) { const m = (note || '').match(PERIOD_TAG_RE); return m ? m[1] : null; }
 function stripPeriodTag(note) { return (note || '').replace(PERIOD_TAG_RE, ''); }
+// Tag "[Vượt hạn mức]" chỉ là cờ kỹ thuật để hiện NHÃN "Vượt hạn mức" trên dòng giao dịch — không
+// nên lặp lại trong phần ghi chú hiển thị. Bỏ mọi lần xuất hiện (dữ liệu cũ có thể bị lặp 2-3 lần).
+const OVER_LIMIT_TAG_RE = /\[Vượt hạn mức\]\s*/g;
+function stripOverLimitTag(note) { return (note || '').replace(OVER_LIMIT_TAG_RE, '').trim(); }
+// Ghi chú dùng để HIỂN THỊ trên dòng lịch sử: bỏ tag kỳ + tag vượt hạn mức.
+function displayTxNote(note) { return stripOverLimitTag(stripPeriodTag(note)); }
 // Hậu tố hiển thị kỳ áp dụng cho hạn mức chi của danh mục (Tuần/Tháng/Năm) — dùng chung
 // cho cảnh báo vượt hạn mức khi nhập giao dịch. Mặc định "Tháng" cho danh mục cũ chưa có
 // limit_period (dữ liệu tạo trước khi có tính năng chọn kỳ).
@@ -1398,7 +1408,11 @@ function periodDaysFor(period) { return period === 'week' ? 7 : period === 'year
 // Mức trần chi mỗi ngày quy đổi từ hạn mức kỳ của danh mục (null nếu danh mục chưa đặt hạn mức).
 function dailyLimitFor(cat) { return cat?.monthly_limit ? Number(cat.monthly_limit) / periodDaysFor(cat.limit_period) : null; }
 // Ngày hôm nay theo giờ địa phương, định dạng 'YYYY-MM-DD' — khớp định dạng field `date` của giao dịch.
-function todayDateStr() { const d = new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 10); }
+// Ngày (YYYY-MM-DD) theo GIỜ ĐỊA PHƯƠNG. KHÔNG dùng d.toISOString().slice(0,10) trực tiếp: nó trả
+// ngày theo UTC nên ở VN (UTC+7) từ 00:00–07:00 sáng sẽ ra NGÀY HÔM TRƯỚC → giao dịch/bộ lọc
+// bị lệch sang kỳ/ngày sai.
+function localDateStr(d = new Date()) { const x = new Date(d); x.setMinutes(x.getMinutes() - x.getTimezoneOffset()); return x.toISOString().slice(0, 10); }
+function todayDateStr() { return localDateStr(new Date()); }
 // Tổng đã chi trong ngày hôm nay của 1 danh mục (chỉ tính giao dịch loại 'expense', không tính quỹ).
 function todaySpentInCategory(transactions, categoryId) {
   const today = todayDateStr();
@@ -1495,13 +1509,36 @@ function periodKeyToRange(periodKey) {
   return { start, end };
 }
 
+// ===== CHỐT SỔ SỐ DƯ TÀI SẢN TẠI 1 MỐC (cut-off) — dùng chung cho Báo cáo và Trang chủ =====
+// - Mốc đã qua hẳn (trước hôm nay): số dư chốt CUỐI NGÀY của mốc đó (ví: mọi giao dịch có ngày ≤ mốc;
+//   quỹ: gốc + lãi tới hết ngày đó).
+// - Mốc là hôm nay/tương lai: chỉ ghi nhận những gì đã xảy ra tới hiện tại, KHÔNG cộng lãi dự kiến
+//   cho ngày chưa tới. Ví: mọi giao dịch có ngày ≤ hôm nay. Quỹ: fundBalanceWithProfit (lãi tới hết
+//   hôm qua + giao dịch hôm nay) — đúng số dư quỹ đang hiển thị ở các màn khác.
+function assetCutoffIsNotPast(cutoff) {
+  const startOfToday = new Date(); startOfToday.setHours(0, 0, 0, 0);
+  return new Date(cutoff) >= startOfToday;
+}
+function walletBalanceAsOf(account, transactions, cutoff) {
+  const endOfToday = new Date(); endOfToday.setHours(23, 59, 59, 999);
+  return accountBalanceAtDate(account, transactions, assetCutoffIsNotPast(cutoff) ? endOfToday : cutoff);
+}
+function fundBalanceAsOf(category, transactions, cutoff) {
+  return assetCutoffIsNotPast(cutoff) ? fundBalanceWithProfit(category, transactions) : fundBalanceAtDate(category, transactions, cutoff);
+}
+// Mốc bắt đầu của 1 khoảng nằm hoàn toàn trong tương lai -> chưa có số liệu để chốt.
+function isRangeInFuture(rangeStart) {
+  const endOfToday = new Date(); endOfToday.setHours(23, 59, 59, 999);
+  return new Date(rangeStart) > endOfToday;
+}
+
 // Danh sách năm cố định cho các dropdown lọc "Năm" trong Dashboard: 2025 -> 2035.
 const YEAR_OPTIONS = Array.from({ length: 11 }, (_, i) => 2025 + i);
 const PERIOD_WEEK_DAY_LABELS = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'];
 
 // Sinh danh sách bucket thời gian dùng chung cho các chart lọc theo Tuần/Tháng/Năm.
 // - week: khoảng ngày tuỳ chọn (weekStart -> weekEnd), mỗi bucket là 1 ngày.
-// - year: 12 tháng của năm được chọn.
+// - year: 12 kỳ tài chính (21 → 20) của năm được chọn.
 // - month: chia kỳ tài chính (21 -> 20) hiện tại thành 5 khoảng.
 function computePeriodBuckets({ period, year, periodKey, weekStart, weekEnd }) {
   if (period === 'week') {
@@ -1519,11 +1556,11 @@ function computePeriodBuckets({ period, year, periodKey, weekStart, weekEnd }) {
     });
   }
   if (period === 'year') {
-    return Array.from({ length: 12 }, (_, i) => ({
-      label: `Th${i + 1}`,
-      start: new Date(year, i, 1, 0, 0, 0),
-      end: new Date(year, i + 1, 0, 23, 59, 59),
-    }));
+    // Mỗi cột = 1 KỲ tài chính (21 tháng trước → 20 tháng này), không phải tháng dương lịch.
+    return Array.from({ length: 12 }, (_, i) => {
+      const { start, end } = periodKeyToRange(`${year}-${String(i + 1).padStart(2, '0')}`);
+      return { label: `Th${i + 1}`, start, end };
+    });
   }
   const { start: periodStart, end: periodEnd } = periodKeyToRange(periodKey);
   const totalDays = Math.round((periodEnd - periodStart) / 86400000) + 1;
@@ -2120,6 +2157,21 @@ function EmojiCircle({ emoji, size = 36, active = false, activeColor = '#0DBACC'
   return <div className="rounded-xl flex items-center justify-center flex-shrink-0" style={{ width: size, height: size, background: active ? activeColor : bg, fontSize: size * 0.5 }}>{emoji || '❔'}</div>;
 }
 
+// Icon (emoji) hiển thị cho 1 dòng giao dịch. Trước đây chỉ lấy icon của danh mục nên các
+// giao dịch KHÔNG có danh mục (Cập nhật số dư ví, thu/chi không gắn danh mục...) hiện ❔.
+// Thứ tự ưu tiên: icon danh mục (bỏ qua ❔ mặc định) → icon của ví (với cập nhật số dư/ví)
+// → icon mặc định theo loại giao dịch.
+function txIconEmoji(tx, categories, accounts) {
+  const cat = (categories || []).find((c) => c.id === tx.category_id);
+  if (cat?.icon && cat.icon !== '❔') return cat.icon;
+  const acc = tx.account_id ? (accounts || []).find((a) => a.id === tx.account_id) : null;
+  if (tx.type === 'adjustment') return acc?.icon || '👛';
+  if (tx.type === 'income') return '💵';
+  if (tx.type === 'allocation') return '🐷';
+  if (tx.type === 'transfer') return '🔁';
+  return acc?.icon || '🧾';
+}
+
 function SummaryCard({ icon: Icon, iconBg, label, value, sub }) {
   return (
     <div className="frost-card rounded-2xl p-4">
@@ -2607,9 +2659,9 @@ function SidebarDesktop({ screen, setScreen, sidebarCollapsed, toggleSidebar, th
       <div className={`pointer-events-none absolute bottom-24 -right-14 w-56 h-56 rounded-full blur-3xl ${isDark ? 'bg-lavender/25' : 'bg-lavender-light/60'}`} />
       <div className={`pointer-events-none absolute inset-y-0 right-0 w-px bg-gradient-to-b from-transparent to-transparent ${isDark ? 'via-white/10' : 'via-white/70'}`} />
 
-      <div className={`relative flex items-center mb-8 overflow-hidden transition-all duration-200 ${sidebarCollapsed ? 'justify-center px-0' : 'gap-2 px-1'}`}>
-        <button onClick={toggleSidebar} title={sidebarCollapsed ? 'Mở rộng menu' : 'Thu gọn menu'} className="w-9 h-9 rounded-xl bg-gradient-primary flex items-center justify-center flex-shrink-0 hover:opacity-90 transition shadow-md shadow-turquoise/30 overflow-hidden">
-          {appLogoUrl ? <img src={appLogoUrl} alt="" className="w-full h-full object-cover" /> : <Wallet size={17} className="text-white" />}
+      <div className={`relative flex items-center mb-8 overflow-hidden transition-all duration-200 ${sidebarCollapsed ? 'justify-center px-0' : 'gap-0.5 px-1'}`}>
+        <button onClick={toggleSidebar} title={sidebarCollapsed ? 'Mở rộng menu' : 'Thu gọn menu'} className={`w-10 h-10 flex items-center justify-center flex-shrink-0 hover:opacity-90 transition ${appLogoUrl ? '' : 'rounded-xl bg-gradient-primary shadow-md shadow-turquoise/30 overflow-hidden'}`}>
+          {appLogoUrl ? <img src={appLogoUrl} alt="PandaFi" className="w-full h-full object-contain" /> : <Wallet size={17} className="text-white" />}
         </button>
         <span className={`font-extrabold text-blueberry dark:text-white text-lg whitespace-nowrap overflow-hidden transition-all duration-200 ${sidebarCollapsed ? 'max-w-0 opacity-0' : 'max-w-[140px] opacity-100'}`}>PandaFi</span>
       </div>
@@ -2819,7 +2871,7 @@ function useGlobalSearchResults(query, { accounts, categories, transactions, goa
       return {
         id: `tx-${t.id}`,
         icon: cat?.icon || '❔',
-        title: stripPeriodTag(t.note) || cat?.name || 'Giao dịch',
+        title: displayTxNote(t.note) || cat?.name || 'Giao dịch',
         sub: `${t.type === 'income' ? '+' : '-'}${formatMoney(t.amount)} · ${new Date(t.date).toLocaleDateString('vi-VN')}`,
         type: 'transaction',
         payload: t,
@@ -3263,7 +3315,7 @@ function AddTransaction({ onClose, accounts, categories, transactions, onSaved, 
         `Cộng khoản này, hôm nay bạn sẽ chi ${formatMoney(todaySpent + Number(amount))} cho "${activeCat.name}" — vượt mức trung bình ${formatMoney(dailyLimit)}/ngày (quy đổi từ hạn mức ${formatMoney(activeCat.monthly_limit)}${limitPeriodSuffix(activeCat.limit_period)}). Bạn vẫn muốn tiếp tục nhập?`
       );
       if (!confirm) return;
-      noteToSave = `[Vượt hạn mức] ${noteToSave || ''}`;
+      noteToSave = `[Vượt hạn mức] ${stripOverLimitTag(noteToSave)}`.trim();
     }
 
     if (type === 'income') {
@@ -3465,7 +3517,7 @@ function EditTransaction({ transaction, onClose, accounts, categories, transacti
   });
   const [selectedPeriod, setSelectedPeriod] = useState(() => parsePeriodTag(transaction.note) || dateToPeriodKey(transaction.date || transaction.created_at));
   const [expenseSource, setExpenseSource] = useState(transaction.account_id || 'income');
-  const [note, setNote] = useState(stripPeriodTag(transaction.note || ''));
+  const [note, setNote] = useState(displayTxNote(transaction.note || ''));
   const [dateTime, setDateTime] = useState(() => {
     const d = new Date(transaction.created_at || transaction.date);
     d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
@@ -3540,7 +3592,7 @@ function EditTransaction({ transaction, onClose, accounts, categories, transacti
         `Cộng khoản này, hôm nay bạn sẽ chi ${formatMoney(todaySpent + Number(amount))} cho "${activeCat.name}" — vượt mức trung bình ${formatMoney(dailyLimit)}/ngày (quy đổi từ hạn mức ${formatMoney(activeCat.monthly_limit)}${limitPeriodSuffix(activeCat.limit_period)}). Bạn vẫn muốn tiếp tục nhập?`
       );
       if (!confirm) return;
-      noteToSave = `[Vượt hạn mức] ${noteToSave || ''}`;
+      noteToSave = `[Vượt hạn mức] ${stripOverLimitTag(noteToSave)}`.trim();
     }
 
     if (type === 'income') {
@@ -3780,7 +3832,7 @@ function EditFundForm({ category, onClose, onSaved, isNew, initialAmount, firstA
     // .slice(0,10) để LUÔN chỉ lấy phần ngày, kể cả nếu "date" của bản ghi cũ lỡ đã bị lưu
     // thành chuỗi ngày+giờ đầy đủ (dữ liệu tạo từ 1 bản trước đó) — tránh nối chồng 2 lần
     // "T..." khi ghép lại với giờ bên dưới, gây ra Invalid Date khi lưu.
-    initial_allocation_date: (!isNew && firstAllocation) ? (firstAllocation.date || new Date(firstAllocation.created_at).toISOString().slice(0, 10)).slice(0, 10) : new Date().toISOString().slice(0, 10),
+    initial_allocation_date: (!isNew && firstAllocation) ? (firstAllocation.date || localDateStr(firstAllocation.created_at)).slice(0, 10) : todayDateStr(),
     // Cho phép sửa luôn cả GIỜ nạp quỹ lần đầu, không chỉ ngày — lấy đúng giờ đang hiển thị
     // ở Lịch sử (ưu tiên đọc từ "created_at", giống formatDisplayTime) để form pre-fill
     // khớp với những gì người dùng đang thấy.
@@ -3825,7 +3877,7 @@ function EditFundForm({ category, onClose, onSaved, isNew, initialAmount, firstA
     // Luôn ép initial_allocation_date về đúng 10 ký tự "YYYY-MM-DD" trước khi ghép giờ —
     // đề phòng giá trị cũ còn sót lại (vd do có sẵn từ trước) khiến chuỗi ghép bị sai định
     // dạng và new Date(...) trả về Invalid Date -> vỡ khi gọi .toISOString().
-    const initialDateOnly = (form.initial_allocation_date || new Date().toISOString().slice(0, 10)).slice(0, 10);
+    const initialDateOnly = (form.initial_allocation_date || todayDateStr()).slice(0, 10);
     const initialDateTimeRaw = `${initialDateOnly}T${form.initial_allocation_time || '00:00'}:00`;
     const initialDateTimeObj = new Date(initialDateTimeRaw);
     const initialCreatedAt = isNaN(initialDateTimeObj) ? new Date().toISOString() : initialDateTimeObj.toISOString();
@@ -3892,7 +3944,7 @@ function EditFundForm({ category, onClose, onSaved, isNew, initialAmount, firstA
             <label className="text-xs text-steel dark:text-light-grey font-semibold block mb-1">Ngày & giờ nạp quỹ lần đầu</label>
             <DateTimeField
               value={form.initial_allocation_date ? `${form.initial_allocation_date}T${form.initial_allocation_time || '00:00'}` : ''}
-              max={new Date().toISOString().slice(0, 10)}
+              max={todayDateStr()}
               onChange={(v) => {
                 const [d = '', t = ''] = v.split('T');
                 setForm({ ...form, initial_allocation_date: d, initial_allocation_time: t });
@@ -4271,8 +4323,8 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
   const [globalPeriod, setGlobalPeriod] = useState('month');
   const [globalYear, setGlobalYear] = useState(new Date().getFullYear());
   const [globalPeriodKey, setGlobalPeriodKey] = useState(currentPeriodKey());
-  const [globalWeekStart, setGlobalWeekStart] = useState(() => { const d = new Date(); d.setDate(d.getDate() - 6); return d.toISOString().slice(0, 10); });
-  const [globalWeekEnd, setGlobalWeekEnd] = useState(() => new Date().toISOString().slice(0, 10));
+  const [globalWeekStart, setGlobalWeekStart] = useState(() => { const d = new Date(); d.setDate(d.getDate() - 6); return localDateStr(d); });
+  const [globalWeekEnd, setGlobalWeekEnd] = useState(() => todayDateStr());
   // Object filter dùng chung cho MỌI card (thay cho các bộ lọc riêng từng card trước
   // đây) — truyền thẳng vào computePeriodBuckets/buildCategorySeriesFor/bucketTotalsFor/
   // filteredTxsForCard như 1 filter bình thường.
@@ -4305,7 +4357,7 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
               onChange={(v) => setGlobalWeekStart(v)}
               className="bg-white/50 dark:bg-white/10 rounded-full text-xs font-bold px-2.5 py-1.5 text-blueberry dark:text-white" />
             <span className="text-steel dark:text-light-grey text-xs">-</span>
-            <DateField value={globalWeekEnd} align="right" max={new Date().toISOString().slice(0, 10)} showIcon={false} clearable={false}
+            <DateField value={globalWeekEnd} align="right" max={todayDateStr()} showIcon={false} clearable={false}
               onChange={(v) => setGlobalWeekEnd(v)}
               className="bg-white/50 dark:bg-white/10 rounded-full text-xs font-bold px-2.5 py-1.5 text-blueberry dark:text-white" />
           </div>
@@ -4648,35 +4700,39 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
   // "load" lâu hơn hẳn các thẻ khác dù dữ liệu đã tải xong. Giờ chỉ tính lại khi 1 trong
   // các giá trị phụ thuộc thực sự đổi.
   const trendBuckets = useMemo(() => {
-    const walletBalanceAt = (cutoff) => accounts.reduce((s, a) => s + accountBalanceAtDate(a, transactions, cutoff), 0);
-    const fundBalanceAtCutoff = (cutoff) => fundCategories.reduce((s, c) => s + fundBalanceAtDate(c, transactions, cutoff), 0);
+    // Mọi cột đều CHỐT SỔ cuối khoảng của cột đó (xem walletBalanceAsOf/fundBalanceAsOf): cột đã
+    // qua = số dư cuối ngày; cột đang diễn ra = tính đến hiện tại; cột còn nằm hẳn trong tương lai
+    // = 0 (chưa có số liệu), thay vì kéo dài số dư hiện tại hoặc cộng lãi dự kiến.
+    const snapshot = (label, rangeStart, cutoff) => {
+      if (isRangeInFuture(rangeStart)) return { label, wallet: 0, fund: 0, total: 0 };
+      const wallet = accounts.reduce((s, a) => s + walletBalanceAsOf(a, transactions, cutoff), 0);
+      const fund = fundCategories.reduce((s, c) => s + fundBalanceAsOf(c, transactions, cutoff), 0);
+      return { label, wallet, fund, total: wallet + fund };
+    };
     if (globalPeriod === 'year') {
+      // Mỗi cột = 1 KỲ tài chính (21 → 20), chốt cuối ngày 20 — không phải tháng dương lịch.
       return Array.from({ length: 12 }, (_, i) => {
-        const cutoff = new Date(globalYear, i + 1, 0, 23, 59, 59, 999);
-        const wallet = walletBalanceAt(cutoff), fund = fundBalanceAtCutoff(cutoff);
-        return { label: `Th${i + 1}`, wallet, fund, total: wallet + fund };
+        const { start: pStart, end: pEnd } = periodKeyToRange(`${globalYear}-${String(i + 1).padStart(2, '0')}`);
+        return snapshot(`Th${i + 1}`, pStart, pEnd);
       });
     }
     if (globalPeriod === 'month') {
       return Array.from({ length: daysInMonth }, (_, i) => {
         const d = new Date(curPeriodStart); d.setDate(d.getDate() + i);
+        const dayStart = new Date(d); dayStart.setHours(0, 0, 0, 0);
         const cutoff = new Date(d); cutoff.setHours(23, 59, 59, 999);
-        const wallet = walletBalanceAt(cutoff), fund = fundBalanceAtCutoff(cutoff);
-        return { label: String(d.getDate()), wallet, fund, total: wallet + fund };
+        return snapshot(String(d.getDate()), dayStart, cutoff);
       });
     }
     // week: theo khoảng ngày -> ngày người dùng chọn (globalWeekStart -> globalWeekEnd),
     // không còn cố định 7 ngày gần nhất.
     const wBuckets = computePeriodBuckets({ period: 'week', weekStart: globalWeekStart, weekEnd: globalWeekEnd });
-    return wBuckets.map((b) => {
-      const wallet = walletBalanceAt(b.end), fund = fundBalanceAtCutoff(b.end);
-      return { label: b.label, wallet, fund, total: wallet + fund };
-    });
+    return wBuckets.map((b) => snapshot(b.label, b.start, b.end));
   }, [globalPeriod, globalYear, daysInMonth, curPeriodStart, accounts, transactions, fundCategories, globalWeekStart, globalWeekEnd]);
   // maxTrend tính theo total (luôn là giá trị lớn nhất mỗi cột) để đủ chỗ cho cột "Tổng" mới
   const maxTrend = Math.max(...trendBuckets.map((b) => b.total), 1);
   const fmtDMY = (iso) => { const [y, m, d] = String(iso).split('-'); return `${d}/${m}`; };
-  const trendTitle = globalPeriod === 'year' ? `Biến động tài sản theo tháng (Năm ${globalYear})` : globalPeriod === 'month' ? 'Biến động tài sản theo ngày (kỳ hiện tại)' : `Biến động tài sản theo ngày (${fmtDMY(globalWeekStart)} - ${fmtDMY(globalWeekEnd)})`;
+  const trendTitle = globalPeriod === 'year' ? `Biến động tài sản theo kỳ (Năm ${globalYear})` : globalPeriod === 'month' ? 'Biến động tài sản theo ngày (kỳ hiện tại)' : `Biến động tài sản theo ngày (${fmtDMY(globalWeekStart)} - ${fmtDMY(globalWeekEnd)})`;
 
   const totalMonthlyLimit = categories.filter((c) => c.type === 'expense' && c.monthly_limit).reduce((s, c) => s + Number(c.monthly_limit), 0);
   const limitPct = totalMonthlyLimit > 0 ? (expenseThisMonth / totalMonthlyLimit) * 100 : 0;
@@ -5018,11 +5074,11 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
                           const isDirectSet = tx.type === 'adjustment' && (tx.note || '').startsWith('[SET]');
                           const isPositive = tx.type === 'income' || (tx.type === 'adjustment' && Number(tx.amount) > 0);
                           const label = tx.type === 'adjustment' ? 'Cập nhật số dư ví' : (cat?.name || (tx.type === 'income' ? 'Thu nhập' : 'Chi tiêu'));
-                          const balanceAfter = isDirectSet ? accountBalanceAtDate(accounts.find((a) => a.id === tx.account_id), transactions, new Date(tx.date || tx.created_at), tx) : null;
-                          const noteText = isDirectSet ? `Số dư mới: ${formatMoney(balanceAfter)}` : (stripPeriodTag(tx.note) || new Date(tx.created_at || tx.date).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }));
+                          const balanceAfter = txBalanceAfter(tx, categories, accounts, transactions, spendingPoolByPeriod);
+                          const noteText = isDirectSet && balanceAfter !== null ? `Số dư mới: ${formatMoney(balanceAfter)}` : (displayTxNote(tx.note) || new Date(tx.created_at || tx.date).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }));
                           return (
                             <div key={tx.id} onClick={() => setEditingTx(tx)} className="flex items-center gap-3 py-3 first:pt-0 last:pb-0 cursor-pointer hover:bg-ice-cream dark:hover:bg-night-sky/30 rounded-xl -mx-2 px-2 transition">
-                              <EmojiCircle emoji={cat?.icon} size={40} bg={tx.type === 'income' ? '#B4F1F1' : '#E3D6FF'} />
+                              <EmojiCircle emoji={txIconEmoji(tx, categories, accounts)} size={40} bg={tx.type === 'income' ? '#B4F1F1' : '#E3D6FF'} />
                               <div className="flex-1 min-w-0">
                                 <div className="flex items-center gap-1.5">
                                   <p className="text-blueberry dark:text-white font-bold text-sm">{label}</p>
@@ -5032,9 +5088,8 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
                               </div>
                               <div className="flex-shrink-0 text-right">
                                 <p className={`font-bold text-sm ${isPositive ? 'text-turquoise' : 'text-blueberry dark:text-white'}`}>{isPositive ? '+' : '-'}{formatMoney(Math.abs(tx.amount))}</p>
-                                {isDirectSet && <p className="text-steel dark:text-light-grey text-[11px] mt-0.5 whitespace-nowrap">Số dư cuối: {formatMoney(balanceAfter)}</p>}
+                                {balanceAfter !== null && <p className="text-steel dark:text-light-grey text-[11px] mt-0.5 whitespace-nowrap">Số dư cuối: {formatMoney(balanceAfter)}</p>}
                               </div>
-                              <TxDeleteButton onClick={() => handleDeleteTx(tx)} />
                             </div>
                           );
                         })}
@@ -5244,11 +5299,11 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
                             const isDirectSet = tx.type === 'adjustment' && (tx.note || '').startsWith('[SET]');
                             const isPositive = tx.type === 'income' || (tx.type === 'adjustment' && Number(tx.amount) > 0);
                             const label = tx.type === 'adjustment' ? 'Cập nhật số dư ví' : (cat?.name || (tx.type === 'income' ? 'Thu nhập' : 'Chi tiêu'));
-                            const balanceAfter = isDirectSet ? accountBalanceAtDate(accounts.find((a) => a.id === tx.account_id), transactions, new Date(tx.date || tx.created_at), tx) : null;
-                            const timeOrNote = isDirectSet ? `Số dư mới: ${formatMoney(balanceAfter)}` : new Date(tx.created_at || tx.date).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
+                            const balanceAfter = txBalanceAfter(tx, categories, accounts, transactions, spendingPoolByPeriod);
+                            const timeOrNote = isDirectSet && balanceAfter !== null ? `Số dư mới: ${formatMoney(balanceAfter)}` : new Date(tx.created_at || tx.date).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
                             return (
                               <div key={tx.id} onClick={() => setEditingTx(tx)} className="flex items-center gap-3 py-2.5 first:pt-0 last:pb-0 cursor-pointer hover:bg-ice-cream dark:hover:bg-night-sky/30 rounded-xl -mx-2 px-2 transition">
-                                <EmojiCircle emoji={cat?.icon} size={36} bg={tx.type === 'income' ? '#B4F1F1' : '#E3D6FF'} />
+                                <EmojiCircle emoji={txIconEmoji(tx, categories, accounts)} size={36} bg={tx.type === 'income' ? '#B4F1F1' : '#E3D6FF'} />
                                 <div className="flex-1 min-w-0">
                                   <div className="flex items-center gap-1.5">
                                     <p className="text-blueberry dark:text-white font-bold text-sm truncate">{label}</p>
@@ -5261,9 +5316,8 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
                                 </div>
                                 <div className="flex-shrink-0 text-right">
                                   <p className={`font-bold text-sm ${isPositive ? 'text-turquoise' : 'text-blueberry dark:text-white'}`}>{isPositive ? '+' : '-'}{formatMoney(Math.abs(tx.amount))}</p>
-                                  {isDirectSet && <p className="text-steel dark:text-light-grey text-[11px] mt-0.5 whitespace-nowrap">Số dư cuối: {formatMoney(balanceAfter)}</p>}
+                                  {balanceAfter !== null && <p className="text-steel dark:text-light-grey text-[11px] mt-0.5 whitespace-nowrap">Số dư cuối: {formatMoney(balanceAfter)}</p>}
                                 </div>
-                                <TxDeleteButton onClick={() => handleDeleteTx(tx)} />
                               </div>
                             );
                           })}
@@ -6059,7 +6113,7 @@ function FundDetail({ category, transactions, categories, accounts, onBack, relo
                   const dateKey = itemDate.toDateString();
                   const showHeader = dateKey !== lastDateKey;
                   lastDateKey = dateKey;
-                  const noteText = isProfit ? item.note : stripPeriodTag(item.note);
+                  const noteText = isProfit ? item.note : displayTxNote(item.note);
 
                   return (
                     <Fragment key={item.id}>
@@ -6232,7 +6286,7 @@ function FundDetail({ category, transactions, categories, accounts, onBack, relo
                     const showTopBorder = idx > 0 && !isInitial;
                     const itemDateTime = historyItemDate(item);
                     const dateTimeLabel = `${itemDateTime.toLocaleDateString('vi-VN')} ${itemDateTime.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}`;
-                    const noteLine = item.isProfit ? item.note : stripPeriodTag(item.note);
+                    const noteLine = item.isProfit ? item.note : displayTxNote(item.note);
                     return (
                       <div
                         key={item.id}
@@ -6503,13 +6557,13 @@ function AccountDetail({ account, transactions, categories, accounts, onBack, re
               {history.map((tx) => {
                 const cat = categories.find((c) => c.id === tx.category_id);
                 const isDirectSet = tx.type === 'adjustment' && (tx.note || '').startsWith('[SET]');
-                const displayNote = isDirectSet ? (tx.note || '').replace('[SET] ', '') : tx.note;
+                const displayNote = isDirectSet ? (tx.note || '').replace('[SET] ', '') : displayTxNote(tx.note);
                 const isPositive = tx.type === 'income' || (tx.type === 'adjustment' && Number(tx.amount) > 0);
                 const label = tx.type === 'adjustment' ? 'Cập nhật số dư ví' : (cat?.name || (tx.type === 'income' ? 'Thu nhập' : 'Chi tiêu'));
                 const isOverLimit = (tx.note || '').includes('[Vượt hạn mức]');
                 // [SET] Đặt số dư mới: thay chữ tĩnh "Đặt số dư mới" bằng số dư thực tế đã
                 // đặt, và hiện thêm "Số dư cuối" cạnh chênh lệch (+/-) để rõ ràng hơn.
-                const balanceAfter = isDirectSet ? accountBalanceAtDate(account, transactions, new Date(tx.date || tx.created_at), tx) : null;
+                const balanceAfter = accountBalanceAtDate(account, transactions, new Date(tx.date || tx.created_at), tx);
                 const subtitleNote = isDirectSet ? `Số dư mới: ${formatMoney(balanceAfter)}` : displayNote;
                 return (
                   <div key={tx.id} className="flex items-center gap-3 py-3">
@@ -6525,7 +6579,7 @@ function AccountDetail({ account, transactions, categories, accounts, onBack, re
                     </div>
                     <div className="flex-shrink-0 text-right">
                       <p className={`font-bold text-sm ${isPositive ? 'text-turquoise' : 'text-cotton-candy'}`}>{isPositive ? '+' : '-'}{formatMoney(Math.abs(tx.amount))}</p>
-                      {isDirectSet && <p className="text-steel dark:text-light-grey text-[11px] mt-0.5 whitespace-nowrap">Số dư cuối: {formatMoney(balanceAfter)}</p>}
+                      {balanceAfter !== null && <p className="text-steel dark:text-light-grey text-[11px] mt-0.5 whitespace-nowrap">Số dư cuối: {formatMoney(balanceAfter)}</p>}
                     </div>
                     {!isDirectSet && (
                       <button onClick={() => setEditingTx(tx)} className="w-7 h-7 rounded-full hover:bg-ice-cream dark:hover:bg-night-sky/30 flex items-center justify-center text-steel dark:text-light-grey flex-shrink-0">
@@ -6573,13 +6627,13 @@ function AccountDetail({ account, transactions, categories, accounts, onBack, re
                   {history.map((tx) => {
                     const cat = categories.find((c) => c.id === tx.category_id);
                     const isDirectSet = tx.type === 'adjustment' && (tx.note || '').startsWith('[SET]');
-                    const displayNote = isDirectSet ? (tx.note || '').replace('[SET] ', '') : tx.note;
+                    const displayNote = isDirectSet ? (tx.note || '').replace('[SET] ', '') : displayTxNote(tx.note);
                     const isPositive = tx.type === 'income' || (tx.type === 'adjustment' && Number(tx.amount) > 0);
                     const label = tx.type === 'adjustment' ? 'Cập nhật số dư ví' : (cat?.name || (tx.type === 'income' ? 'Thu nhập' : 'Chi tiêu'));
                     const isOverLimit = (tx.note || '').includes('[Vượt hạn mức]');
                     // [SET] Đặt số dư mới: thay chữ tĩnh "Đặt số dư mới" bằng số dư thực tế đã
                     // đặt, và hiện thêm "Số dư cuối" cạnh chênh lệch (+/-) để rõ ràng hơn.
-                    const balanceAfter = isDirectSet ? accountBalanceAtDate(account, transactions, new Date(tx.date || tx.created_at), tx) : null;
+                    const balanceAfter = accountBalanceAtDate(account, transactions, new Date(tx.date || tx.created_at), tx);
                     const subtitleNote = isDirectSet ? `Số dư mới: ${formatMoney(balanceAfter)}` : displayNote;
                     return (
                       <div key={tx.id} className="flex items-center gap-3 py-3">
@@ -6595,7 +6649,7 @@ function AccountDetail({ account, transactions, categories, accounts, onBack, re
                         </div>
                         <div className="flex-shrink-0 text-right">
                           <p className={`font-bold text-sm ${isPositive ? 'text-turquoise' : 'text-cotton-candy'}`}>{isPositive ? '+' : '-'}{formatMoney(Math.abs(tx.amount))}</p>
-                          {isDirectSet && <p className="text-steel dark:text-light-grey text-[11px] mt-0.5 whitespace-nowrap">Số dư cuối: {formatMoney(balanceAfter)}</p>}
+                          {balanceAfter !== null && <p className="text-steel dark:text-light-grey text-[11px] mt-0.5 whitespace-nowrap">Số dư cuối: {formatMoney(balanceAfter)}</p>}
                         </div>
                         {!isDirectSet && (
                           <button onClick={() => setEditingTx(tx)} className="w-7 h-7 rounded-full hover:bg-ice-cream dark:hover:bg-night-sky/30 flex items-center justify-center text-steel dark:text-light-grey flex-shrink-0">
@@ -7392,7 +7446,7 @@ function blankCategoryForm() {
     interest_rate: '', include_in_spending_pool: true,
     description: '', target_amount: '', background_url: '',
     initial_allocation: '',
-    initial_allocation_date: now.toISOString().slice(0, 10),
+    initial_allocation_date: localDateStr(now),
     initial_allocation_time: now.toTimeString().slice(0, 5),
   };
 }
@@ -7455,7 +7509,7 @@ function CategorySection({ categories, reload, softDelete, spendingPoolByPeriod,
     setForm((f) => ({
       ...f,
       initial_allocation: initial.amount || '',
-      initial_allocation_date: (initial.date || (valid ? d.toISOString().slice(0, 10) : '')).slice(0, 10),
+      initial_allocation_date: (initial.date || (valid ? localDateStr(d) : '')).slice(0, 10),
       initial_allocation_time: valid ? `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}` : '00:00',
     }));
   }
@@ -7480,7 +7534,7 @@ function CategorySection({ categories, reload, softDelete, spendingPoolByPeriod,
 
   // Ghi/cập nhật đúng 1 dòng "Nạp quỹ lần đầu" cho quỹ (không insert trùng dòng mới)
   async function syncInitialAllocation(catId) {
-    const dateOnly = (form.initial_allocation_date || new Date().toISOString().slice(0, 10)).slice(0, 10);
+    const dateOnly = (form.initial_allocation_date || todayDateStr()).slice(0, 10);
     const dtObj = new Date(`${dateOnly}T${form.initial_allocation_time || '00:00'}:00`);
     const createdAt = isNaN(dtObj) ? new Date().toISOString() : dtObj.toISOString();
     const newInitial = form.initial_allocation ? Number(form.initial_allocation) : 0;
@@ -7677,7 +7731,7 @@ function CategorySection({ categories, reload, softDelete, spendingPoolByPeriod,
                     <label className="text-xs text-steel dark:text-light-grey font-semibold block mb-1">Ngày & giờ nạp quỹ lần đầu</label>
                     <DateTimeField
                       value={form.initial_allocation_date ? `${form.initial_allocation_date}T${form.initial_allocation_time || '00:00'}` : ''}
-                      max={new Date().toISOString().slice(0, 10)}
+                      max={todayDateStr()}
                       onChange={(v) => {
                         const [d = '', t = ''] = v.split('T');
                         setForm({ ...form, initial_allocation_date: d, initial_allocation_time: t });
@@ -7917,6 +7971,40 @@ function totalIncomeCumulativeAfterTx(tx, allTx) {
   return cumulative;
 }
 
+// "Số dư cuối" của giao dịch — DÙNG CHUNG cho "Hoạt động gần đây" (TxDetailRow) và bảng chi
+// tiết (TxLedgerRow) để 2 nơi luôn khớp nhau. Quy tắc: tiền lấy từ nguồn nào thì hiện số dư
+// của nguồn đó (quỹ / ví / Thu nhập được chi); khoản thu thì hiện tổng thu nhập cộng dồn.
+// Trả về null CHỈ khi thật sự không xác định được nguồn (vd: quỹ/ví đã bị xoá).
+function txBalanceAfter(tx, categories, accounts, allTx, spendingPoolByPeriod) {
+  const cat = categories.find((c) => c.id === tx.category_id);
+  const txDate = new Date(tx.date || tx.created_at);
+
+  // Nạp quỹ LẦN ĐẦU (không lấy từ ví nào): không có "nguồn bị trừ" nên trước đây rơi vào
+  // nhánh không có số dư. Hiển thị số dư của CHÍNH quỹ vừa nhận tiền.
+  if (tx.type === 'allocation' && isInitialAllocationTx(tx) && !tx.account_id) {
+    return cat ? fundBalanceAtDate(cat, allTx, txDate, tx) : null;
+  }
+
+  const source = txSourceInfo(tx, categories, accounts);
+  if (source.key.startsWith('fund:')) {
+    return cat ? fundBalanceAtDate(cat, allTx, txDate, tx) : null;
+  }
+  if (source.key.startsWith('account:')) {
+    const account = accounts.find((a) => a.id === tx.account_id);
+    return account ? accountBalanceAtDate(account, allTx, txDate, tx) : null;
+  }
+  if (source.key === 'pool') {
+    const isPoolDeduction = tx.type === 'expense' || (tx.type === 'allocation' && !isInitialAllocationTx(tx));
+    if (isPoolDeduction) return poolBalanceAfterTx(tx, allTx, categories, spendingPoolByPeriod);
+    if (tx.type === 'income') return totalIncomeCumulativeAfterTx(tx, allTx);
+    return null;
+  }
+  // 'special-income' (Thu nhập đặc biệt, không tính vào Thu nhập được chi): vẫn là 1 khoản
+  // thu nên hiện tổng thu nhập cộng dồn, thay vì bỏ trống như trước.
+  if (source.key === 'special-income') return totalIncomeCumulativeAfterTx(tx, allTx);
+  return null;
+}
+
 // Bảng chi tiết từng giao dịch cho 1 nhóm (VD: "Chi tiêu tháng 9/2026") — mở từ nút
 // "Xem chi tiết" trong popup hover của các thẻ tổng kết (Thu nhập / Thu nhập được chi /
 // Thu nhập đặc biệt / Chi tiêu). Hiển thị: nội dung chi, ghi chú, ngày, nguồn trừ,
@@ -7925,22 +8013,7 @@ function TxLedgerRow({ tx, categories, accounts, allTx, spendingPoolByPeriod, on
   const txDate = new Date(tx.date || tx.created_at);
   const source = txSourceInfo(tx, categories, accounts);
 
-  let balanceAfter = null;
-  if (source.key.startsWith('fund:')) {
-    const cat = categories.find((c) => c.id === tx.category_id);
-    balanceAfter = fundBalanceAtDate(cat, allTx, txDate, tx);
-  } else if (source.key.startsWith('account:')) {
-    const account = accounts.find((a) => a.id === tx.account_id);
-    balanceAfter = accountBalanceAtDate(account, allTx, txDate, tx);
-  } else if (source.key === 'pool') {
-    // "Thu nhập được chi" (pool): với khoản CHI/nạp quỹ trừ vào pool, hiện số dư còn lại
-    // sau giao dịch; với khoản THU NHẬP cộng vào pool, hiện tổng đã cộng dồn tính đến
-    // giao dịch này (không có "số dư sau khi trừ" vì đây là chiều cộng vào, không phải trừ ra).
-    const isPoolDeduction = (tx.type === 'expense') || (tx.type === 'allocation' && !isInitialAllocationTx(tx));
-    if (isPoolDeduction) balanceAfter = poolBalanceAfterTx(tx, allTx, categories, spendingPoolByPeriod);
-    else if (tx.type === 'income') balanceAfter = totalIncomeCumulativeAfterTx(tx, allTx);
-  }
-  // source.key === 'special-income' (Thu nhập đặc biệt): không có số dư nguồn liên quan, giữ '—'.
+  const balanceAfter = txBalanceAfter(tx, categories, accounts, allTx, spendingPoolByPeriod);
 
   const cat = categories.find((c) => c.id === tx.category_id);
   const isOutflow = tx.type === 'expense' || tx.type === 'allocation';
@@ -7951,7 +8024,7 @@ function TxLedgerRow({ tx, categories, accounts, allTx, spendingPoolByPeriod, on
       <td className="py-2.5 pr-3 text-xs text-steel dark:text-light-grey whitespace-nowrap">{dateTimeLabel}</td>
       <td className="py-2.5 pr-3 text-xs text-steel dark:text-light-grey whitespace-nowrap">{source.label}</td>
       <td className="py-2.5 pr-3 text-xs text-steel dark:text-light-grey whitespace-nowrap">{balanceAfter !== null ? formatMoney(balanceAfter) : '—'}</td>
-      <td className="py-2.5 pr-3 text-xs text-steel dark:text-light-grey max-w-[200px] truncate">{stripPeriodTag(tx.note) || '—'}</td>
+      <td className="py-2.5 pr-3 text-xs text-steel dark:text-light-grey max-w-[200px] truncate">{displayTxNote(tx.note) || '—'}</td>
       <td className={`py-2.5 pr-3 text-sm font-bold text-right whitespace-nowrap ${isOutflow ? 'text-cotton-candy' : 'text-turquoise'}`}>
         {isOutflow ? '-' : '+'}{formatMoney(tx.amount)}
       </td>
@@ -8185,8 +8258,369 @@ function MonthlyTrendChart({ trendData }) {
   );
 }
 
+/* ==============================================================================
+   XUẤT BÁO CÁO PDF — chọn khoảng ngày tự do + chọn mục muốn đưa vào. PDF được dựng
+   bằng @react-pdf/renderer (chữ thật, ngắt trang chuẩn) trong src/ReportPdf.jsx,
+   import động để không làm nặng bundle chính.
+   YÊU CẦU: npm install @react-pdf/renderer  +  đặt font vào public/fonts/.
+
+   Số liệu tài sản đầu/cuối kỳ dùng ĐÚNG cách chốt sổ của trang Báo cáo:
+   - Cuối kỳ = số dư chốt cuối ngày cuối kỳ (kỳ chưa kết thúc thì tính đến hôm nay).
+   - Đầu kỳ  = số dư chốt cuối ngày liền trước ngày bắt đầu (= cuối kỳ trước).
+   ============================================================================== */
+const REPORT_SECTIONS = [
+  { key: 'overview', label: 'Tổng quan (tài sản đầu/cuối kỳ, thu nhập, chi tiêu)' },
+  { key: 'income_by_cat', label: 'Thu nhập trong kỳ — theo nguồn' },
+  { key: 'expense_by_cat', label: 'Chi tiêu trong kỳ — theo nguồn' },
+  { key: 'funds', label: 'Quỹ — số dư cuối kỳ' },
+  { key: 'wallets', label: 'Ví — tổng quan (gồm những ví nào, số dư đầu/cuối)' },
+  { key: 'fund_history', label: 'Lịch sử quỹ (nạp/rút trong kỳ)' },
+  { key: 'transactions', label: 'Tất cả giao dịch trong kỳ' },
+];
+
+// Nạp quỹ (chuyển tiền sang quỹ) có tính vào "Tổng chi tiêu" của báo cáo không?
+// false: chỉ tính chi tiêu thật (giống thẻ "Chi tiêu" ở trang Báo cáo); nạp quỹ được ghi chú riêng.
+// true : gộp cả nạp quỹ vào chi tiêu (giống donut "Chi tiêu theo danh mục" trước đây).
+const REPORT_COUNT_FUND_DEPOSIT_AS_EXPENSE = false;
+
+function firstDayOfThisMonthStr() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`;
+}
+
+function parseLocalDate(str, endOfDay) {
+  const [y, m, d] = String(str).slice(0, 10).split('-').map(Number);
+  return endOfDay ? new Date(y, m - 1, d, 23, 59, 59, 999) : new Date(y, m - 1, d, 0, 0, 0, 0);
+}
+function reportDmy(iso) { const [y, m, d] = String(iso).slice(0, 10).split('-'); return `${d}/${m}/${y}`; }
+
+// Gom toàn bộ số liệu báo cáo thành các chuỗi đã định dạng sẵn — ReportPdf.jsx chỉ việc vẽ.
+function buildReportData({ startDate, endDate, transactions, categories, accounts, sections }) {
+  const txAll = transactions || [];
+  const cats = categories || [];
+  const accs = accounts || [];
+  const num = (v) => Number(v) || 0;
+  const sum = (arr, pick = (t) => num(t.amount)) => arr.reduce((s, x) => s + pick(x), 0);
+  const dash = (n, fmt = formatMoney) => (Math.round(n) ? fmt(n) : '-');
+  const pctOf = (part, whole) => `${whole > 0 ? ((part / whole) * 100).toFixed(1) : '0.0'}%`;
+  const catById = new Map(cats.map((c) => [c.id, c]));
+  const fundCats = cats.filter((c) => c.is_fund);
+  const txDay = (t) => (t.date ? String(t.date).slice(0, 10) : localDateStr(t.created_at));
+  const cleanNote = (n) => displayTxNote(n).replace(/^\[SET\]\s*/, '');
+
+  const start = parseLocalDate(startDate, false);
+  const end = parseLocalDate(endDate, true);
+  const openingCutoff = new Date(start.getTime() - 1); // 23:59:59.999 ngày liền trước kỳ
+  const inRange = (t) => { const d = new Date(t.date || t.created_at); return d >= start && d <= end; };
+  const rangeTxs = txAll.filter(inRange).sort(compareTxTime);
+
+  /* ---------- Tài sản đầu / cuối kỳ ---------- */
+  const walletStart = new Map(accs.map((a) => [a.id, walletBalanceAsOf(a, txAll, openingCutoff)]));
+  const walletEnd = new Map(accs.map((a) => [a.id, walletBalanceAsOf(a, txAll, end)]));
+  const fundStart = new Map(fundCats.map((c) => [c.id, fundBalanceAsOf(c, txAll, openingCutoff)]));
+  const fundEnd = new Map(fundCats.map((c) => [c.id, fundBalanceAsOf(c, txAll, end)]));
+  const isGold = (a) => a.type === 'gold';
+  const plainWallets = accs.filter((a) => !isGold(a));
+  const goldWallets = accs.filter(isGold);
+  const sumMap = (map, items) => items.reduce((s, x) => s + (map.get(x.id) || 0), 0);
+
+  const groupsAgg = [
+    { label: 'Ví', s: sumMap(walletStart, plainWallets), e: sumMap(walletEnd, plainWallets), show: plainWallets.length > 0 },
+    { label: 'Vàng', s: sumMap(walletStart, goldWallets), e: sumMap(walletEnd, goldWallets), show: goldWallets.length > 0 },
+    { label: 'Quỹ', s: sumMap(fundStart, fundCats), e: sumMap(fundEnd, fundCats), show: fundCats.length > 0 },
+  ].filter((g) => g.show);
+  const assetsStart = sum(groupsAgg, (g) => g.s);
+  const assetsEnd = sum(groupsAgg, (g) => g.e);
+  const assetsDiff = assetsEnd - assetsStart;
+
+  /* ---------- Thu nhập / chi tiêu ---------- */
+  const incomeTxs = rangeTxs.filter((t) => t.type === 'income');
+  const totalIncome = sum(incomeTxs);
+  const allocTxs = rangeTxs.filter((t) => t.type === 'allocation' && !isInitialAllocationTx(t));
+  const totalAlloc = sum(allocTxs);
+  const expenseTxs = rangeTxs.filter((t) => t.type === 'expense' || (REPORT_COUNT_FUND_DEPOSIT_AS_EXPENSE && allocTxs.includes(t)));
+  const totalExpense = sum(expenseTxs);
+  const net = totalIncome - totalExpense;
+
+  function groupBy(txs, keyFn, nameFn) {
+    const map = new Map();
+    txs.forEach((t) => {
+      const k = keyFn(t);
+      const cur = map.get(k) || { name: nameFn(t), count: 0, total: 0 };
+      cur.count += 1; cur.total += num(t.amount);
+      map.set(k, cur);
+    });
+    return [...map.values()].sort((a, b) => b.total - a.total);
+  }
+  const toCatRows = (groups, whole) => groups.map((g) => ({ name: g.name, count: String(g.count), amount: formatMoney(g.total), pct: pctOf(g.total, whole) }));
+
+  const incomeByCat = toCatRows(groupBy(incomeTxs, (t) => t.category_id || 'none', (t) => catById.get(t.category_id)?.name || 'Không rõ danh mục'), totalIncome);
+  const expenseByCat = toCatRows(groupBy(
+    expenseTxs,
+    (t) => `${t.category_id || 'none'}:${t.type}`,
+    (t) => {
+      const c = catById.get(t.category_id);
+      if (c?.is_fund) return t.type === 'allocation' ? `Nạp quỹ: ${c.name}` : `Rút từ quỹ: ${c.name}`;
+      return c?.name || 'Không rõ danh mục';
+    },
+  ), totalExpense);
+  const expenseBySource = groupBy(expenseTxs, (t) => txSourceInfo(t, cats, accs).key, (t) => txSourceInfo(t, cats, accs).label)
+    .map((g) => ({ label: g.name, amount: formatMoney(g.total), pct: pctOf(g.total, totalExpense) }));
+
+  /* ---------- Ví ---------- */
+  const walletRow = (a) => {
+    const mine = rangeTxs.filter((t) => t.account_id === a.id);
+    const inflow = sum(mine.filter((t) => t.type === 'income'));
+    const outflow = sum(mine.filter((t) => t.type === 'expense'));
+    const toFund = sum(mine.filter((t) => t.type === 'allocation'));
+    const adjust = sum(mine.filter((t) => t.type === 'adjustment'));
+    return {
+      name: a.name,
+      typeLabel: ACCOUNT_TYPES.find((x) => x.value === a.type)?.label || '',
+      startRaw: walletStart.get(a.id) || 0, endRaw: walletEnd.get(a.id) || 0,
+      inflowRaw: inflow, outflowRaw: outflow, toFundRaw: toFund, adjustRaw: adjust,
+    };
+  };
+  const walletGroups = [
+    { title: 'Ví', items: plainWallets },
+    { title: 'Vàng', items: goldWallets },
+  ].filter((g) => g.items.length > 0).map((g) => {
+    const rows = g.items.map(walletRow);
+    const t = (k) => sum(rows, (r) => r[k]);
+    return {
+      title: g.title,
+      rows: rows.map((r) => ({
+        name: r.name, typeLabel: r.typeLabel,
+        start: formatMoneySigned(r.startRaw), inflow: dash(r.inflowRaw), outflow: dash(r.outflowRaw),
+        toFund: dash(r.toFundRaw), adjust: dash(r.adjustRaw, formatMoneySigned), end: formatMoneySigned(r.endRaw),
+      })),
+      total: {
+        name: 'Tổng', typeLabel: '', start: formatMoneySigned(t('startRaw')), inflow: dash(t('inflowRaw')), outflow: dash(t('outflowRaw')),
+        toFund: dash(t('toFundRaw')), adjust: dash(t('adjustRaw'), formatMoneySigned), end: formatMoneySigned(t('endRaw')),
+      },
+    };
+  });
+
+  /* ---------- Quỹ: số dư cuối kỳ + lịch sử ---------- */
+  const fundRowsRaw = fundCats.map((c) => {
+    const mine = rangeTxs.filter((t) => t.category_id === c.id);
+    const deposit = sum(mine.filter((t) => t.type === 'allocation'));
+    const withdraw = sum(mine.filter((t) => t.type === 'expense'));
+    const startB = fundStart.get(c.id) || 0;
+    const endB = fundEnd.get(c.id) || 0;
+    let profit = endB - startB - deposit + withdraw; // lợi nhuận tự sinh trong kỳ
+    if (Math.abs(profit) < 1) profit = 0;
+    return { name: c.name, startB, deposit, withdraw, profit, endB };
+  });
+  const ft = (k) => sum(fundRowsRaw, (r) => r[k]);
+  const funds = {
+    rows: fundRowsRaw.map((r) => ({
+      name: r.name, start: formatMoneySigned(r.startB), deposit: dash(r.deposit), withdraw: dash(r.withdraw),
+      profit: dash(r.profit, formatMoneySigned), end: formatMoneySigned(r.endB),
+    })),
+    total: { name: 'Tổng', start: formatMoneySigned(ft('startB')), deposit: dash(ft('deposit')), withdraw: dash(ft('withdraw')), profit: dash(ft('profit'), formatMoneySigned), end: formatMoneySigned(ft('endB')) },
+  };
+
+  const fundHistory = fundCats.map((c) => {
+    const rate = num(c.interest_rate);
+    const rows = fundTransactionsWithBalance(c, txAll).filter(inRange).map((t) => ({
+      date: reportDmy(txDay(t)),
+      kind: t.type === 'allocation' ? 'Nạp quỹ' : 'Rút quỹ',
+      note: cleanNote(t.note),
+      amount: `${t.type === 'allocation' ? '+' : '-'}${formatMoney(t.amount)}`,
+      tone: t.type === 'allocation' ? 'in' : 'out',
+      balance: formatMoneySigned(t.balanceAfter),
+    }));
+    return { name: `${c.name}${rate > 0 ? ` · lãi ${rate}%/năm` : ''}`, rows };
+  });
+
+  /* ---------- Danh sách giao dịch ---------- */
+  const kindLabel = (t) => {
+    if (t.type === 'income') return 'Thu nhập';
+    if (t.type === 'allocation') return 'Nạp quỹ';
+    if (t.type === 'adjustment') return 'Điều chỉnh ví';
+    return catById.get(t.category_id)?.is_fund ? 'Rút quỹ' : 'Chi tiêu';
+  };
+  const txs = rangeTxs.map((t) => {
+    let amount, tone;
+    if (t.type === 'income') { amount = `+${formatMoney(t.amount)}`; tone = 'in'; }
+    else if (t.type === 'expense') { amount = `-${formatMoney(t.amount)}`; tone = 'out'; }
+    else if (t.type === 'adjustment') { amount = `${num(t.amount) >= 0 ? '+' : '-'}${formatMoney(t.amount)}`; tone = num(t.amount) >= 0 ? 'in' : 'out'; }
+    else { amount = formatMoney(t.amount); tone = undefined; } // nạp quỹ: chuyển nội bộ, không màu
+    return {
+      date: reportDmy(txDay(t)),
+      kind: kindLabel(t),
+      cat: catById.get(t.category_id)?.name || '',
+      source: txSourceInfo(t, cats, accs).label,
+      note: cleanNote(t.note),
+      amount, tone,
+    };
+  });
+
+  return {
+    startDate: reportDmy(startDate),
+    endDate: reportDmy(endDate),
+    generatedAt: new Date().toLocaleString('vi-VN'),
+    sections,
+    overview: {
+      assetsStart: formatMoneySigned(assetsStart),
+      assetsEnd: formatMoneySigned(assetsEnd),
+      assetsChange: `${assetsDiff >= 0 ? '+' : '-'}${formatMoney(assetsDiff)}`,
+      assetsChangePct: assetsStart > 0 ? `${assetsDiff >= 0 ? '+' : '-'}${Math.abs((assetsDiff / assetsStart) * 100).toFixed(1)}%` : null,
+      assetsPositive: assetsDiff >= 0,
+      income: formatMoney(totalIncome),
+      expense: formatMoney(totalExpense),
+      net: formatMoneySigned(net),
+      netPositive: net >= 0,
+      composition: groupsAgg.map((g) => ({ label: g.label, start: formatMoneySigned(g.s), end: formatMoneySigned(g.e), diff: formatMoneySigned(g.e - g.s) })),
+      compositionTotal: { label: 'Tổng tài sản', start: formatMoneySigned(assetsStart), end: formatMoneySigned(assetsEnd), diff: formatMoneySigned(assetsDiff) },
+      expenseBySource,
+      allocation: totalAlloc > 0 ? formatMoney(totalAlloc) : null,
+      allocationCountedAsExpense: REPORT_COUNT_FUND_DEPOSIT_AS_EXPENSE,
+    },
+    incomeByCat, incomeTotal: { count: String(incomeTxs.length), amount: formatMoney(totalIncome) },
+    expenseByCat, expenseTotal: { count: String(expenseTxs.length), amount: formatMoney(totalExpense) },
+    funds, walletGroups, fundHistory,
+    txs, txCount: txs.length,
+  };
+}
+
+function ReportExportModal({ onClose, transactions, categories, accounts }) {
+  const [step, setStep] = useState('config'); // 'config' | 'preview'
+  const [startDate, setStartDate] = useState(firstDayOfThisMonthStr());
+  const [endDate, setEndDate] = useState(todayDateStr());
+  const [selectedSections, setSelectedSections] = useState(() => Object.fromEntries(REPORT_SECTIONS.map((s) => [s.key, true])));
+  const [generating, setGenerating] = useState(false);
+  const [error, setError] = useState('');
+  const [pdfUrl, setPdfUrl] = useState(null);
+  const pdfBlobRef = useRef(null);
+
+  // Giải phóng object URL khi đóng modal / tạo bản mới, tránh rò bộ nhớ.
+  useEffect(() => () => { if (pdfUrl) URL.revokeObjectURL(pdfUrl); }, [pdfUrl]);
+
+  function toggleSection(key) { setSelectedSections((s) => ({ ...s, [key]: !s[key] })); }
+  const anySelected = REPORT_SECTIONS.some((s) => selectedSections[s.key]);
+
+  // Chọn nhanh khoảng thời gian. Kỳ tài chính của app chạy từ ngày 21 tháng trước đến ngày 20;
+  // ngày cuối không được vượt quá hôm nay (kỳ chưa kết thúc thì báo cáo tính đến hôm nay).
+  function applyPeriodPreset(periodKey) {
+    const { start, end } = periodKeyToRange(periodKey);
+    const today = todayDateStr();
+    const endStr = localDateStr(end) > today ? today : localDateStr(end);
+    setStartDate(localDateStr(start));
+    setEndDate(endStr);
+  }
+  function previousPeriodKey() {
+    const [y, m] = currentPeriodKey().split('-').map(Number);
+    return m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, '0')}`;
+  }
+  const presets = [
+    { label: 'Kỳ này (21→20)', run: () => applyPeriodPreset(currentPeriodKey()) },
+    { label: 'Kỳ trước (21→20)', run: () => applyPeriodPreset(previousPeriodKey()) },
+    { label: 'Tháng này', run: () => { setStartDate(firstDayOfThisMonthStr()); setEndDate(todayDateStr()); } },
+  ];
+
+  async function generatePdf() {
+    setGenerating(true);
+    setError('');
+    try {
+      const data = buildReportData({ startDate, endDate, transactions, categories, accounts, sections: selectedSections });
+      const { renderReportPdfBlob } = await import('./ReportPdf');
+      const blob = await renderReportPdfBlob(data);
+      pdfBlobRef.current = blob;
+      setPdfUrl(URL.createObjectURL(blob));
+      setStep('preview');
+    } catch (e) {
+      const msg = e?.message || '';
+      setError(/Failed to resolve|Cannot find module|Failed to fetch dynamically/.test(msg)
+        ? 'Chưa cài thư viện. Chạy "npm install @react-pdf/renderer" rồi khởi động lại dev server.'
+        : 'Tạo PDF thất bại: ' + msg);
+    }
+    setGenerating(false);
+  }
+
+  function downloadPdf() {
+    if (!pdfBlobRef.current) return;
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(pdfBlobRef.current);
+    a.download = `bao-cao-pandafi_${startDate}_${endDate}.pdf`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  }
+
+  return createPortal(
+    <div className="fixed inset-0 bg-black/50 z-[999] flex items-center justify-center p-2 md:p-3" onClick={onClose}>
+      <div className="bg-white dark:bg-[#1e1e32] rounded-3xl w-[96vw] h-[96vh] max-w-none flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-6 py-4 border-b border-light-grey/30 flex-shrink-0">
+          <div className="flex items-center gap-2">
+            <FileText size={18} className="text-turquoise" />
+            <h3 className="font-bold text-blueberry dark:text-white">{step === 'config' ? 'Xuất báo cáo PDF' : 'Xem trước báo cáo'}</h3>
+          </div>
+          <button onClick={onClose}><X size={18} className="text-steel dark:text-light-grey" /></button>
+        </div>
+
+        {step === 'config' ? (
+          <div className="p-6 overflow-y-auto scrollbar-hide flex-1">
+           <div className="max-w-2xl mx-auto">
+            <p className="text-blueberry dark:text-white font-bold text-sm mb-2">Khoảng thời gian</p>
+            <div className="flex flex-wrap gap-2 mb-3">
+              {presets.map((p) => (
+                <button key={p.label} type="button" onClick={p.run} className="px-3 py-1.5 rounded-full text-xs font-bold text-blueberry dark:text-white bg-ice-cream dark:bg-night-sky">{p.label}</button>
+              ))}
+            </div>
+            <div className="flex items-center gap-2 mb-5">
+              <DateField value={startDate} onChange={setStartDate} max={endDate} showIcon={false} clearable={false} className="flex-1 justify-between bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm text-blueberry dark:text-white" />
+              <span className="text-steel dark:text-light-grey text-sm">-</span>
+              <DateField value={endDate} onChange={setEndDate} max={todayDateStr()} align="right" showIcon={false} clearable={false} className="flex-1 justify-between bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm text-blueberry dark:text-white" />
+            </div>
+            <p className="text-blueberry dark:text-white font-bold text-sm mb-2">Mục muốn đưa vào báo cáo</p>
+            <div className="flex flex-col gap-2 mb-2">
+              {REPORT_SECTIONS.map((s) => (
+                <label key={s.key} className="flex items-center gap-3 bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm font-semibold text-blueberry dark:text-white cursor-pointer">
+                  <input type="checkbox" checked={!!selectedSections[s.key]} onChange={() => toggleSection(s.key)} />
+                  {s.label}
+                </label>
+              ))}
+            </div>
+            {!anySelected && <p className="text-cotton-candy text-xs font-semibold mt-1">Chọn ít nhất 1 mục để tạo báo cáo.</p>}
+           </div>
+          </div>
+        ) : (
+          <div className="flex-1 min-h-0 bg-[#e5e5ea] flex items-center justify-center">
+            {/* Trình xem PDF nhúng chỉ đáng tin cậy trên desktop; WebView điện thoại thường không hiển thị. */}
+            <iframe title="Xem trước báo cáo" src={pdfUrl || undefined} className="hidden md:block w-full h-full border-0" />
+            <p className="md:hidden text-steel text-sm text-center px-8 py-10">Điện thoại không hỗ trợ xem trước PDF ngay trong app. Bấm "Tải PDF" để mở file.</p>
+          </div>
+        )}
+
+        <div className="flex items-center justify-between gap-3 px-6 py-4 border-t border-light-grey/30 flex-shrink-0">
+          {error && <p className="text-cotton-candy text-xs font-semibold flex-1">{error}</p>}
+          <div className="flex items-center gap-3 ml-auto">
+            {step === 'preview' && (
+              <button onClick={() => setStep('config')} className="px-4 py-2.5 rounded-full text-sm font-bold text-steel dark:text-light-grey bg-ice-cream dark:bg-[#2a2a44]">Quay lại</button>
+            )}
+            {step === 'config' ? (
+              <button onClick={generatePdf} disabled={!anySelected || generating} className="flex items-center gap-2 px-5 py-2.5 rounded-full text-sm font-bold text-white bg-gradient-primary disabled:opacity-50 shadow-md shadow-turquoise/30">
+                {generating && <Loader2 size={15} className="animate-spin" />} Xem trước
+              </button>
+            ) : (
+              <button onClick={downloadPdf} className="flex items-center gap-2 px-5 py-2.5 rounded-full text-sm font-bold text-white bg-gradient-primary shadow-md shadow-turquoise/30">
+                <Download size={15} /> Tải PDF
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
 function Report({ setScreen, transactions, categories, accounts, goals, onAddClick, displayName, avatarUrl, theme, toggleTheme, openSettings, sidebarCollapsed, toggleSidebar, spendingPoolByPeriod, saveSpendingPoolForPeriod, reload, softDelete, openFund }) {
   const [editingTx, setEditingTx] = useState(null);
+  const [showExportModal, setShowExportModal] = useState(false);
   // Bộ lọc "Hoạt động gần đây": lọc theo Loại giao dịch trước (Thu nhập / Chi tiêu /
   // Nạp quỹ / Rút quỹ / Chuyển khoản...), sau đó lọc thêm theo Danh mục cụ thể bên trong loại đó.
   // FIX: đổi từ string đơn sang mảng để cho phép chọn NHIỀU loại cùng lúc (vd Chi tiêu + Nạp
@@ -8241,16 +8675,16 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
   const [selectedQuarter, setSelectedQuarter] = useState(Math.ceil(defaultPeriodMonth / 3));
   const [selectedHalf, setSelectedHalf] = useState(defaultPeriodMonth <= 6 ? 1 : 2);
   const [selectedYear, setSelectedYear] = useState(defaultPeriodYear);
-  const [selectedDay, setSelectedDay] = useState(new Date().toISOString().slice(0,10));
+  const [selectedDay, setSelectedDay] = useState(todayDateStr());
   const [selectedWeek, setSelectedWeek] = useState(() => {
     const d = new Date();
     const day = d.getDay();
     const diff = d.getDate() - day + (day === 0 ? -6 : 1); // Monday
     d.setDate(diff);
-    return d.toISOString().slice(0,10);
+    return localDateStr(d);
   });
-  const [customStart, setCustomStart] = useState(new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0,10));
-  const [customEnd, setCustomEnd] = useState(new Date().toISOString().slice(0,10));
+  const [customStart, setCustomStart] = useState(localDateStr(periodKeyToRange(currentPeriodKey()).start));
+  const [customEnd, setCustomEnd] = useState(todayDateStr());
 
   // Neo vị trí card "Thu nhập đã đi đâu?" khi đổi bộ chọn thời gian (Ngày/Tuần/Tháng/Quý/
   // 6 tháng/Năm/Tùy chỉnh) — card này có vài dòng chỉ hiện có điều kiện (Tích lũy trước chi,
@@ -8369,15 +8803,18 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
   // Nhãn "Tháng .../Năm ..." dùng làm dòng ngăn cách giữa các tháng trong danh sách
   // "Hoạt động gần đây" — giúp dễ nhận biết ranh giới tháng khi danh sách kéo dài nhiều tháng.
   function formatTxMonthLabel(dateStr) {
-    const date = new Date(dateStr);
-    return `Tháng ${date.getMonth() + 1}/${date.getFullYear()}`;
+    const pk = dateToPeriodKey(new Date(dateStr));
+    const [py, pm] = pk.split('-').map(Number);
+    const { start: pStart, end: pEnd } = periodKeyToRange(pk);
+    const dm = (d) => `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}`;
+    return `Kỳ tháng ${pm}/${py} (${dm(pStart)} - ${dm(pEnd)})`;
   }
-  // So 2 key ngày (toDateString) có cùng tháng+năm hay không — dùng để quyết định có
-  // chèn dòng ngăn cách tháng phía trên nhóm ngày đang xét hay không.
+  // So 2 key ngày (toDateString) có cùng KỲ tài chính (21 → 20) hay không — quyết định có chèn
+  // dòng ngăn cách kỳ phía trên nhóm ngày đang xét hay không. Trước đây so theo tháng dương lịch
+  // nên ranh giới bị cắt giữa kỳ (ngày 30/9 | 1/10) thay vì ở ngày 20 | 21.
   function isSameTxMonth(keyA, keyB) {
     if (!keyA || !keyB) return false;
-    const a = new Date(keyA), b = new Date(keyB);
-    return a.getMonth() === b.getMonth() && a.getFullYear() === b.getFullYear();
+    return dateToPeriodKey(new Date(keyA)) === dateToPeriodKey(new Date(keyB));
   }
   // (đã thay bằng groupedFilteredTxs/sortedFilteredTxKeys bên dưới, có áp thêm bộ lọc)
 
@@ -8465,27 +8902,15 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
     const isOverLimit = (tx.note || '').includes('[Vượt hạn mức]');
     const isDirectSet = tx.type === 'adjustment' && (tx.note || '').startsWith('[SET]');
     const timeLabel = new Date(tx.created_at || tx.date).toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit', year: 'numeric' });
-    const txDate = new Date(tx.date || tx.created_at);
-    const sourceKeyInfo = txSourceInfo(tx, categories, accounts);
-    let balanceAfter = null;
-    if (sourceKeyInfo.key.startsWith('fund:')) {
-      balanceAfter = fundBalanceAtDate(cat, transactions, txDate, tx);
-    } else if (sourceKeyInfo.key.startsWith('account:')) {
-      const account = accounts.find((a) => a.id === tx.account_id);
-      balanceAfter = accountBalanceAtDate(account, transactions, txDate, tx);
-    } else if (sourceKeyInfo.key === 'pool') {
-      const isPoolDeduction = (tx.type === 'expense') || (tx.type === 'allocation' && !isInitialAllocationTx(tx));
-      if (isPoolDeduction) balanceAfter = poolBalanceAfterTx(tx, transactions, categories, spendingPoolByPeriod);
-      else if (tx.type === 'income') balanceAfter = totalIncomeCumulativeAfterTx(tx, transactions);
-    }
+    const balanceAfter = txBalanceAfter(tx, categories, accounts, transactions, spendingPoolByPeriod);
     // [SET] Đặt số dư mới: ghi chú hiển thị con số thực tế "Số dư mới" thay vì
     // chữ tĩnh "Đặt số dư mới" chung chung, để người dùng biết ngay giá trị đã đặt.
     const noteText = isDirectSet
       ? (balanceAfter !== null ? `Số dư mới: ${formatMoney(balanceAfter)}` : stripPeriodTag((tx.note || '').replace('[SET] ', '')))
-      : stripPeriodTag(tx.note);
+      : displayTxNote(tx.note);
     return (
       <div onClick={() => setEditingTx(tx)} className="flex items-center gap-3 py-3 first:pt-0 last:pb-0 cursor-pointer hover:bg-ice-cream dark:hover:bg-night-sky/30 rounded-xl -mx-2 px-2 transition">
-        <EmojiCircle emoji={cat?.icon} size={40} bg={tx.type === 'expense' ? '#E3D6FF' : '#B4F1F1'} />
+        <EmojiCircle emoji={txIconEmoji(tx, categories, accounts)} size={40} bg={tx.type === 'expense' ? '#E3D6FF' : '#B4F1F1'} />
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5 flex-wrap">
             <p className="text-blueberry dark:text-white font-bold text-sm truncate">{tx.type === 'adjustment' ? 'Cập nhật số dư ví' : (cat?.name || (tx.type === 'income' ? 'Thu nhập' : 'Chi tiêu'))}</p>
@@ -8581,15 +9006,25 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
   }
   const prevAgg = { income: prevFinancials.totalIncome, allocation: prevFinancials.allocationFromSpendingPool, expenseFromIncome: prevFinancials.expenseFromSpendingPool, expenseFromFund: prevFinancials.expenseFromFund, totalActualExpense: prevFinancials.totalActualExpense, remaining: prevFinancials.remainingAfterSpend };
 
-  // Asset snapshot at end of period
-  const totalAccountsEnd = accounts.reduce((s, a) => s + accountBalanceAtDate(a, transactions, end), 0);
+  // ===== CHỐT SỔ TÀI SẢN ĐẦU / CUỐI KỲ (nguyên tắc kế toán: cut-off + số dư đầu kỳ = số dư cuối kỳ trước) =====
+  // - Cuối kỳ = số dư CHỐT cuối ngày cuối kỳ (cuối ngày 20).
+  // - Đầu kỳ  = số dư CHỐT cuối ngày liền trước ngày bắt đầu (cuối ngày 20 của kỳ trước), nên
+  //   đầu kỳ này luôn BẰNG cuối kỳ trước; mọi giao dịch/lãi của ngày 21 thuộc hẳn kỳ mới.
+  //   (Trước đây quỹ bị tính luôn cả ngày 21 vào đầu kỳ vì hàm tính theo ngày, còn ví thì không.)
+  // - Kỳ CHƯA kết thúc: chỉ ghi nhận những gì đã xảy ra tới hiện tại, không cộng lãi dự kiến
+  //   của những ngày chưa tới. Ví: mọi giao dịch có ngày ≤ hôm nay. Quỹ: fundBalanceWithProfit
+  //   (lãi tới hết hôm qua + giao dịch hôm nay) — đúng số dư quỹ đang hiển thị ở các màn khác.
+  const endOfToday = new Date(); endOfToday.setHours(23, 59, 59, 999);
+  const openingCutoff = new Date(start.getTime() - 1); // 23:59:59.999 ngày liền trước kỳ
+  const totalAccountsEnd = accounts.reduce((s, a) => s + walletBalanceAsOf(a, transactions, end), 0);
   const fundCats = categories.filter(c => c.is_fund);
-  const totalFundsEnd = fundCats.reduce((s, c) => s + fundBalanceAtDate(c, transactions, end), 0);
+  const totalFundsEnd = fundCats.reduce((s, c) => s + fundBalanceAsOf(c, transactions, end), 0);
   const totalAssetsEnd = totalAccountsEnd + totalFundsEnd;
-  // Asset at start of period for comparison
-  const totalAccountsStart = accounts.reduce((s, a) => s + accountBalanceAtDate(a, transactions, start), 0);
-  const totalFundsStart = fundCats.reduce((s, c) => s + fundBalanceAtDate(c, transactions, start), 0);
+  // Tài sản đầu kỳ (chốt cuối ngày liền trước kỳ)
+  const totalAccountsStart = accounts.reduce((s, a) => s + walletBalanceAsOf(a, transactions, openingCutoff), 0);
+  const totalFundsStart = fundCats.reduce((s, c) => s + fundBalanceAsOf(c, transactions, openingCutoff), 0);
   const totalAssetsStart = totalAccountsStart + totalFundsStart;
+  const isPeriodOngoing = end > endOfToday; // kỳ chưa kết thúc -> "cuối kỳ" thực chất là "tính đến hôm nay"
   const assetChange = totalAssetsStart > 0 ? ((totalAssetsEnd - totalAssetsStart) / totalAssetsStart) * 100 : null;
 
   // Income breakdown
@@ -8623,9 +9058,9 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
     ...expenseBreakdown.map(c => ({ key: c.id, name: c.name, amount: c.amount })),
     ...expenseFundWithdrawn,
   ].sort((a, b) => b.amount - a.amount);
-  const assetWalletItems = accounts.filter(a => a.type !== 'gold').map(a => ({ key: a.id, name: a.name, amount: accountBalanceAtDate(a, transactions, end) }));
-  const assetGoldItems = accounts.filter(a => a.type === 'gold').map(a => ({ key: a.id, name: a.name, amount: accountBalanceAtDate(a, transactions, end) }));
-  const assetFundItems = fundCats.map(c => ({ key: c.id, name: c.name, amount: fundBalanceAtDate(c, transactions, end) }));
+  const assetWalletItems = accounts.filter(a => a.type !== 'gold').map(a => ({ key: a.id, name: a.name, amount: walletBalanceAsOf(a, transactions, end) }));
+  const assetGoldItems = accounts.filter(a => a.type === 'gold').map(a => ({ key: a.id, name: a.name, amount: walletBalanceAsOf(a, transactions, end) }));
+  const assetFundItems = fundCats.map(c => ({ key: c.id, name: c.name, amount: fundBalanceAsOf(c, transactions, end) }));
   // "Còn lại" của kỳ = Thu nhập được chi còn lại + số dư cuối kỳ của TỪNG quỹ + TỪNG ví
   // (không gộp tổng), liệt kê đủ mọi quỹ/ví hiện có, dù kỳ đó quỹ/ví đó có biến động số dư hay không.
   const remainingWalletTotal = assetWalletItems.reduce((s, w) => s + w.amount, 0);
@@ -8634,7 +9069,7 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
 
   // Fund data
   const fundData = fundCats.map(c => {
-    const balanceNow = fundBalanceAtDate(c, transactions, end); // at end of period
+    const balanceNow = fundBalanceAsOf(c, transactions, end); // chốt cuối kỳ (hoặc tới hôm nay nếu kỳ chưa kết thúc)
     const contributed = periodTxs.filter(t => t.category_id === c.id && t.type === 'allocation').reduce((s, t) => s + Number(t.amount), 0);
     const withdrawn = periodTxs.filter(t => t.category_id === c.id && t.type === 'expense').reduce((s, t) => s + Number(t.amount), 0);
     const target = Number(c.target_amount || 0);
@@ -8853,7 +9288,10 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
         <div className="w-full min-h-[100dvh] pb-28 relative">
           <div className="px-5 pt-8 flex items-center justify-between">
             <h1 className="text-blueberry dark:text-white text-lg font-bold">Báo cáo</h1>
-            <button onClick={() => setScreen('dashboard')} className="w-9 h-9 rounded-full frost-inset flex items-center justify-center"><X size={18} className="text-blueberry dark:text-white" /></button>
+            <div className="flex items-center gap-2">
+              <button onClick={() => setShowExportModal(true)} title="Xuất báo cáo PDF" className="w-9 h-9 rounded-full frost-inset flex items-center justify-center"><FileText size={17} className="text-blueberry dark:text-white" /></button>
+              <button onClick={() => setScreen('dashboard')} className="w-9 h-9 rounded-full frost-inset flex items-center justify-center"><X size={18} className="text-blueberry dark:text-white" /></button>
+            </div>
           </div>
           <div onClickCapture={captureIncomeCardScrollAnchor} onChangeCapture={captureIncomeCardScrollAnchor} className="px-5 mt-2">
             <CustomSelect value={timeType} onChange={(e) => setTimeType(e.target.value)} className="" triggerClassName="w-full frost-inset rounded-xl px-4 py-2 text-sm text-blueberry dark:text-white outline-none [color-scheme:light] dark:[color-scheme:dark]">
@@ -8989,7 +9427,10 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
         <div className="frost-blob z-0 w-96 h-96 bg-baby-blue-light/70 dark:bg-baby-blue/22 -top-10 right-10" />
         <div className="frost-blob z-0 w-80 h-80 bg-lavender-light/70 dark:bg-lavender/22 top-[600px] -left-10" />
         <div className="relative flex items-center justify-between mb-6 flex-wrap gap-4">
-          <h1 className="text-blueberry dark:text-white text-2xl font-extrabold">Báo cáo &amp; Phân tích</h1>
+          <div className="flex items-center gap-3">
+            <h1 className="text-blueberry dark:text-white text-2xl font-extrabold">Báo cáo &amp; Phân tích</h1>
+            <button onClick={() => setShowExportModal(true)} className="frost-inset rounded-full text-sm font-bold px-4 py-2 flex items-center gap-2 text-blueberry dark:text-white"><FileText size={15} className="text-turquoise" /> Xuất PDF</button>
+          </div>
           <div onClickCapture={captureIncomeCardScrollAnchor} onChangeCapture={captureIncomeCardScrollAnchor} className="flex items-center gap-2 flex-wrap">
             <CustomSelect value={timeType} onChange={(e) => setTimeType(e.target.value)} className="" triggerClassName="frost-inset rounded-full text-sm font-bold px-4 py-2 outline-none text-blueberry dark:text-white [color-scheme:light] dark:[color-scheme:dark]">
               <option value="day">Ngày</option>
@@ -9040,16 +9481,20 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
 
  <div className="frost-card rounded-3xl p-6 mb-6">
           <h2 className="text-blueberry dark:text-white font-extrabold text-lg mb-2">Tổng kết {periodLabel}</h2>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
             <div><p className="text-steel dark:text-light-grey text-sm">Thu nhập</p><p className="text-xl font-bold text-turquoise">{formatMoney(income)}</p></div>
             <div><p className="text-steel dark:text-light-grey text-sm">Góp quỹ</p><p className="text-xl font-bold text-baby-blue">{formatMoney(allocation)}</p></div>
             <div><p className="text-steel dark:text-light-grey text-sm">Chi tiêu</p><p className="text-xl font-bold text-cotton-candy">{formatMoney(totalActualExpense)}</p></div>
+            <div><p className="text-steel dark:text-light-grey text-sm">Tài sản đầu kỳ</p><p className="text-xl font-bold text-blueberry dark:text-white">{formatMoney(totalAssetsStart)}</p></div>
             <div><p className="text-steel dark:text-light-grey text-sm">Tài sản cuối kỳ</p><p className="text-xl font-bold text-blueberry dark:text-white">{formatMoney(totalAssetsEnd)}</p></div>
           </div>
           {assetChange !== null && (
             <p className={`text-sm mt-2 ${assetChange >= 0 ? 'text-turquoise' : 'text-cotton-candy'}`}>
               {assetChange >= 0 ? '▲' : '▼'} {Math.abs(Math.round(assetChange))}% so với đầu kỳ
             </p>
+          )}
+          {isPeriodOngoing && (
+            <p className="text-steel dark:text-light-grey text-xs mt-1">Kỳ chưa kết thúc — Tài sản cuối kỳ đang tính đến hôm nay. Tài sản đầu kỳ chốt cuối ngày liền trước kỳ (bằng cuối kỳ trước).</p>
           )}
         </div>
 
@@ -9377,7 +9822,7 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
                     <div key={tx.id} className="flex justify-between border-b py-2">
                       <div>
                         <p className="text-sm text-blueberry dark:text-white">{new Date(tx.date || tx.created_at).toLocaleDateString('vi-VN')}</p>
-                        <p className="text-xs text-steel dark:text-light-grey">{stripPeriodTag(tx.note) || 'Không có ghi chú'}</p>
+                        <p className="text-xs text-steel dark:text-light-grey">{displayTxNote(tx.note) || 'Không có ghi chú'}</p>
                       </div>
                       <span className="font-bold text-cotton-candy">{formatMoney(tx.amount)}</span>
                     </div>
@@ -9399,6 +9844,9 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
           onClose={() => setLedgerModal(null)}
           onDeleteTx={handleDeleteTx}
         />
+      )}
+      {showExportModal && (
+        <ReportExportModal onClose={() => setShowExportModal(false)} transactions={transactions} categories={categories} accounts={accounts} />
       )}
       {editingTx && (
         <EditTransaction
@@ -9600,7 +10048,7 @@ function MainApp({ user, theme, toggleTheme }) {
             type: 'allocation',
             account_id: null,
             amount: target,
-            date: insertAt.toISOString().slice(0, 10),
+            date: localDateStr(insertAt),
             created_at: insertAt.toISOString(),
             note: tagPeriodNote(periodKey, AUTO_ACCUM_NOTE),
           });
