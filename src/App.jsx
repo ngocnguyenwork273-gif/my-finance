@@ -8367,6 +8367,37 @@ function buildReportData({ startDate, endDate, transactions, categories, account
   const expenseBySource = groupBy(expenseTxs, (t) => txSourceInfo(t, cats, accs).key, (t) => txSourceInfo(t, cats, accs).label)
     .map((g) => ({ label: g.name, amount: formatMoney(g.total), pct: pctOf(g.total, totalExpense) }));
 
+  /* ---------- Thu nhập được chi: góp quỹ theo mục + còn lại để chi ngoài quỹ ----------
+     "Thu nhập được chi" = thu nhập từ các danh mục có include_in_spending_pool !== false
+     (loại các khoản thu đặc biệt như quà/lãi một lần). Trong khoản này: bao nhiêu % đã
+     góp vào từng quỹ (chỉ tính nạp quỹ lấy nguồn = Thu nhập, tức account_id === null;
+     nạp quỹ bằng ví khác không trừ vào đây), và còn lại bao nhiêu cho chi tiêu ngoài quỹ. */
+  const incomeForPoolTxs = incomeTxs.filter((t) => {
+    const c = catById.get(t.category_id);
+    return c ? c.include_in_spending_pool !== false : true;
+  });
+  const incomeForPool = sum(incomeForPoolTxs);
+  const poolAllocTxs = allocTxs.filter((t) => t.account_id === null);
+  const poolAllocByFundRaw = groupBy(poolAllocTxs, (t) => t.category_id, (t) => catById.get(t.category_id)?.name || 'Không rõ quỹ');
+  const poolAllocTotal = sum(poolAllocByFundRaw, (g) => g.total);
+  const poolNonFundExpense = sum(rangeTxs.filter((t) => t.type === 'expense' && !catById.get(t.category_id)?.is_fund && t.account_id === null));
+  const poolRemaining = incomeForPool - poolAllocTotal - poolNonFundExpense;
+  const poolAllocation = (incomeForPool > 0 || poolAllocTotal > 0) ? {
+    hasPool: true,
+    pool: formatMoney(incomeForPool),
+    rows: poolAllocByFundRaw.map((g) => ({
+      name: g.name,
+      amount: formatMoney(g.total),
+      pct: pctOf(g.total, incomeForPool),
+      pctNum: incomeForPool > 0 ? (g.total / incomeForPool) * 100 : 0,
+    })),
+    totalPct: pctOf(poolAllocTotal, incomeForPool),
+    total: formatMoney(poolAllocTotal),
+    nonFundExpense: poolNonFundExpense > 0 ? formatMoney(poolNonFundExpense) : null,
+    remaining: formatMoneySigned(poolRemaining),
+    remainingPositive: poolRemaining >= 0,
+  } : { hasPool: false };
+
   /* ---------- Ví ---------- */
   const walletRow = (a) => {
     const mine = rangeTxs.filter((t) => t.account_id === a.id);
@@ -8477,6 +8508,7 @@ function buildReportData({ startDate, endDate, transactions, categories, account
       expenseBySource,
       allocation: totalAlloc > 0 ? formatMoney(totalAlloc) : null,
       allocationCountedAsExpense: REPORT_COUNT_FUND_DEPOSIT_AS_EXPENSE,
+      poolAllocation,
     },
     incomeByCat, incomeTotal: { count: String(incomeTxs.length), amount: formatMoney(totalIncome) },
     expenseByCat, expenseTotal: { count: String(expenseTxs.length), amount: formatMoney(totalExpense) },
@@ -8485,18 +8517,273 @@ function buildReportData({ startDate, endDate, transactions, categories, account
   };
 }
 
+/* ---------- Xem trước ngay trên giao diện (HTML, không cần tạo PDF) ----------
+   Dùng lại đúng dữ liệu đã tính trong buildReportData(), chỉ khác cách vẽ: đây là
+   div/Tailwind để hiện ngay trong app, không phải PDF. Nút "Tải PDF" bên dưới mới
+   thật sự dựng file bằng react-pdf.
+   Mỗi mục có 1 màu riêng (accent) để dễ phân biệt — header bảng, dòng tổng và viền trái
+   của khối đều tô theo màu đó. */
+const R_ACCENT = {
+  overview: '#0DBACC',
+  income_by_cat: '#12B76A',
+  expense_by_cat: '#E0568F',
+  funds: '#8E6CF1',
+  wallets: '#3E9BE0',
+  fund_history: '#F0A93E',
+  transactions: '#7E7F90',
+};
+const R_FUND_COLORS = ['#0DBACC', '#8E6CF1', '#F0A93E', '#3E9BE0', '#12B76A', '#E0568F'];
+function hexToRgba(hex, alpha) {
+  const h = hex.replace('#', '');
+  const r = parseInt(h.substring(0, 2), 16), g = parseInt(h.substring(2, 4), 16), b = parseInt(h.substring(4, 6), 16);
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
+function RTable({ cols, rows, total, accent = '#7E7F90' }) {
+  const alignCls = (c) => (c.align === 'right' ? 'text-right' : 'text-left');
+  const toneCls = (tone) => (tone === 'in' ? 'text-turquoise' : tone === 'out' ? 'text-cotton-candy' : 'text-blueberry dark:text-white');
+  return (
+    <div className="overflow-x-auto scrollbar-hide -mx-1">
+      <table className="w-full text-xs border-collapse min-w-[480px]">
+        <thead>
+          <tr style={{ backgroundColor: hexToRgba(accent, 0.1) }}>
+            {cols.map((c) => (
+              <th key={c.key} className={`font-bold px-2 py-2 whitespace-nowrap ${alignCls(c)} first:rounded-l-lg last:rounded-r-lg`} style={{ color: accent }}>{c.label}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.length === 0 ? (
+            <tr><td colSpan={cols.length} className="text-steel dark:text-light-grey text-center py-4">Không có dữ liệu.</td></tr>
+          ) : rows.map((r, i) => (
+            <tr key={i} className="border-b border-light-grey/20">
+              {cols.map((c) => (
+                <td key={c.key} className={`px-2 py-2 ${alignCls(c)} ${c.tone ? `font-bold ${toneCls(r.tone)}` : c.muted ? 'text-steel dark:text-light-grey' : 'text-blueberry dark:text-white'}`}>
+                  {r[c.key] || (c.muted ? '—' : '')}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+        {total && (
+          <tfoot>
+            <tr className="font-bold" style={{ backgroundColor: hexToRgba(accent, 0.14) }}>
+              {cols.map((c) => (
+                <td key={c.key} className={`px-2 py-2 text-blueberry dark:text-white ${alignCls(c)} first:rounded-l-lg last:rounded-r-lg`}>{total[c.key] || ''}</td>
+              ))}
+            </tr>
+          </tfoot>
+        )}
+      </table>
+    </div>
+  );
+}
+function RStat({ label, value, color }) {
+  return (
+    <div
+      className={`flex-1 min-w-[130px] rounded-xl px-3 py-2.5 ${color ? '' : 'bg-ice-cream dark:bg-night-sky'}`}
+      style={color ? { backgroundColor: hexToRgba(color, 0.08), borderLeft: `3px solid ${color}` } : undefined}
+    >
+      <p className="text-[11px] text-steel dark:text-light-grey">{label}</p>
+      <p className="text-base font-bold mt-0.5" style={color ? { color } : undefined}>{value}</p>
+    </div>
+  );
+}
+function RSection({ title, accent = '#7E7F90', children }) {
+  return (
+    <div className="mb-6 pl-3" style={{ borderLeft: `3px solid ${accent}` }}>
+      <h4 className="font-bold text-sm mb-2.5" style={{ color: accent }}>{title}</h4>
+      {children}
+    </div>
+  );
+}
+// Thanh % góp quỹ trong "Thu nhập được chi": mỗi quỹ 1 dòng tên + %, thanh ngang theo tỷ lệ.
+function RPoolAllocation({ p }) {
+  if (!p || !p.hasPool) return null;
+  return (
+    <>
+      <p className="text-xs font-bold text-blueberry dark:text-white mt-4 mb-1.5">Thu nhập được chi — góp quỹ theo mục</p>
+      <div className="flex flex-wrap gap-2 mb-3">
+        <RStat label="Thu nhập được chi" value={p.pool} color="#0DBACC" />
+        <RStat label={`Đã góp quỹ (${p.totalPct})`} value={p.total} color="#8E6CF1" />
+        <RStat label="Còn lại (không phải quỹ)" value={p.remaining} color={p.remainingPositive ? '#0DBACC' : '#E0568F'} />
+      </div>
+      {p.rows.length > 0 && (
+        <div className="flex flex-col gap-2.5 mb-2">
+          {p.rows.map((r, i) => {
+            const color = R_FUND_COLORS[i % R_FUND_COLORS.length];
+            return (
+              <div key={i}>
+                <div className="flex items-center justify-between text-xs mb-1">
+                  <span className="font-bold text-blueberry dark:text-white">{r.name}</span>
+                  <span className="font-bold" style={{ color }}>{r.pct} · {r.amount}</span>
+                </div>
+                <div className="h-1.5 rounded-full bg-ice-cream dark:bg-night-sky overflow-hidden">
+                  <div className="h-1.5 rounded-full" style={{ width: `${Math.min(100, r.pctNum)}%`, backgroundColor: color }} />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {p.nonFundExpense && (
+        <p className="text-[11px] text-steel dark:text-light-grey mt-1">Đã chi tiêu (ngoài quỹ) từ Thu nhập được chi: {p.nonFundExpense}.</p>
+      )}
+    </>
+  );
+}
+
+function ReportHtmlPreview({ data }) {
+  const sec = data.sections;
+  const o = data.overview;
+  return (
+    <div className="max-w-3xl mx-auto">
+      <div className="mb-5">
+        <p className="font-bold text-lg text-blueberry dark:text-white">Báo cáo tài chính</p>
+        <p className="text-xs text-steel dark:text-light-grey mt-0.5">Từ {data.startDate} đến {data.endDate} · Xuất lúc {data.generatedAt}</p>
+      </div>
+
+      {sec.overview && (
+        <RSection title="Tổng quan" accent={R_ACCENT.overview}>
+          <div className="flex flex-wrap gap-2 mb-2">
+            <RStat label="Tổng tài sản đầu kỳ" value={o.assetsStart} />
+            <RStat label="Tổng tài sản cuối kỳ" value={o.assetsEnd} />
+            <RStat label={o.assetsChangePct ? `Chênh lệch tài sản (${o.assetsChangePct})` : 'Chênh lệch tài sản'} value={o.assetsChange} color={o.assetsPositive ? '#0DBACC' : '#E0568F'} />
+          </div>
+          <div className="flex flex-wrap gap-2 mb-4">
+            <RStat label="Tổng thu nhập trong kỳ" value={o.income} color="#0DBACC" />
+            <RStat label="Tổng chi tiêu trong kỳ" value={o.expense} color="#E0568F" />
+            <RStat label="Thu nhập - Chi tiêu" value={o.net} color={o.netPositive ? '#0DBACC' : '#E0568F'} />
+          </div>
+          <p className="text-xs font-bold text-blueberry dark:text-white mb-1.5">Cơ cấu tài sản</p>
+          <RTable
+            accent={R_ACCENT.overview}
+            cols={[
+              { key: 'label', label: 'Nhóm' },
+              { key: 'start', label: 'Đầu kỳ', align: 'right' },
+              { key: 'end', label: 'Cuối kỳ', align: 'right' },
+              { key: 'diff', label: 'Chênh lệch', align: 'right' },
+            ]}
+            rows={o.composition}
+            total={o.compositionTotal}
+          />
+          {o.expenseBySource.length > 0 && (
+            <>
+              <p className="text-xs font-bold text-blueberry dark:text-white mt-4 mb-1.5">Chi tiêu theo nguồn tiền</p>
+              <RTable
+                accent={R_ACCENT.overview}
+                cols={[{ key: 'label', label: 'Nguồn tiền' }, { key: 'amount', label: 'Số tiền', align: 'right' }, { key: 'pct', label: 'Tỷ trọng', align: 'right' }]}
+                rows={o.expenseBySource}
+              />
+            </>
+          )}
+          {o.allocation && (
+            <p className="text-[11px] text-steel dark:text-light-grey mt-2">Góp vào quỹ trong kỳ: {o.allocation} (chuyển tiền sang quỹ, {o.allocationCountedAsExpense ? 'ĐÃ' : 'không'} tính vào chi tiêu).</p>
+          )}
+
+          <RPoolAllocation p={o.poolAllocation} />
+        </RSection>
+      )}
+
+      {sec.income_by_cat && (
+        <RSection title="Thu nhập trong kỳ — theo nguồn" accent={R_ACCENT.income_by_cat}>
+          <RTable
+            accent={R_ACCENT.income_by_cat}
+            cols={[{ key: 'name', label: 'Nguồn / Danh mục' }, { key: 'count', label: 'Số GD', align: 'right' }, { key: 'amount', label: 'Số tiền', align: 'right' }, { key: 'pct', label: 'Tỷ trọng', align: 'right' }]}
+            rows={data.incomeByCat}
+            total={{ name: 'Tổng', count: data.incomeTotal.count, amount: data.incomeTotal.amount, pct: '100%' }}
+          />
+        </RSection>
+      )}
+
+      {sec.expense_by_cat && (
+        <RSection title="Chi tiêu trong kỳ — theo nguồn" accent={R_ACCENT.expense_by_cat}>
+          <RTable
+            accent={R_ACCENT.expense_by_cat}
+            cols={[{ key: 'name', label: 'Nguồn / Danh mục' }, { key: 'count', label: 'Số GD', align: 'right' }, { key: 'amount', label: 'Số tiền', align: 'right' }, { key: 'pct', label: 'Tỷ trọng', align: 'right' }]}
+            rows={data.expenseByCat}
+            total={{ name: 'Tổng', count: data.expenseTotal.count, amount: data.expenseTotal.amount, pct: '100%' }}
+          />
+        </RSection>
+      )}
+
+      {sec.funds && (
+        <RSection title="Quỹ — số dư cuối kỳ" accent={R_ACCENT.funds}>
+          <RTable
+            accent={R_ACCENT.funds}
+            cols={[
+              { key: 'name', label: 'Quỹ' }, { key: 'start', label: 'Đầu kỳ', align: 'right' }, { key: 'deposit', label: 'Nạp', align: 'right' },
+              { key: 'withdraw', label: 'Rút', align: 'right' }, { key: 'profit', label: 'Lãi', align: 'right' }, { key: 'end', label: 'Cuối kỳ', align: 'right' },
+            ]}
+            rows={data.funds.rows}
+            total={data.funds.total}
+          />
+          <p className="text-[11px] text-steel dark:text-light-grey mt-2">Lãi = số dư cuối kỳ - số dư đầu kỳ - nạp + rút.</p>
+        </RSection>
+      )}
+
+      {sec.wallets && (
+        <RSection title="Ví — tổng quan" accent={R_ACCENT.wallets}>
+          {data.walletGroups.map((g, i) => (
+            <div key={i} className="mb-4">
+              <p className="text-xs font-bold text-blueberry dark:text-white mb-1.5">{g.title}</p>
+              <RTable
+                accent={R_ACCENT.wallets}
+                cols={[
+                  { key: 'name', label: 'Ví' }, { key: 'typeLabel', label: 'Loại', muted: true }, { key: 'start', label: 'Đầu kỳ', align: 'right' },
+                  { key: 'inflow', label: 'Thu vào', align: 'right' }, { key: 'outflow', label: 'Chi ra', align: 'right' },
+                  { key: 'toFund', label: 'Nạp quỹ', align: 'right' }, { key: 'adjust', label: 'Điều chỉnh', align: 'right' }, { key: 'end', label: 'Cuối kỳ', align: 'right' },
+                ]}
+                rows={g.rows}
+                total={g.total}
+              />
+            </div>
+          ))}
+        </RSection>
+      )}
+
+      {sec.fund_history && (
+        <RSection title="Lịch sử quỹ trong kỳ" accent={R_ACCENT.fund_history}>
+          {data.fundHistory.map((f, i) => (
+            <div key={i} className="mb-4">
+              <p className="text-xs font-bold text-blueberry dark:text-white mb-1.5">{f.name}</p>
+              <RTable
+                accent={R_ACCENT.fund_history}
+                cols={[
+                  { key: 'date', label: 'Ngày' }, { key: 'kind', label: 'Loại' }, { key: 'note', label: 'Ghi chú', muted: true },
+                  { key: 'amount', label: 'Số tiền', align: 'right', tone: true }, { key: 'balance', label: 'Số dư sau GD', align: 'right' },
+                ]}
+                rows={f.rows}
+              />
+            </div>
+          ))}
+        </RSection>
+      )}
+
+      {sec.transactions && (
+        <RSection title={`Tất cả giao dịch trong kỳ (${data.txCount})`} accent={R_ACCENT.transactions}>
+          <RTable
+            accent={R_ACCENT.transactions}
+            cols={[
+              { key: 'date', label: 'Ngày' }, { key: 'kind', label: 'Loại' }, { key: 'cat', label: 'Danh mục' },
+              { key: 'source', label: 'Ví / Nguồn' }, { key: 'note', label: 'Ghi chú', muted: true }, { key: 'amount', label: 'Số tiền', align: 'right', tone: true },
+            ]}
+            rows={data.txs}
+          />
+        </RSection>
+      )}
+    </div>
+  );
+}
+
 function ReportExportModal({ onClose, transactions, categories, accounts }) {
   const [step, setStep] = useState('config'); // 'config' | 'preview'
   const [startDate, setStartDate] = useState(firstDayOfThisMonthStr());
   const [endDate, setEndDate] = useState(todayDateStr());
   const [selectedSections, setSelectedSections] = useState(() => Object.fromEntries(REPORT_SECTIONS.map((s) => [s.key, true])));
-  const [generating, setGenerating] = useState(false);
+  const [reportData, setReportData] = useState(null);
+  const [downloading, setDownloading] = useState(false);
   const [error, setError] = useState('');
-  const [pdfUrl, setPdfUrl] = useState(null);
-  const pdfBlobRef = useRef(null);
-
-  // Giải phóng object URL khi đóng modal / tạo bản mới, tránh rò bộ nhớ.
-  useEffect(() => () => { if (pdfUrl) URL.revokeObjectURL(pdfUrl); }, [pdfUrl]);
 
   function toggleSection(key) { setSelectedSections((s) => ({ ...s, [key]: !s[key] })); }
   const anySelected = REPORT_SECTIONS.some((s) => selectedSections[s.key]);
@@ -8520,34 +8807,40 @@ function ReportExportModal({ onClose, transactions, categories, accounts }) {
     { label: 'Tháng này', run: () => { setStartDate(firstDayOfThisMonthStr()); setEndDate(todayDateStr()); } },
   ];
 
-  async function generatePdf() {
-    setGenerating(true);
+  // Xem trước: chỉ tính số liệu rồi hiện thẳng lên giao diện — không đụng tới react-pdf nên tức thì.
+  function showPreview() {
     setError('');
     try {
       const data = buildReportData({ startDate, endDate, transactions, categories, accounts, sections: selectedSections });
-      const { renderReportPdfBlob } = await import('./ReportPdf');
-      const blob = await renderReportPdfBlob(data);
-      pdfBlobRef.current = blob;
-      setPdfUrl(URL.createObjectURL(blob));
+      setReportData(data);
       setStep('preview');
+    } catch (e) {
+      setError('Không tính được báo cáo: ' + (e?.message || ''));
+    }
+  }
+
+  // Tải PDF: lúc này mới tải react-pdf và dựng file thật, dùng đúng reportData đang hiện.
+  async function downloadPdf() {
+    if (!reportData) return;
+    setDownloading(true);
+    setError('');
+    try {
+      const { renderReportPdfBlob } = await import('./ReportPdf');
+      const blob = await renderReportPdfBlob(reportData);
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `bao-cao-pandafi_${startDate}_${endDate}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
     } catch (e) {
       const msg = e?.message || '';
       setError(/Failed to resolve|Cannot find module|Failed to fetch dynamically/.test(msg)
         ? 'Chưa cài thư viện. Chạy "npm install @react-pdf/renderer" rồi khởi động lại dev server.'
         : 'Tạo PDF thất bại: ' + msg);
     }
-    setGenerating(false);
-  }
-
-  function downloadPdf() {
-    if (!pdfBlobRef.current) return;
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(pdfBlobRef.current);
-    a.download = `bao-cao-pandafi_${startDate}_${endDate}.pdf`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    setDownloading(false);
   }
 
   return createPortal(
@@ -8588,10 +8881,8 @@ function ReportExportModal({ onClose, transactions, categories, accounts }) {
            </div>
           </div>
         ) : (
-          <div className="flex-1 min-h-0 bg-[#e5e5ea] flex items-center justify-center">
-            {/* Trình xem PDF nhúng chỉ đáng tin cậy trên desktop; WebView điện thoại thường không hiển thị. */}
-            <iframe title="Xem trước báo cáo" src={pdfUrl || undefined} className="hidden md:block w-full h-full border-0" />
-            <p className="md:hidden text-steel text-sm text-center px-8 py-10">Điện thoại không hỗ trợ xem trước PDF ngay trong app. Bấm "Tải PDF" để mở file.</p>
+          <div className="flex-1 min-h-0 overflow-y-auto scrollbar-hide p-5 md:p-8 bg-[#fafafa] dark:bg-[#17172a]">
+            {reportData && <ReportHtmlPreview data={reportData} />}
           </div>
         )}
 
@@ -8602,12 +8893,12 @@ function ReportExportModal({ onClose, transactions, categories, accounts }) {
               <button onClick={() => setStep('config')} className="px-4 py-2.5 rounded-full text-sm font-bold text-steel dark:text-light-grey bg-ice-cream dark:bg-[#2a2a44]">Quay lại</button>
             )}
             {step === 'config' ? (
-              <button onClick={generatePdf} disabled={!anySelected || generating} className="flex items-center gap-2 px-5 py-2.5 rounded-full text-sm font-bold text-white bg-gradient-primary disabled:opacity-50 shadow-md shadow-turquoise/30">
-                {generating && <Loader2 size={15} className="animate-spin" />} Xem trước
+              <button onClick={showPreview} disabled={!anySelected} className="flex items-center gap-2 px-5 py-2.5 rounded-full text-sm font-bold text-white bg-gradient-primary disabled:opacity-50 shadow-md shadow-turquoise/30">
+                Xem trước
               </button>
             ) : (
-              <button onClick={downloadPdf} className="flex items-center gap-2 px-5 py-2.5 rounded-full text-sm font-bold text-white bg-gradient-primary shadow-md shadow-turquoise/30">
-                <Download size={15} /> Tải PDF
+              <button onClick={downloadPdf} disabled={downloading} className="flex items-center gap-2 px-5 py-2.5 rounded-full text-sm font-bold text-white bg-gradient-primary disabled:opacity-50 shadow-md shadow-turquoise/30">
+                {downloading ? <Loader2 size={15} className="animate-spin" /> : <Download size={15} />} Tải PDF
               </button>
             )}
           </div>
