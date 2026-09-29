@@ -203,6 +203,30 @@ function centeredAspectCrop(mediaWidth, mediaHeight, ratio) {
   );
 }
 
+// Thu nhỏ ảnh gốc từ điện thoại (thường 12-48MP) xuống tối đa maxSide px cạnh dài.
+// Canvas trên mobile/WebView bị giới hạn kích thước → ảnh quá lớn sẽ vẽ ra đen tuyền.
+async function downscaleImageFile(file, maxSide = 2048) {
+  const url = URL.createObjectURL(file);
+  try {
+    const img = new window.Image();
+    img.src = url;
+    await img.decode().catch(() => new Promise((res, rej) => { img.onload = res; img.onerror = rej; }));
+    const scale = Math.min(1, maxSide / Math.max(img.naturalWidth, img.naturalHeight));
+    const w = Math.max(1, Math.round(img.naturalWidth * scale));
+    const h = Math.max(1, Math.round(img.naturalHeight * scale));
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#fff'; // JPEG không có alpha → nền trắng thay vì đen
+    ctx.fillRect(0, 0, w, h);
+    ctx.drawImage(img, 0, 0, w, h);
+    return canvas.toDataURL('image/jpeg', 0.9);
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
 function ImageUploader({
   aspectRatio = '1:1',
   circularCrop = false,
@@ -220,21 +244,23 @@ function ImageUploader({
   const imageRef = useRef(null);
   const inputRef = useRef(null);
 
-  function onSelectFile(e) {
+  async function onSelectFile(e) {
     const file = e.target.files?.[0];
     e.target.value = ''; // cho phép chọn lại cùng 1 file lần sau
     if (!file) return;
-    const reader = new FileReader();
-    reader.addEventListener('load', () => {
-      setImgSrc(reader.result);
+    try {
+      // Thu nhỏ ảnh trước khi đưa vào editor (tránh canvas quá lớn trên điện thoại)
+      const dataUrl = await downscaleImageFile(file);
+      setImgSrc(dataUrl);
       setZoom(1);
       // Chưa có khung crop cho tới khi ảnh load xong (xem onImageLoad) — để tránh
-      // hiện thoáng qua 1 khung sai kích thước trước khi khung thật (đã canh giữa,
-      // đúng tỉ lệ) xuất hiện.
+      // hiện thoáng qua 1 khung sai kích thước trước khi khung thật xuất hiện.
       setCrop(undefined);
       setShowEditor(true);
-    });
-    reader.readAsDataURL(file);
+    } catch (err) {
+      console.error('Không đọc được ảnh:', err);
+      toast('Không đọc được ảnh này, thử ảnh khác nhé.');
+    }
   }
 
   // Ảnh vừa load xong trong editor → tự tính & hiển thị ngay khung crop đã canh giữa,
@@ -286,10 +312,14 @@ function ImageUploader({
     const cropY = (crop.y / 100) * image.naturalHeight;
     const cropWidth = (crop.width / 100) * image.naturalWidth;
     const cropHeight = (crop.height / 100) * image.naturalHeight;
-    canvas.width = cropWidth;
-    canvas.height = cropHeight;
+    // Giới hạn ảnh xuất ra tối đa 1600px cạnh dài (đủ nét cho avatar/banner, upload cũng nhanh hơn)
+    const outScale = Math.min(1, 1600 / Math.max(cropWidth, cropHeight));
+    canvas.width = Math.max(1, Math.round(cropWidth * outScale));
+    canvas.height = Math.max(1, Math.round(cropHeight * outScale));
     const ctx = canvas.getContext('2d');
-    ctx.drawImage(image, cropX, cropY, cropWidth, cropHeight, 0, 0, cropWidth, cropHeight);
+    ctx.fillStyle = '#fff'; // nền trắng, tránh vùng trống bị JPEG biến thành đen
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(image, cropX, cropY, cropWidth, cropHeight, 0, 0, canvas.width, canvas.height);
     return canvas;
   }
 
@@ -323,9 +353,10 @@ function ImageUploader({
       await waitForImageReady(freshImage);
     } catch (err) {
       console.error('Không thể tải/giải mã ảnh trước khi cắt:', err);
+      toast('Không xử lý được ảnh, thử lại nhé.');
       return;
     }
-    if (!freshImage.naturalWidth || !freshImage.naturalHeight) return; // ảnh hỏng/rỗng — không có gì để vẽ
+    if (!freshImage.naturalWidth || !freshImage.naturalHeight) { toast('Ảnh bị lỗi, thử ảnh khác nhé.'); return; } // ảnh hỏng/rỗng
 
     let canvas = drawCroppedCanvas(freshImage);
     if (isCanvasLikelyBlank(canvas)) {
@@ -335,11 +366,12 @@ function ImageUploader({
       canvas = drawCroppedCanvas(freshImage);
       if (isCanvasLikelyBlank(canvas)) {
         console.error('Ảnh xuất ra bị trống/đen sau khi thử lại — huỷ lưu để tránh lưu nhầm ảnh hỏng.');
+        toast('Ảnh xuất ra bị lỗi, thử chọn ảnh khác nhé.');
         return;
       }
     }
     canvas.toBlob((blob) => {
-      if (!blob) return;
+      if (!blob) { toast('Không tạo được file ảnh, thử lại nhé.'); return; }
       const file = new File([blob], 'image.jpg', { type: 'image/jpeg' });
       onConfirm && onConfirm(file);
       setShowEditor(false);
