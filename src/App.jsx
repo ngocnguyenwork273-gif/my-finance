@@ -1460,10 +1460,6 @@ function transactionPeriodKey(t) {
 const MEAL_ALLOWANCE_FIXED_PER_PERIOD = 600000; // "Tiền cơm" cố định mỗi kỳ
 const BASE_SALARY_CATEGORY_NAME = 'Lương cơ bản';
 const ACCUMULATION_FUND_CATEGORY_NAME = 'Tích lũy trước chi';
-// Note để nhận diện đây là giao dịch DO CODE TỰ TẠO (không phải người dùng tự nạp tay) —
-// nhờ vậy lần đồng bộ sau tìm lại đúng giao dịch cũ để SỬA thay vì tạo trùng thêm 1 dòng mới.
-const AUTO_ACCUM_NOTE = 'Tự động: Tích lũy trước chi';
-
 // Tính số tiền ĐÚNG (theo công thức) cần có trong quỹ "Tích lũy trước chi" của 1 kỳ.
 // Trả về null nếu chưa đủ điều kiện để tính (chưa có category "Lương cơ bản", hoặc kỳ đó
 // chưa cài đặt "Thu nhập được chi") — null nghĩa là "chưa biết", KHÔNG phải là 0.
@@ -1476,23 +1472,6 @@ function computeAccumulationBeforeSpendTarget(periodKey, transactions, categorie
     .filter((t) => !t.deleted_at && t.type === 'income' && t.category_id === baseSalaryCat.id && transactionPeriodKey(t) === periodKey)
     .reduce((s, t) => s + Number(t.amount), 0);
   return Math.max(baseSalaryTotal + MEAL_ALLOWANCE_FIXED_PER_PERIOD - Number(spendingPool), 0);
-}
-
-// Trả về created_at của giao dịch "Lương cơ bản" GẦN NHẤT trong kỳ (nếu có). Dùng để đặt
-// giờ cho dòng "nạp tự động" ngay SAU thời điểm đó, thay vì luôn lấy giờ hiện tại lúc effect
-// chạy (vd mở lại app vài ngày sau) — tránh dòng tự động bị xếp lệch giờ/thứ tự trong Lịch sử.
-function latestBaseSalaryTimestamp(periodKey, transactions, categories) {
-  const baseSalaryCat = (categories || []).find((c) => c.name === BASE_SALARY_CATEGORY_NAME);
-  if (!baseSalaryCat) return null;
-  const salaryTxs = (transactions || []).filter(
-    (t) => !t.deleted_at && t.type === 'income' && t.category_id === baseSalaryCat.id && transactionPeriodKey(t) === periodKey
-  );
-  if (salaryTxs.length === 0) return null;
-  const latestMs = salaryTxs.reduce((max, t) => {
-    const ms = new Date(t.created_at || t.date).getTime();
-    return ms > max ? ms : max;
-  }, 0);
-  return new Date(latestMs + 1000); // +1 giây để chắc chắn đứng SAU dòng lương (tie-break theo created_at)
 }
 
 function periodPool(transactions, periodKey) {
@@ -3263,6 +3242,24 @@ function AddTransaction({ onClose, accounts, categories, transactions, onSaved, 
     && amount
     && Number(amount) > remainingAfterSpend;
 
+  // Quỹ "Tích lũy trước chi": khi chọn quỹ này + nguồn "Thu nhập của 1 Kỳ", công thức tự tính
+  // số cần nạp theo Kỳ đang chọn và tự điền vào ô Số tiền — không cần tự gõ tay (xem
+  // computeAccumulationBeforeSpendTarget ở đầu file).
+  const isAccumulationFundAllocation = type === 'allocation' && activeCat?.name === ACCUMULATION_FUND_CATEGORY_NAME && expenseSource === 'income';
+  const suggestedAccumulationAmount = isAccumulationFundAllocation
+    ? computeAccumulationBeforeSpendTarget(selectedPeriod, transactions, categories, spendingPoolByPeriod)
+    : null;
+  const lastSuggestedAccumulationRef = useRef(null);
+  useEffect(() => {
+    if (suggestedAccumulationAmount == null) return;
+    // Chỉ tự điền nếu ô đang trống, hoặc đang giữ đúng số gợi ý lần trước (đổi Kỳ/nguồn) —
+    // không ghi đè nếu người dùng đã tự gõ 1 số khác.
+    if (amount === '' || amount === lastSuggestedAccumulationRef.current) {
+      setAmount(String(suggestedAccumulationAmount));
+      lastSuggestedAccumulationRef.current = String(suggestedAccumulationAmount);
+    }
+  }, [suggestedAccumulationAmount]);
+
   const fundBalanceNow = isFundCategory ? fundBalanceWithProfit(activeCat, transactions || []) : null;
   const fundOverBalance = isFundCategory && amount && Number(amount) > fundBalanceNow;
   const sourceAccount = ((type === 'expense' && !isFundCategory) || type === 'allocation') && expenseSource && expenseSource !== 'income' ? accounts.find((a) => a.id === expenseSource) : null;
@@ -3394,6 +3391,7 @@ function AddTransaction({ onClose, accounts, categories, transactions, onSaved, 
           {periodOverLimit && <p className="text-cotton-candy text-xs mt-2 font-semibold">⚠️ Vượt Thu nhập được chi còn lại ({formatMoney(remainingAfterSpend)}) của kỳ này!</p>}
           {fundOverBalance && <p className="text-cotton-candy text-xs mt-2 font-semibold">⚠️ Vượt số dư hiện có của quỹ ({formatMoney(fundBalanceNow)})!</p>}
           {sourceOverBalance && <p className="text-cotton-candy text-xs mt-2 font-semibold">⚠️ Vượt số dư hiện có của nguồn tiền này ({formatMoney(accountBalance(sourceAccount, transactions || []))})!</p>}
+          {suggestedAccumulationAmount != null && <p className="text-turquoise text-xs mt-2 font-semibold">Đã tự điền theo công thức Tích lũy trước chi của kỳ này: {formatMoney(suggestedAccumulationAmount)}. Bạn vẫn có thể sửa lại số tiền.</p>}
         </div>
         <div className="px-5 mt-8">
           <p className="text-blueberry dark:text-white font-bold text-sm mb-3">{type === 'income' ? 'Danh mục thu nhập' : 'Quỹ / Danh mục'} <span className="text-cotton-candy">*</span></p>
@@ -3985,7 +3983,7 @@ function EditFundForm({ category, onClose, onSaved, isNew, initialAmount, firstA
   );
 }
 
-function QuickAllocateWithdrawForm({ category, mode, transaction, onClose, onSaved }) {
+function QuickAllocateWithdrawForm({ category, mode, transaction, onClose, onSaved, transactions, categories, spendingPoolByPeriod }) {
   const isEditing = !!transaction;
   const [amount, setAmount] = useState(isEditing ? String(transaction.amount) : '');
   const [note, setNote] = useState(isEditing ? stripPeriodTag(transaction.note || '') : '');
@@ -3993,6 +3991,24 @@ function QuickAllocateWithdrawForm({ category, mode, transaction, onClose, onSav
   const initialPeriod = isEditing ? (parsePeriodTag(transaction.note) || currentPeriodKey()) : currentPeriodKey();
   const [selectedYear, setSelectedYear] = useState(Number(initialPeriod.split('-')[0]));
   const [selectedPeriod, setSelectedPeriod] = useState(initialPeriod);
+  // Quỹ "Tích lũy trước chi": KHÔNG cần tự nhập số tiền khi Nạp quỹ — công thức tự tính theo
+  // Kỳ thu nhập đang chọn (xem computeAccumulationBeforeSpendTarget ở đầu file) và tự điền vào ô
+  // Số tiền. Chỉ áp dụng khi tạo mới (không áp dụng lúc sửa 1 giao dịch cũ, để không ghi đè số
+  // gốc đã lưu) và khi đang ở chế độ Nạp quỹ (không áp dụng cho Rút quỹ).
+  const isAccumulationFund = category.name === ACCUMULATION_FUND_CATEGORY_NAME;
+  const suggestedAmount = (!isEditing && mode === 'allocation' && isAccumulationFund)
+    ? computeAccumulationBeforeSpendTarget(selectedPeriod, transactions, categories, spendingPoolByPeriod)
+    : null;
+  const lastSuggestedRef = useRef(null);
+  useEffect(() => {
+    if (suggestedAmount == null) return;
+    // Chỉ tự điền nếu ô đang trống, hoặc đang giữ đúng số gợi ý lần trước (đổi Kỳ) — không ghi
+    // đè nếu người dùng đã tự gõ 1 số khác.
+    if (amount === '' || amount === lastSuggestedRef.current) {
+      setAmount(String(suggestedAmount));
+      lastSuggestedRef.current = String(suggestedAmount);
+    }
+  }, [suggestedAmount]);
   // FIX: cho phép chỉnh sửa cả ngày lẫn giờ:phút nhập (trước đây chỉ chỉnh được ngày,
   // giờ:phút luôn tự động lấy giờ hiện tại lúc lưu). Đồng bộ pattern datetime-local
   // đang dùng ở AddTransaction / EditTransaction — mặc định = giờ hiện tại, cho sửa tự do.
@@ -4059,6 +4075,7 @@ function QuickAllocateWithdrawForm({ category, mode, transaction, onClose, onSav
               {periods.map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
             </CustomSelect>
             <p className="text-steel dark:text-light-grey text-xs mt-2">Số tiền sẽ được trừ từ thu nhập của kỳ này.</p>
+            {suggestedAmount != null && <p className="text-turquoise text-xs mt-1 font-semibold">Đã tự điền theo công thức Tích lũy trước chi của kỳ này: {formatMoney(suggestedAmount)}. Bạn vẫn có thể sửa lại số tiền.</p>}
           </div>
         )}
 
@@ -6339,7 +6356,7 @@ function FundDetail({ category, transactions, categories, accounts, onBack, relo
       </div>
 
       {showEdit && <EditFundForm category={category} onClose={() => setShowEdit(false)} onSaved={reload} isNew={false} initialAmount={initialAmount} firstAllocation={firstAllocation} />}
-      {quickMode && <QuickAllocateWithdrawForm category={category} mode={quickMode} onClose={() => setQuickMode(null)} onSaved={reload} />}
+      {quickMode && <QuickAllocateWithdrawForm category={category} mode={quickMode} onClose={() => setQuickMode(null)} onSaved={reload} transactions={transactions} categories={categories} spendingPoolByPeriod={spendingPoolByPeriod} />}
       {editingQuickTx && (
         <QuickAllocateWithdrawForm
           category={category}
@@ -6347,6 +6364,9 @@ function FundDetail({ category, transactions, categories, accounts, onBack, relo
           transaction={editingQuickTx}
           onClose={() => setEditingQuickTx(null)}
           onSaved={reload}
+          transactions={transactions}
+          categories={categories}
+          spendingPoolByPeriod={spendingPoolByPeriod}
         />
       )}
     </>
@@ -8332,6 +8352,14 @@ function buildReportData({ startDate, endDate, transactions, categories, account
   const assetsStart = sum(groupsAgg, (g) => g.s);
   const assetsEnd = sum(groupsAgg, (g) => g.e);
   const assetsDiff = assetsEnd - assetsStart;
+  const ASSET_GROUP_COLORS = { 'Ví': '#0DBACC', 'Vàng': '#D4A017', 'Quỹ': '#8E6CF1' };
+  const assetDonut = assetsEnd > 0 ? groupsAgg.filter((g) => g.e > 0).map((g) => ({
+    label: g.label,
+    amount: formatMoney(g.e),
+    pctNum: (g.e / assetsEnd) * 100,
+    pctLabel: pctOf(g.e, assetsEnd),
+    color: ASSET_GROUP_COLORS[g.label] || '#7E7F90',
+  })) : [];
 
   /* ---------- Thu nhập / chi tiêu ---------- */
   const incomeTxs = rangeTxs.filter((t) => t.type === 'income');
@@ -8341,6 +8369,25 @@ function buildReportData({ startDate, endDate, transactions, categories, account
   const expenseTxs = rangeTxs.filter((t) => t.type === 'expense' || (REPORT_COUNT_FUND_DEPOSIT_AS_EXPENSE && allocTxs.includes(t)));
   const totalExpense = sum(expenseTxs);
   const net = totalIncome - totalExpense;
+
+  /* ---------- So với kỳ trước ---------- */
+  // Kỳ trước = cùng số ngày, liền kề ngay trước ngày bắt đầu kỳ này (bất kể kỳ hiện tại
+  // dài/ngắn bao nhiêu ngày, để so sánh công bằng thay vì cố định 21→20 hàng tháng).
+  const periodMs = end.getTime() - start.getTime();
+  const prevEnd = new Date(start.getTime() - 1);
+  const prevStart = new Date(prevEnd.getTime() - periodMs);
+  const prevTxs = txAll.filter((t) => { const d = new Date(t.date || t.created_at); return d >= prevStart && d <= prevEnd; });
+  const prevIncome = sum(prevTxs.filter((t) => t.type === 'income'));
+  const prevAllocTxs = prevTxs.filter((t) => t.type === 'allocation' && !isInitialAllocationTx(t));
+  const prevExpense = sum(prevTxs.filter((t) => t.type === 'expense' || (REPORT_COUNT_FUND_DEPOSIT_AS_EXPENSE && prevAllocTxs.includes(t))));
+  function vsPrev(cur, prev, higherIsGood) {
+    if (prev <= 0) return cur > 0 ? { label: 'Mới so với kỳ trước', good: higherIsGood } : null;
+    const pct = ((cur - prev) / prev) * 100;
+    const rising = pct >= 0;
+    return { label: `${rising ? '▲' : '▼'} ${Math.abs(pct).toFixed(1)}% so với kỳ trước`, good: rising === higherIsGood };
+  }
+  const incomeVsPrev = vsPrev(totalIncome, prevIncome, true);
+  const expenseVsPrev = vsPrev(totalExpense, prevExpense, false);
 
   function groupBy(txs, keyFn, nameFn) {
     const map = new Map();
@@ -8365,7 +8412,7 @@ function buildReportData({ startDate, endDate, transactions, categories, account
     },
   ), totalExpense);
   const expenseBySource = groupBy(expenseTxs, (t) => txSourceInfo(t, cats, accs).key, (t) => txSourceInfo(t, cats, accs).label)
-    .map((g) => ({ label: g.name, amount: formatMoney(g.total), pct: pctOf(g.total, totalExpense) }));
+    .map((g) => ({ label: g.name, amount: formatMoney(g.total), pct: pctOf(g.total, totalExpense), pctNum: totalExpense > 0 ? (g.total / totalExpense) * 100 : 0 }));
 
   /* ---------- Thu nhập được chi: góp quỹ theo mục + còn lại để chi ngoài quỹ ----------
      "Thu nhập được chi" = thu nhập từ các danh mục có include_in_spending_pool !== false
@@ -8488,6 +8535,28 @@ function buildReportData({ startDate, endDate, transactions, categories, account
     };
   });
 
+  // Gộp giao dịch theo ngày để bảng đỡ lặp lại cột Ngày trên từng dòng — mỗi ngày có
+  // 1 dòng chia nhóm hiển thị "thay đổi ròng" (thu - chi +/- điều chỉnh; nạp/rút quỹ là
+  // chuyển nội bộ nên không tính vào đây vì không đổi tổng tài sản).
+  const txsByDay = [];
+  rangeTxs.forEach((t, idx) => {
+    const row = txs[idx];
+    let group = txsByDay[txsByDay.length - 1];
+    if (!group || group.date !== row.date) {
+      group = { date: row.date, items: [], netRaw: 0 };
+      txsByDay.push(group);
+    }
+    if (t.type === 'income') group.netRaw += num(t.amount);
+    else if (t.type === 'expense') group.netRaw -= num(t.amount);
+    else if (t.type === 'adjustment') group.netRaw += num(t.amount);
+    group.items.push(row);
+  });
+  txsByDay.forEach((g) => {
+    g.net = formatMoneySigned(g.netRaw);
+    g.netPositive = g.netRaw >= 0;
+    g.hasNet = Math.round(g.netRaw) !== 0;
+  });
+
   return {
     startDate: reportDmy(startDate),
     endDate: reportDmy(endDate),
@@ -8505,15 +8574,17 @@ function buildReportData({ startDate, endDate, transactions, categories, account
       netPositive: net >= 0,
       composition: groupsAgg.map((g) => ({ label: g.label, start: formatMoneySigned(g.s), end: formatMoneySigned(g.e), diff: formatMoneySigned(g.e - g.s) })),
       compositionTotal: { label: 'Tổng tài sản', start: formatMoneySigned(assetsStart), end: formatMoneySigned(assetsEnd), diff: formatMoneySigned(assetsDiff) },
+      assetDonut,
       expenseBySource,
       allocation: totalAlloc > 0 ? formatMoney(totalAlloc) : null,
       allocationCountedAsExpense: REPORT_COUNT_FUND_DEPOSIT_AS_EXPENSE,
       poolAllocation,
+      incomeVsPrev, expenseVsPrev,
     },
     incomeByCat, incomeTotal: { count: String(incomeTxs.length), amount: formatMoney(totalIncome) },
     expenseByCat, expenseTotal: { count: String(expenseTxs.length), amount: formatMoney(totalExpense) },
     funds, walletGroups, fundHistory,
-    txs, txCount: txs.length,
+    txs, txCount: txs.length, txsByDay,
   };
 }
 
@@ -8537,6 +8608,77 @@ function hexToRgba(hex, alpha) {
   const h = hex.replace('#', '');
   const r = parseInt(h.substring(0, 2), 16), g = parseInt(h.substring(2, 4), 16), b = parseInt(h.substring(4, 6), 16);
   return `rgba(${r},${g},${b},${alpha})`;
+}
+
+// Biểu đồ tròn (donut) cơ cấu tài sản — vẽ bằng SVG thuần, cùng kỹ thuật với bản PDF
+// (nhiều <circle> chồng lên nhau, mỗi cung 1 đoạn strokeDasharray) để 2 bản khớp nhau.
+function RDonut({ items, size = 92, thickness = 14 }) {
+  const r = (size - thickness) / 2;
+  const cx = size / 2, cy = size / 2;
+  const circumference = 2 * Math.PI * r;
+  let acc = 0;
+  return (
+    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="flex-shrink-0">
+      <circle cx={cx} cy={cy} r={r} stroke="rgba(126,127,144,0.18)" strokeWidth={thickness} fill="none" />
+      {items.map((it, i) => {
+        const len = (it.pctNum / 100) * circumference;
+        const el = (
+          <circle
+            key={i}
+            cx={cx} cy={cy} r={r}
+            stroke={it.color}
+            strokeWidth={thickness}
+            fill="none"
+            strokeDasharray={`${len} ${circumference - len}`}
+            strokeDashoffset={-acc}
+            transform={`rotate(-90 ${cx} ${cy})`}
+          />
+        );
+        acc += len;
+        return el;
+      })}
+    </svg>
+  );
+}
+function RAssetDonut({ items }) {
+  if (!items || items.length === 0) return null;
+  return (
+    <div className="flex items-center gap-4 mb-3">
+      <RDonut items={items} />
+      <div className="flex-1 flex flex-col gap-1.5 min-w-0">
+        {items.map((it, i) => (
+          <div key={i} className="flex items-center text-xs">
+            <span className="w-2 h-2 rounded-full mr-2 flex-shrink-0" style={{ backgroundColor: it.color }} />
+            <span className="flex-1 text-blueberry dark:text-white truncate">{it.label}</span>
+            <span className="font-bold text-blueberry dark:text-white w-12 text-right flex-shrink-0">{it.pctLabel}</span>
+            <span className="text-steel dark:text-light-grey ml-2 w-24 text-right flex-shrink-0">{it.amount}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+// Danh sách thanh % dùng chung cho "góp quỹ theo mục" và "chi tiêu theo nguồn tiền" —
+// mỗi dòng: tên + % + số tiền, thanh ngang tô màu theo tỷ lệ (biểu đồ cột ngang đơn giản).
+function RBarList({ rows, labelKey = 'name' }) {
+  return (
+    <div className="flex flex-col gap-2.5 mb-2">
+      {rows.map((r, i) => {
+        const color = R_FUND_COLORS[i % R_FUND_COLORS.length];
+        return (
+          <div key={i}>
+            <div className="flex items-center justify-between text-xs mb-1 gap-2">
+              <span className="font-bold text-blueberry dark:text-white truncate">{r[labelKey]}</span>
+              <span className="font-bold flex-shrink-0" style={{ color }}>{r.pct} · {r.amount}</span>
+            </div>
+            <div className="h-1.5 rounded-full bg-ice-cream dark:bg-night-sky overflow-hidden">
+              <div className="h-1.5 rounded-full" style={{ width: `${Math.min(100, r.pctNum)}%`, backgroundColor: color }} />
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 function RTable({ cols, rows, total, accent = '#7E7F90' }) {
@@ -8578,7 +8720,7 @@ function RTable({ cols, rows, total, accent = '#7E7F90' }) {
     </div>
   );
 }
-function RStat({ label, value, color }) {
+function RStat({ label, value, color, sub, subColor }) {
   return (
     <div
       className={`flex-1 min-w-[130px] rounded-xl px-3 py-2.5 ${color ? '' : 'bg-ice-cream dark:bg-night-sky'}`}
@@ -8586,6 +8728,7 @@ function RStat({ label, value, color }) {
     >
       <p className="text-[11px] text-steel dark:text-light-grey">{label}</p>
       <p className="text-base font-bold mt-0.5" style={color ? { color } : undefined}>{value}</p>
+      {sub && <p className="text-[10px] font-bold mt-1" style={{ color: subColor || '#7E7F90' }}>{sub}</p>}
     </div>
   );
 }
@@ -8608,28 +8751,61 @@ function RPoolAllocation({ p }) {
         <RStat label={`Đã góp quỹ (${p.totalPct})`} value={p.total} color="#8E6CF1" />
         <RStat label="Còn lại (không phải quỹ)" value={p.remaining} color={p.remainingPositive ? '#0DBACC' : '#E0568F'} />
       </div>
-      {p.rows.length > 0 && (
-        <div className="flex flex-col gap-2.5 mb-2">
-          {p.rows.map((r, i) => {
-            const color = R_FUND_COLORS[i % R_FUND_COLORS.length];
-            return (
-              <div key={i}>
-                <div className="flex items-center justify-between text-xs mb-1">
-                  <span className="font-bold text-blueberry dark:text-white">{r.name}</span>
-                  <span className="font-bold" style={{ color }}>{r.pct} · {r.amount}</span>
-                </div>
-                <div className="h-1.5 rounded-full bg-ice-cream dark:bg-night-sky overflow-hidden">
-                  <div className="h-1.5 rounded-full" style={{ width: `${Math.min(100, r.pctNum)}%`, backgroundColor: color }} />
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
+      {p.rows.length > 0 && <RBarList rows={p.rows} labelKey="name" />}
       {p.nonFundExpense && (
         <p className="text-[11px] text-steel dark:text-light-grey mt-1">Đã chi tiêu (ngoài quỹ) từ Thu nhập được chi: {p.nonFundExpense}.</p>
       )}
     </>
+  );
+}
+
+// Bảng giao dịch gộp theo ngày: 1 header cột chung, mỗi ngày có 1 dòng chia nhóm (ngày +
+// thay đổi ròng trong ngày) rồi tới các giao dịch của ngày đó (không lặp lại cột Ngày).
+function RTransactionsByDay({ days, accent }) {
+  const cols = [
+    { key: 'kind', label: 'Loại' }, { key: 'cat', label: 'Danh mục' }, { key: 'source', label: 'Ví / Nguồn' },
+    { key: 'note', label: 'Ghi chú', muted: true }, { key: 'amount', label: 'Số tiền', align: 'right', tone: true },
+  ];
+  const alignCls = (c) => (c.align === 'right' ? 'text-right' : 'text-left');
+  const toneCls = (tone) => (tone === 'in' ? 'text-turquoise' : tone === 'out' ? 'text-cotton-candy' : 'text-blueberry dark:text-white');
+  if (!days || days.length === 0) return <p className="text-steel dark:text-light-grey text-xs py-4">Không có giao dịch trong khoảng này.</p>;
+  return (
+    <div className="overflow-x-auto scrollbar-hide -mx-1">
+      <table className="w-full text-xs border-collapse min-w-[520px]">
+        <thead>
+          <tr style={{ backgroundColor: hexToRgba(accent, 0.1) }}>
+            {cols.map((c) => (
+              <th key={c.key} className={`font-bold px-2 py-2 whitespace-nowrap ${alignCls(c)} first:rounded-l-lg last:rounded-r-lg`} style={{ color: accent }}>{c.label}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {days.map((d, di) => (
+            <Fragment key={di}>
+              <tr>
+                <td colSpan={cols.length} className="pt-3 pb-1 px-1">
+                  <div className="flex items-center justify-between rounded-lg px-2.5 py-1.5" style={{ backgroundColor: hexToRgba(accent, 0.14) }}>
+                    <span className="font-bold text-blueberry dark:text-white">{d.date}</span>
+                    <span className="font-bold" style={{ color: d.hasNet ? (d.netPositive ? '#0DBACC' : '#E0568F') : '#7E7F90' }}>
+                      {d.hasNet ? `Ròng ${d.net}` : 'Chuyển nội bộ'}
+                    </span>
+                  </div>
+                </td>
+              </tr>
+              {d.items.map((r, ri) => (
+                <tr key={ri} className="border-b border-light-grey/20">
+                  {cols.map((c) => (
+                    <td key={c.key} className={`px-2 py-2 ${alignCls(c)} ${c.tone ? `font-bold ${toneCls(r.tone)}` : c.muted ? 'text-steel dark:text-light-grey' : 'text-blueberry dark:text-white'}`}>
+                      {r[c.key] || (c.muted ? '—' : '')}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </Fragment>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
@@ -8651,11 +8827,14 @@ function ReportHtmlPreview({ data }) {
             <RStat label={o.assetsChangePct ? `Chênh lệch tài sản (${o.assetsChangePct})` : 'Chênh lệch tài sản'} value={o.assetsChange} color={o.assetsPositive ? '#0DBACC' : '#E0568F'} />
           </div>
           <div className="flex flex-wrap gap-2 mb-4">
-            <RStat label="Tổng thu nhập trong kỳ" value={o.income} color="#0DBACC" />
-            <RStat label="Tổng chi tiêu trong kỳ" value={o.expense} color="#E0568F" />
+            <RStat label="Tổng thu nhập trong kỳ" value={o.income} color="#0DBACC"
+              sub={o.incomeVsPrev?.label} subColor={o.incomeVsPrev ? (o.incomeVsPrev.good ? '#0DBACC' : '#E0568F') : undefined} />
+            <RStat label="Tổng chi tiêu trong kỳ" value={o.expense} color="#E0568F"
+              sub={o.expenseVsPrev?.label} subColor={o.expenseVsPrev ? (o.expenseVsPrev.good ? '#0DBACC' : '#E0568F') : undefined} />
             <RStat label="Thu nhập - Chi tiêu" value={o.net} color={o.netPositive ? '#0DBACC' : '#E0568F'} />
           </div>
           <p className="text-xs font-bold text-blueberry dark:text-white mb-1.5">Cơ cấu tài sản</p>
+          <RAssetDonut items={o.assetDonut} />
           <RTable
             accent={R_ACCENT.overview}
             cols={[
@@ -8670,11 +8849,7 @@ function ReportHtmlPreview({ data }) {
           {o.expenseBySource.length > 0 && (
             <>
               <p className="text-xs font-bold text-blueberry dark:text-white mt-4 mb-1.5">Chi tiêu theo nguồn tiền</p>
-              <RTable
-                accent={R_ACCENT.overview}
-                cols={[{ key: 'label', label: 'Nguồn tiền' }, { key: 'amount', label: 'Số tiền', align: 'right' }, { key: 'pct', label: 'Tỷ trọng', align: 'right' }]}
-                rows={o.expenseBySource}
-              />
+              <RBarList rows={o.expenseBySource} labelKey="label" />
             </>
           )}
           {o.allocation && (
@@ -8762,14 +8937,7 @@ function ReportHtmlPreview({ data }) {
 
       {sec.transactions && (
         <RSection title={`Tất cả giao dịch trong kỳ (${data.txCount})`} accent={R_ACCENT.transactions}>
-          <RTable
-            accent={R_ACCENT.transactions}
-            cols={[
-              { key: 'date', label: 'Ngày' }, { key: 'kind', label: 'Loại' }, { key: 'cat', label: 'Danh mục' },
-              { key: 'source', label: 'Ví / Nguồn' }, { key: 'note', label: 'Ghi chú', muted: true }, { key: 'amount', label: 'Số tiền', align: 'right', tone: true },
-            ]}
-            rows={data.txs}
-          />
+          <RTransactionsByDay days={data.txsByDay} accent={R_ACCENT.transactions} />
         </RSection>
       )}
     </div>
@@ -10270,87 +10438,11 @@ function MainApp({ user, theme, toggleTheme }) {
 
   useEffect(() => { loadAll(); }, []);
 
-  // TÍNH NĂNG MỚI: tự động tính & nạp "Tích lũy trước chi" (công thức + cách đổi tên category
-  // nếu cần: xem computeAccumulationBeforeSpendTarget ở đầu file). Effect này chạy lại mỗi khi
-  // transactions/categories/spendingPoolByPeriod đổi — tức mỗi khi bạn thêm/sửa/xoá giao dịch
-  // "Lương cơ bản", hoặc cài đặt lại "Thu nhập được chi" — nhờ vậy tự ĐIỀU CHỈNH lại khoản đã
-  // nạp trước đó (sửa số tiền, hoặc xoá nếu không còn cần) mà không cần thao tác tay.
-  // Nhận diện đúng giao dịch tự tạo trước đó qua note = AUTO_ACCUM_NOTE (xem hằng số ở đầu file)
-  // — không đụng tới giao dịch bạn tự nạp tay vào quỹ này (nếu note khác).
-  const accumSyncRunningRef = useRef(false);
-  useEffect(() => {
-    if (!initialLoadDone) return; // chờ load xong dữ liệu ban đầu mới bắt đầu đối chiếu
-    if (accumSyncRunningRef.current) return; // tránh chạy chồng lấn nếu effect bắn liên tiếp
-    const fundCat = categories.find((c) => c.name === ACCUMULATION_FUND_CATEGORY_NAME && c.is_fund);
-    if (!fundCat) return; // chưa có quỹ "Tích lũy trước chi" trong Danh mục -> bỏ qua, không tự tạo category giúp
-    const periodKeys = Object.keys(spendingPoolByPeriod || {});
-    if (periodKeys.length === 0) return; // chưa kỳ nào cài đặt "Thu nhập được chi" -> chưa có gì để tính
-
-    (async () => {
-      accumSyncRunningRef.current = true;
-      try {
-        let didWrite = false;
-        for (const periodKey of periodKeys) {
-          const target = computeAccumulationBeforeSpendTarget(periodKey, transactions, categories, spendingPoolByPeriod);
-          if (target == null) continue; // thiếu category "Lương cơ bản" -> chưa tính được, bỏ qua kỳ này
-
-          // TẤT CẢ khoản đã nạp vào quỹ này cho đúng kỳ này (không phân biệt note) — để nhận ra
-          // cả khoản bạn đã TỰ TAY nạp trước khi bật tính năng tự động, tránh nạp lặp thêm 1 dòng.
-          const candidates = transactions.filter((t) =>
-            t.type === 'allocation' &&
-            t.category_id === fundCat.id &&
-            t.account_id === null &&
-            !t.deleted_at &&
-            transactionPeriodKey(t) === periodKey
-          );
-          const autoExisting = candidates.find((t) => stripPeriodTag(t.note || '').trim() === AUTO_ACCUM_NOTE);
-          const manualExisting = candidates.find((t) => t !== autoExisting);
-
-          if (target <= 0) {
-            // Thu nhập được chi đã đủ/vượt (Lương cơ bản + Tiền cơm) -> không cần tích lũy nữa,
-            // xoá mềm khoản CODE ĐÃ TỰ NẠP trước đó (nếu có). Không đụng vào khoản bạn tự tay nạp.
-            if (autoExisting) {
-              await softDelete('transactions', autoExisting.id, `Tự động xoá "Tích lũy trước chi" kỳ ${periodKey} (Thu nhập được chi đã đủ)`, 'auto_accumulation_remove');
-              didWrite = true;
-            }
-            continue;
-          }
-
-          if (manualExisting) {
-            // Bạn đã tự tay nạp cho kỳ này rồi -> không tạo thêm dòng tự động nữa (tôn trọng
-            // khoản bạn đã tự nhập, kể cả khi số tiền không khớp 100% với công thức).
-            continue;
-          }
-
-          if (autoExisting) {
-            if (Number(autoExisting.amount) !== target) {
-              const { error } = await supabase.from('transactions').update({ amount: target }).eq('id', autoExisting.id);
-              if (!error) didWrite = true;
-            }
-            continue;
-          }
-
-          // Chưa có dòng nào (tự động lẫn tự tay) cho kỳ này -> tạo mới. Đặt giờ NGAY SAU giao
-          // dịch "Lương cơ bản" gần nhất của kỳ (nếu có), thay vì luôn lấy giờ hiện tại lúc effect
-          // chạy — để dòng tự động luôn nằm đúng vị trí, ngay sau khi bạn nhập lương, trong Lịch sử.
-          const insertAt = latestBaseSalaryTimestamp(periodKey, transactions, categories) || new Date();
-          const { error } = await supabase.from('transactions').insert({
-            category_id: fundCat.id,
-            type: 'allocation',
-            account_id: null,
-            amount: target,
-            date: localDateStr(insertAt),
-            created_at: insertAt.toISOString(),
-            note: tagPeriodNote(periodKey, AUTO_ACCUM_NOTE),
-          });
-          if (!error) didWrite = true;
-        }
-        if (didWrite) await loadAll(); // chỉ tải lại nếu thật sự có thay đổi, tránh vòng lặp thừa
-      } finally {
-        accumSyncRunningRef.current = false;
-      }
-    })();
-  }, [transactions, categories, spendingPoolByPeriod, initialLoadDone]);
+  // Trước đây có 1 effect TỰ ĐỘNG tính & nạp "Tích lũy trước chi" mỗi khi transactions/categories/
+  // spendingPoolByPeriod đổi. Theo yêu cầu, tính năng này đã CHUYỂN sang chế độ THỦ CÔNG: công
+  // thức (computeAccumulationBeforeSpendTarget) giờ chỉ dùng để GỢI Ý số tiền trong 2 form nạp quỹ
+  // (AddTransactionModal khi chọn "Tích lũy trước chi", và modal "Nạp quỹ" ở FundDetail) — người
+  // dùng tự bấm Nạp quỹ để lưu, không còn giao dịch nào được tự tạo/sửa/xoá ngầm nữa.
 
   const [resettingData, setResettingData] = useState(false);
   async function resetAllData() {

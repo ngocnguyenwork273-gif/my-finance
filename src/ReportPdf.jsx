@@ -1,7 +1,7 @@
 // Tài liệu PDF báo cáo — dùng @react-pdf/renderer. File này được App.jsx import ĐỘNG
 // (await import('./ReportPdf')) nên thư viện chỉ tải khi người dùng bấm xem trước/xuất.
 // Dữ liệu (đã định dạng sẵn thành chuỗi) do buildReportData() trong App.jsx cung cấp.
-import { Document, Page, View, Text, Font, StyleSheet, pdf } from '@react-pdf/renderer';
+import { Document, Page, View, Text, Font, StyleSheet, Svg, Circle, pdf } from '@react-pdf/renderer';
 
 const BASE = import.meta.env.BASE_URL || '/';
 // Font phải hỗ trợ tiếng Việt (Helvetica mặc định không có dấu). File nằm ở public/fonts/.
@@ -27,8 +27,8 @@ const ACCENT = {
   fund_history: '#F0A93E',
   transactions: C.steel,
 };
-// Bảng màu xoay vòng cho các thanh % góp quỹ theo từng quỹ (để phân biệt quỹ này với quỹ khác).
-const FUND_COLORS = ['#0DBACC', '#8E6CF1', '#F0A93E', '#3E9BE0', '#12B76A', '#E0568F'];
+// Bảng màu xoay vòng cho các thanh % (góp quỹ, chi tiêu theo nguồn) — phân biệt từng dòng.
+const PALETTE = ['#0DBACC', '#8E6CF1', '#F0A93E', '#3E9BE0', '#12B76A', '#E0568F'];
 
 // Trộn 1 màu hex với độ trong suốt để làm nền nhạt (react-pdf hiểu rgba trực tiếp).
 function tint(hex, alpha) {
@@ -49,6 +49,7 @@ const s = StyleSheet.create({
   card: { flex: 1, borderWidth: 1, borderLeftWidth: 3, borderColor: C.line, borderRadius: 6, padding: 8 },
   cardLabel: { fontSize: 8, color: C.steel, marginBottom: 3 },
   cardValue: { fontSize: 12, fontWeight: 700 },
+  cardSub: { fontSize: 7, fontWeight: 700, marginTop: 3 },
   row: { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: C.soft, paddingVertical: 4 },
   totalRow: { flexDirection: 'row', paddingVertical: 5, borderRadius: 4 },
   thRow: { flexDirection: 'row', paddingVertical: 4, marginBottom: 2, borderRadius: 4 },
@@ -59,10 +60,13 @@ const s = StyleSheet.create({
   muted: { color: C.steel },
   empty: { fontSize: 9, color: C.steel },
   note: { fontSize: 8, color: C.steel, marginTop: 5 },
-  fundRow: { marginBottom: 9 },
-  fundRowHead: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 3 },
+  barRow: { marginBottom: 9 },
+  barRowHead: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 3 },
   barTrack: { height: 6, borderRadius: 3, backgroundColor: C.soft, overflow: 'hidden' },
   barFill: { height: 6, borderRadius: 3 },
+  legendRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 5 },
+  legendDot: { width: 8, height: 8, borderRadius: 4, marginRight: 6 },
+  dayHead: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 3, paddingHorizontal: 6, marginTop: 7, marginBottom: 2, borderRadius: 3 },
   footer: { position: 'absolute', bottom: 22, left: 40, right: 40, flexDirection: 'row', justifyContent: 'space-between', fontSize: 8, color: C.steel },
 });
 
@@ -117,11 +121,85 @@ function Section({ title, accent = C.steel, children }) {
   );
 }
 
-function Card({ label, value, color }) {
+function Card({ label, value, color, sub, subColor }) {
   return (
     <View style={[s.card, color ? { borderLeftColor: color, backgroundColor: tint(color, 0.05) } : null]} wrap={false}>
       <Text style={s.cardLabel}>{label}</Text>
       <Text style={[s.cardValue, color ? { color } : null]}>{value}</Text>
+      {sub && <Text style={[s.cardSub, { color: subColor || C.steel }]}>{sub}</Text>}
+    </View>
+  );
+}
+
+// Danh sách thanh % dùng chung cho "góp quỹ theo mục" và "chi tiêu theo nguồn tiền" —
+// mỗi dòng: tên + % + số tiền, thanh ngang tô màu theo tỷ lệ (biểu đồ cột ngang đơn giản).
+function BarList({ rows, labelKey = 'name' }) {
+  return (
+    <View style={{ marginTop: 2, marginBottom: 2 }}>
+      {rows.map((r, i) => {
+        const color = PALETTE[i % PALETTE.length];
+        return (
+          <View key={i} style={s.barRow} wrap={false}>
+            <View style={s.barRowHead}>
+              <Text style={[s.td, s.bold]}>{clean(r[labelKey])}</Text>
+              <Text style={[s.td, s.bold, { color }]}>{r.pct}  ·  {r.amount}</Text>
+            </View>
+            <View style={s.barTrack}>
+              <View style={[s.barFill, { width: `${Math.min(100, r.pctNum)}%`, backgroundColor: color }]} />
+            </View>
+          </View>
+        );
+      })}
+    </View>
+  );
+}
+
+// Biểu đồ tròn (donut) cơ cấu tài sản — vẽ bằng SVG thuần (nhiều <Circle> chồng lên nhau,
+// mỗi cung 1 đoạn strokeDasharray), không cần thư viện chart ngoài.
+function DonutChart({ items, size = 84, thickness = 13 }) {
+  const r = (size - thickness) / 2;
+  const cx = size / 2, cy = size / 2;
+  const circumference = 2 * Math.PI * r;
+  let acc = 0;
+  return (
+    <Svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+      <Circle cx={cx} cy={cy} r={r} stroke={C.soft} strokeWidth={thickness} fill="none" />
+      {items.map((it, i) => {
+        const len = (it.pctNum / 100) * circumference;
+        const node = (
+          <Circle
+            key={i}
+            cx={cx} cy={cy} r={r}
+            stroke={it.color}
+            strokeWidth={thickness}
+            fill="none"
+            strokeDasharray={`${len} ${circumference - len}`}
+            strokeDashoffset={-acc}
+            transform={`rotate(-90 ${cx} ${cy})`}
+          />
+        );
+        acc += len;
+        return node;
+      })}
+    </Svg>
+  );
+}
+
+function AssetDonutBlock({ items }) {
+  if (!items || items.length === 0) return null;
+  return (
+    <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 10 }} wrap={false}>
+      <DonutChart items={items} />
+      <View style={{ flex: 1, marginLeft: 16 }}>
+        {items.map((it, i) => (
+          <View key={i} style={s.legendRow}>
+            <View style={[s.legendDot, { backgroundColor: it.color }]} />
+            <Text style={[s.td, { flex: 1 }]}>{it.label}</Text>
+            <Text style={[s.td, s.bold, { width: 42, textAlign: 'right' }]}>{it.pctLabel}</Text>
+            <Text style={[s.td, s.muted, { width: 84, textAlign: 'right' }]}>{it.amount}</Text>
+          </View>
+        ))}
+      </View>
     </View>
   );
 }
@@ -137,24 +215,7 @@ function PoolAllocationBlock({ p }) {
         <Card label={`Đã góp quỹ (${p.totalPct})`} value={p.total} color="#8E6CF1" />
         <Card label="Còn lại (không phải quỹ)" value={p.remaining} color={p.remainingPositive ? C.turquoise : C.pink} />
       </View>
-      {p.rows.length > 0 && (
-        <View style={{ marginTop: 4, marginBottom: 4 }}>
-          {p.rows.map((r, i) => {
-            const color = FUND_COLORS[i % FUND_COLORS.length];
-            return (
-              <View key={i} style={s.fundRow} wrap={false}>
-                <View style={s.fundRowHead}>
-                  <Text style={[s.td, s.bold]}>{clean(r.name)}</Text>
-                  <Text style={[s.td, s.bold, { color }]}>{r.pct}  ·  {r.amount}</Text>
-                </View>
-                <View style={s.barTrack}>
-                  <View style={[s.barFill, { width: `${Math.min(100, r.pctNum)}%`, backgroundColor: color }]} />
-                </View>
-              </View>
-            );
-          })}
-        </View>
-      )}
+      {p.rows.length > 0 && <BarList rows={p.rows} labelKey="name" />}
       {p.nonFundExpense && (
         <Text style={s.note}>Đã chi tiêu (ngoài quỹ) từ Thu nhập được chi: {p.nonFundExpense}.</Text>
       )}
@@ -173,12 +234,15 @@ function OverviewSection({ o }) {
         <Card label={o.assetsChangePct ? `Chênh lệch tài sản (${o.assetsChangePct})` : 'Chênh lệch tài sản'} value={o.assetsChange} color={o.assetsPositive ? C.turquoise : C.pink} />
       </View>
       <View style={s.cards}>
-        <Card label="Tổng thu nhập trong kỳ" value={o.income} color={C.turquoise} />
-        <Card label="Tổng chi tiêu trong kỳ" value={o.expense} color={C.pink} />
+        <Card label="Tổng thu nhập trong kỳ" value={o.income} color={C.turquoise}
+          sub={o.incomeVsPrev?.label} subColor={o.incomeVsPrev ? (o.incomeVsPrev.good ? C.turquoise : C.pink) : undefined} />
+        <Card label="Tổng chi tiêu trong kỳ" value={o.expense} color={C.pink}
+          sub={o.expenseVsPrev?.label} subColor={o.expenseVsPrev ? (o.expenseVsPrev.good ? C.turquoise : C.pink) : undefined} />
         <Card label="Thu nhập - Chi tiêu" value={o.net} color={o.netPositive ? C.turquoise : C.pink} />
       </View>
 
       <Text style={s.groupTitle}>Cơ cấu tài sản</Text>
+      <AssetDonutBlock items={o.assetDonut} />
       <Table
         accent={accent}
         cols={[
@@ -194,15 +258,7 @@ function OverviewSection({ o }) {
       {o.expenseBySource.length > 0 && (
         <>
           <Text style={s.groupTitle}>Chi tiêu theo nguồn tiền</Text>
-          <Table
-            accent={accent}
-            cols={[
-              { key: 'label', label: 'Nguồn tiền', flex: 3 },
-              { key: 'amount', label: 'Số tiền', flex: 2, align: 'right' },
-              { key: 'pct', label: 'Tỷ trọng', flex: 1, align: 'right' },
-            ]}
-            rows={o.expenseBySource}
-          />
+          <BarList rows={o.expenseBySource} labelKey="label" />
         </>
       )}
       {o.allocation && (
@@ -312,23 +368,49 @@ function FundHistorySection({ history }) {
   );
 }
 
-function TransactionsSection({ txs, count }) {
+// Danh sách giao dịch gộp theo ngày: 1 header cột chung, mỗi ngày có 1 dòng chia nhóm
+// (ngày + thay đổi ròng trong ngày) rồi tới các giao dịch của ngày đó (không lặp cột Ngày).
+function TransactionsSection({ days, count }) {
   const accent = ACCENT.transactions;
+  const cols = [
+    { key: 'kind', label: 'Loại', flex: 1.4 },
+    { key: 'cat', label: 'Danh mục', flex: 2 },
+    { key: 'source', label: 'Ví / Nguồn', flex: 2 },
+    { key: 'note', label: 'Ghi chú', flex: 2.6, muted: true },
+    { key: 'amount', label: 'Số tiền', flex: 1.9, align: 'right', tone: true },
+  ];
+  const cell = (c) => ({ flex: c.flex || 1, paddingRight: 4, textAlign: c.align === 'right' ? 'right' : 'left' });
+  const renderRow = (r, i) => (
+    <View key={i} style={s.row} wrap={false}>
+      {cols.map((c) => (
+        <Text key={c.key} style={[s.td, cell(c), c.muted ? s.muted : null, c.tone ? { color: toneColor(r.tone), fontWeight: 700 } : null]}>
+          {clean(r[c.key]) || (c.muted ? '—' : '')}
+        </Text>
+      ))}
+    </View>
+  );
   return (
     <Section title={`Tất cả giao dịch trong kỳ (${count})`} accent={accent}>
-      {txs.length === 0 ? <Text style={s.empty}>Không có giao dịch trong khoảng này.</Text> : (
-        <Table
-          accent={accent}
-          cols={[
-            { key: 'date', label: 'Ngày', flex: 1.3 },
-            { key: 'kind', label: 'Loại', flex: 1.4 },
-            { key: 'cat', label: 'Danh mục', flex: 2 },
-            { key: 'source', label: 'Ví / Nguồn', flex: 2 },
-            { key: 'note', label: 'Ghi chú', flex: 2.6, muted: true },
-            { key: 'amount', label: 'Số tiền', flex: 1.9, align: 'right', tone: true },
-          ]}
-          rows={txs}
-        />
+      {days.length === 0 ? <Text style={s.empty}>Không có giao dịch trong khoảng này.</Text> : (
+        <View>
+          <View style={[s.thRow, { backgroundColor: tint(accent, 0.1) }]} wrap={false}>
+            {cols.map((c) => <Text key={c.key} style={[s.th, cell(c), { color: accent }]}>{c.label}</Text>)}
+          </View>
+          {days.map((d, di) => (
+            <View key={di}>
+              <View wrap={false}>
+                <View style={[s.dayHead, { backgroundColor: tint(accent, 0.16) }]}>
+                  <Text style={[s.td, s.bold]}>{d.date}</Text>
+                  <Text style={[s.td, s.bold, { color: d.hasNet ? (d.netPositive ? C.turquoise : C.pink) : C.steel }]}>
+                    {d.hasNet ? `Ròng ${d.net}` : 'Chuyển nội bộ'}
+                  </Text>
+                </View>
+                {d.items[0] && renderRow(d.items[0], 0)}
+              </View>
+              {d.items.slice(1).map((r, ri) => renderRow(r, ri + 1))}
+            </View>
+          ))}
+        </View>
       )}
     </Section>
   );
@@ -353,7 +435,7 @@ function ReportDocument({ data }) {
         {sec.funds && <FundsSection funds={data.funds} />}
         {sec.wallets && <WalletsSection groups={data.walletGroups} />}
         {sec.fund_history && <FundHistorySection history={data.fundHistory} />}
-        {sec.transactions && <TransactionsSection txs={data.txs} count={data.txCount} />}
+        {sec.transactions && <TransactionsSection days={data.txsByDay} count={data.txCount} />}
 
         <View style={s.footer} fixed>
           <Text>PandaFi</Text>
