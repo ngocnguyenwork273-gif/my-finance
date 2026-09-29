@@ -3,6 +3,8 @@
    ============================================================================== */
 import { useState, useEffect, useLayoutEffect, useRef, useMemo, Fragment, Children } from 'react';
 import { createPortal } from 'react-dom';
+import { Capacitor } from '@capacitor/core';
+import { App as CapApp } from '@capacitor/app'; // nút Back Android (cần: npm i @capacitor/app)
 import { supabase } from './supabaseClient';
 import {
   Home, Sparkles, Plus, BarChart3, SettingsIcon, TrendingUp, TrendingDown, PiggyBank, HeartPulse,
@@ -37,449 +39,77 @@ function findScrollableAncestor(el) {
 }
 
 /* ==============================================================================
-   02. CUSTOM STYLES (Fincheck palette + ẩn scrollbar)
+   02. CUSTOM STYLES
+   Toàn bộ CSS (bảng màu Fincheck, liquid glass, font Nunito self-host...) đã chuyển sang
+   src/index.css — không còn inject <style> lúc chạy nữa (hết chớp giao diện lúc mở app).
    ============================================================================== */
-const fincheckStyles = `
-  @import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&display=swap');
-  * { font-family: 'Nunito', sans-serif; }
-  :root {
-    --turquoise: #0DBACC;
-    --baby-blue: #74ACEF;
-    --cotton-candy: #F18AB5;
-    --lavender: #9F7FE0;
-    --ice-cream: #EEF0F4;
-    --white: #FFFFFF;
-    --light-grey: #BDBDCB;
-    --steel: #7E7F90;
-    --blueberry: #303150;
-    --night-sky: #2B2B46;
-    --dodger-blue: #69ADFF;
-    --turquoise-light: #B4F1F1;
-    --baby-blue-light: #C1DDFF;
-    --cotton-candy-light: #FFCDDB;
-    --lavender-light: #E3D6FF;
-    --page-bg: #EDE4FF; /* Lavender nhạt pha thêm trắng — nền pastel đồng nhất cho tất cả các trang, không dùng gradient nữa */
-
-    /* Typography hierarchy (avoid pure #FFFFFF everywhere) */
-    --text-primary: rgba(255,255,255,0.92);
-    --text-secondary: rgba(255,255,255,0.70);
-    --text-tertiary: rgba(255,255,255,0.55);
-    --text-placeholder: rgba(255,255,255,0.48);
-    --text-disabled: rgba(255,255,255,0.35);
-
-    /* Liquid glass tokens — blur/saturate mạnh hơn, viền + highlight rõ hơn
-       để cảm giác "kính lỏng" rõ rệt hơn trên mọi bề mặt, cả sáng lẫn tối. */
-    --glass-bg: rgba(20,20,45,0.50);
-    --glass-border: rgba(255,255,255,0.18);
-    --glass-blur: blur(30px) saturate(190%);
-    --glass-shadow: 0 10px 42px rgba(0,0,0,0.24);
-    --glass-highlight: rgba(255,255,255,0.35);
-  }
-
-  /* App shell base: avoid the default browser bg (white/black) showing
-     through during elastic/overscroll, which reads as an unintended
-     "black patch" on mobile, especially in dark theme. */
-  html, body, #root {
-    width: 100%;
-    min-height: 100%;
-    margin: 0;
-    background-color: var(--ice-cream);
-  }
-  html.dark, html.dark body, html.dark #root {
-    background-color: #1a1a2e;
-  }
-
-  /* Liquid glass — reusable surface for auth card / modal / dropdown / popover.
-     Tăng blur/saturate + thêm lớp "sheen" (ánh sáng lướt) chuyển động rất chậm
-     để bề mặt có cảm giác kính lỏng sống động thay vì kính mờ tĩnh. Đồng thời
-     bổ sung biến thể .dark thực sự (trước đây chỉ có .glass-surface-dark —
-     một class không được gắn ở đâu cả nên auth card KHÔNG đổi theo dark mode). */
-  .glass-surface {
-    background: rgba(255,255,255,0.24);
-    backdrop-filter: blur(34px) saturate(190%);
-    -webkit-backdrop-filter: blur(34px) saturate(190%);
-    border: 1px solid rgba(255,255,255,0.36);
-    box-shadow: 0 24px 70px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,255,255,0.5),
-      inset 0 0 46px rgba(255,255,255,0.06);
-  }
-  .glass-surface::after {
-    content: '';
-    position: absolute;
-    inset: 0;
-    border-radius: inherit;
-    background: linear-gradient(115deg, rgba(255,255,255,0.5) 0%, rgba(255,255,255,0) 30%, rgba(255,255,255,0) 70%, rgba(255,255,255,0.25) 100%);
-    background-size: 220% 220%;
-    animation: liquidSheen 10s ease-in-out infinite;
-    pointer-events: none;
-    z-index: -1;
-  }
-  .dark .glass-surface {
-    background: rgba(20,20,45,0.55);
-    backdrop-filter: blur(34px) saturate(190%);
-    -webkit-backdrop-filter: blur(34px) saturate(190%);
-    border: 1px solid rgba(255,255,255,0.16);
-    box-shadow: 0 24px 70px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.12),
-      inset 0 0 46px rgba(255,255,255,0.03);
-  }
-  @keyframes liquidSheen {
-    0%, 100% { background-position: 0% 0%; }
-    50% { background-position: 100% 100%; }
-  }
-  .glass-input {
-    background: rgba(255,255,255,0.20);
-    backdrop-filter: blur(18px) saturate(170%);
-    -webkit-backdrop-filter: blur(18px) saturate(170%);
-    border: 1px solid rgba(255,255,255,0.34);
-    box-shadow: inset 0 1px 0 rgba(255,255,255,0.4);
-    transition: background-color .15s, border-color .15s, box-shadow .15s;
-  }
-  .glass-input:focus {
-    border-color: rgba(34,211,238,0.65);
-    box-shadow: 0 0 0 3px rgba(34,211,238,0.14), inset 0 1px 0 rgba(255,255,255,0.5);
-    background: rgba(255,255,255,0.28);
-  }
-  .bg-ice-cream { background-color: var(--ice-cream); }
-  .bg-turquoise { background-color: var(--turquoise); }
-  .bg-baby-blue { background-color: var(--baby-blue); }
-  .bg-cotton-candy { background-color: var(--cotton-candy); }
-  .bg-lavender { background-color: var(--lavender); }
-  .bg-night-sky { background-color: var(--night-sky); }
-  .bg-blueberry { background-color: var(--blueberry); }
-  .bg-steel { background-color: var(--steel); }
-  .bg-light-grey { background-color: var(--light-grey); }
-  .bg-turquoise-light { background-color: var(--turquoise-light); }
-  .bg-baby-blue-light { background-color: var(--baby-blue-light); }
-  .bg-cotton-candy-light { background-color: var(--cotton-candy-light); }
-  .bg-lavender-light { background-color: var(--lavender-light); }
-  .text-turquoise { color: var(--turquoise); }
-  .text-baby-blue { color: var(--baby-blue); }
-  .text-cotton-candy { color: var(--cotton-candy); }
-  .text-lavender { color: var(--lavender); }
-  .text-blueberry { color: var(--blueberry); }
-  .text-steel { color: var(--steel); }
-  .text-light-grey { color: var(--light-grey); }
-  .text-white { color: var(--white); }
-  .text-night-sky { color: var(--night-sky); }
-  .border-turquoise { border-color: var(--turquoise); }
-  .border-baby-blue { border-color: var(--baby-blue); }
-  .border-cotton-candy { border-color: var(--cotton-candy); }
-  .border-lavender { border-color: var(--lavender); }
-  .border-steel { border-color: var(--steel); }
-  .border-light-grey { border-color: var(--light-grey); }
-  .shadow-soft { box-shadow: 0 1px 2px rgba(48,49,80,0.04), 0 10px 30px rgba(48,49,80,0.10), inset 0 1px 0 rgba(255,255,255,0.5); }
-  .shadow-card { box-shadow: 0 2px 4px rgba(48,49,80,0.05), 0 18px 48px rgba(48,49,80,0.14), inset 0 1px 0 rgba(255,255,255,0.55); }
-  .dark .bg-ice-cream { background-color: var(--night-sky); }
-  /* "bg-white" / "dark:bg-[#1e1e32]" / "dark:bg-[#2a2a44]" là các nền đặc dùng
-     cho card, modal, dropdown, segmented-control khắp app. Đổi sang kính lỏng
-     (nền bán trong suốt + backdrop-blur) thay vì màu đặc, cả sáng lẫn tối,
-     để hiệu ứng liquid glass nhất quán trên toàn bộ giao diện. */
-  .bg-white {
-    background-color: rgba(255,255,255,0.66);
-    backdrop-filter: blur(28px) saturate(190%);
-    -webkit-backdrop-filter: blur(28px) saturate(190%);
-  }
-  .dark .bg-white {
-    background-color: rgba(30,30,50,0.62);
-    backdrop-filter: blur(28px) saturate(190%);
-    -webkit-backdrop-filter: blur(28px) saturate(190%);
-  }
-  .dark .dark\:bg-\[\#1e1e32\] {
-    background-color: rgba(30,30,50,0.62);
-    backdrop-filter: blur(28px) saturate(190%);
-    -webkit-backdrop-filter: blur(28px) saturate(190%);
-  }
-  .dark .dark\:bg-\[\#2a2a44\] {
-    background-color: rgba(42,42,68,0.68);
-    backdrop-filter: blur(18px) saturate(190%);
-    -webkit-backdrop-filter: blur(18px) saturate(190%);
-  }
-  /* Tăng độ dày mặc định của backdrop-blur (Tailwind) để mọi bề mặt bán
-     trong suốt còn lại (thanh tìm kiếm, nút tròn, menu...) cũng dày kính hơn. */
-  .backdrop-blur {
-    backdrop-filter: blur(22px) saturate(190%);
-    -webkit-backdrop-filter: blur(22px) saturate(190%);
-  }
-  .dark .text-blueberry { color: var(--text-primary); }
-  .dark .text-steel { color: var(--light-grey); }
-  .dark .border-steel { border-color: #3a3a5a; }
-  .dark .border-light-grey { border-color: #3a3a5a; }
-  .dark .shadow-soft { box-shadow: 0 4px 24px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.08); }
-  .dark .shadow-card { box-shadow: 0 10px 40px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.1); }
-  .bg-gradient-primary { background: linear-gradient(135deg, var(--turquoise), var(--baby-blue)); }
-  .bg-gradient-secondary { background: linear-gradient(135deg, var(--cotton-candy), var(--lavender)); }
-  .bg-gradient-warm { background: linear-gradient(135deg, var(--cotton-candy-light), var(--lavender-light)); }
-  .bg-gradient-cool { background: linear-gradient(135deg, var(--turquoise-light), var(--baby-blue-light)); }
-  .bg-gradient-hero { background: linear-gradient(135deg, var(--turquoise), var(--lavender)); }
-  .bg-page { background-color: var(--page-bg); }
-
-  /* ==========================================================================
-     Mobile: Frosted-glass + Neumorphism blend (pastel, layered, soft shadows)
-     Reusable across mobile screens — panels, cards, and inset stat tiles.
-     ========================================================================== */
-  .frost-card {
-    position: relative;
-    background: rgba(255,255,255,0.92);
-    backdrop-filter: blur(16px) saturate(150%);
-    -webkit-backdrop-filter: blur(16px) saturate(150%);
-    border: 1px solid rgba(255,255,255,0.6);
-    box-shadow: 0 6px 20px rgba(48,49,80,0.08);
-    isolation: isolate;
-  }
-  .frost-card::before {
-    content: '';
-    position: absolute;
-    inset: 0;
-    border-radius: inherit;
-    background: linear-gradient(115deg, rgba(255,255,255,0.22) 0%, rgba(255,255,255,0) 40%, rgba(255,255,255,0) 100%);
-    pointer-events: none;
-    z-index: -1;
-  }
-  .dark .frost-card {
-    background: rgba(38,38,64,0.82);
-    backdrop-filter: blur(16px) saturate(150%);
-    -webkit-backdrop-filter: blur(16px) saturate(150%);
-    border: 1px solid rgba(255,255,255,0.10);
-    box-shadow: 0 6px 20px rgba(0,0,0,0.28);
-  }
-  .dark .frost-card::before {
-    background: linear-gradient(115deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0) 40%, rgba(255,255,255,0) 100%);
-  }
-  .frost-inset {
-    position: relative;
-    background: rgba(255,255,255,0.55);
-    backdrop-filter: blur(8px) saturate(130%);
-    -webkit-backdrop-filter: blur(8px) saturate(130%);
-    border: 1px solid rgba(255,255,255,0.5);
-    box-shadow: 0 2px 10px rgba(48,49,80,0.06);
-  }
-  .dark .frost-inset {
-    background: rgba(255,255,255,0.05);
-    backdrop-filter: blur(8px) saturate(130%);
-    -webkit-backdrop-filter: blur(8px) saturate(130%);
-    border: 1px solid rgba(255,255,255,0.10);
-    box-shadow: 0 2px 10px rgba(0,0,0,0.22);
-  }
-  .frost-pill {
-    background: rgba(255,255,255,0.58);
-    backdrop-filter: blur(30px) saturate(220%);
-    -webkit-backdrop-filter: blur(30px) saturate(220%);
-    border: 1px solid rgba(255,255,255,0.85);
-    box-shadow: 8px 8px 18px rgba(48,49,80,0.13), -5px -5px 12px rgba(255,255,255,0.85);
-  }
-  .dark .frost-pill {
-    background: rgba(255,255,255,0.09);
-    backdrop-filter: blur(30px) saturate(220%);
-    -webkit-backdrop-filter: blur(30px) saturate(220%);
-    border: 1px solid rgba(255,255,255,0.18);
-    box-shadow: 8px 8px 18px rgba(0,0,0,0.4), -5px -5px 12px rgba(255,255,255,0.04);
-  }
-  /* Soft ambient pastel blobs for layered depth behind frosted panels — bigger & more saturated
-     so the backdrop-blur on cards has real color/contrast to blur (this is what makes the glass
-     effect actually read as "glass" instead of a flat translucent panel). */
-  .frost-blob {
-    position: absolute;
-    border-radius: 9999px;
-    filter: blur(50px);
-    pointer-events: none;
-    opacity: 0.9;
-  }
 
 
-  .scrollbar-hide {
-    -ms-overflow-style: none;
-    scrollbar-width: none;
-  }
-  .scrollbar-hide::-webkit-scrollbar {
-    display: none;
-  }
+/* ==============================================================================
+   02b. TOAST + ĐÓNG MODAL BẰNG ESC / NÚT BACK
+   - toast(msg, type): thay toast() — không chặn luồng, hợp giao diện app, đẹp trong WebView Android.
+     type: 'error' (mặc định, hồng) | 'info' (xanh đậm) | 'success' (turquoise).
+   - useEscapeKey(onClose): gắn vào mọi modal. Nhiều modal chồng nhau thì CHỈ modal trên cùng đóng.
+   - closeTopModal(): nút Back Android gọi hàm này để đóng modal trên cùng trước khi lùi màn hình.
+   ============================================================================== */
+const TOAST_EVENT = 'app:toast';
+function toast(message, type = 'error') {
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(new CustomEvent(TOAST_EVENT, { detail: { message: String(message), type } }));
+}
 
-  /* Thanh cuộn ngang mảnh, chỉ dùng cho các chart cột (TrendBarChart...) — khác với
-     scrollbar-hide (ẩn hoàn toàn), ở đây để lộ một thanh mảnh, mờ để người dùng biết
-     là còn nội dung có thể kéo/cuộn ngang khi số cột (ngày/tháng) vượt quá khung nhìn. */
-  .chart-scroll-x {
-    scrollbar-width: thin;
-    scrollbar-color: rgba(48,49,80,0.18) transparent;
-  }
-  .chart-scroll-x::-webkit-scrollbar {
-    height: 6px;
-  }
-  .chart-scroll-x::-webkit-scrollbar-track {
-    background: transparent;
-  }
-  .chart-scroll-x::-webkit-scrollbar-thumb {
-    background: rgba(48,49,80,0.18);
-    border-radius: 999px;
-  }
-  .chart-scroll-x::-webkit-scrollbar-thumb:hover {
-    background: rgba(48,49,80,0.32);
-  }
-  .dark .chart-scroll-x {
-    scrollbar-color: rgba(255,255,255,0.22) transparent;
-  }
-  .dark .chart-scroll-x::-webkit-scrollbar-thumb {
-    background: rgba(255,255,255,0.22);
-  }
-  .dark .chart-scroll-x::-webkit-scrollbar-thumb:hover {
-    background: rgba(255,255,255,0.36);
-  }
-
-  /* FIX: bấm vào nút / biểu tượng (icon button) không còn hiện con trỏ chữ (I-beam)
-     kiểu ô nhập văn bản, và không bị bôi đen chữ khi bấm nhanh 2 lần.
-     Ô nhập liệu được loại trừ ngay bên dưới để vẫn gõ / bôi đen text bình thường. */
-  button,
-  [role="button"],
-  [role="tab"],
-  [role="option"],
-  label,
-  summary,
-  button svg,
-  [role="button"] svg,
-  label svg {
-    cursor: pointer;
-    -webkit-user-select: none;
-    user-select: none;
-    -webkit-tap-highlight-color: transparent;
-  }
-  button:disabled,
-  [role="button"][aria-disabled="true"] {
-    cursor: not-allowed;
-  }
-  /* Các ô nhập liệu vẫn giữ con trỏ chữ và cho phép bôi đen, kể cả khi nằm trong <label> */
-  input,
-  textarea,
-  select,
-  [contenteditable="true"] {
-    -webkit-user-select: text;
-    user-select: text;
-  }
-  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="button"]):not([type="submit"]),
-  textarea,
-  [contenteditable="true"] {
-    cursor: text;
-  }
-  select,
-  input[type="checkbox"],
-  input[type="radio"] {
-    cursor: pointer;
-  }
-
-  /* Mobile: ẩn scrollbar toàn bộ */
-  @media (max-width: 767px) {
-    * {
-      scrollbar-width: none;
-      -ms-overflow-style: none;
+function ToastHost() {
+  const [items, setItems] = useState([]);
+  useEffect(() => {
+    function onToast(e) {
+      const { message, type } = e.detail;
+      const id = Date.now() + Math.random();
+      // Tránh chồng nhiều toast giống hệt nhau; tối đa 3 toast cùng lúc.
+      setItems((prev) => [...prev.filter((t) => t.message !== message), { id, message, type }].slice(-3));
+      const ms = Math.min(9000, 3500 + message.length * 40);
+      setTimeout(() => setItems((prev) => prev.filter((t) => t.id !== id)), ms);
     }
-    *::-webkit-scrollbar {
-      display: none;
-    }
-  }
+    window.addEventListener(TOAST_EVENT, onToast);
+    return () => window.removeEventListener(TOAST_EVENT, onToast);
+  }, []);
+  if (!items.length) return null;
+  const tone = { error: 'bg-cotton-candy text-white', info: 'bg-blueberry text-white', success: 'bg-turquoise text-white' };
+  return (
+    <div className="pointer-events-none fixed inset-x-0 z-[9999] flex flex-col items-center gap-2 px-4"
+         style={{ top: 'calc(env(safe-area-inset-top, 0px) + 12px)' }}>
+      {items.map((t) => (
+        <div key={t.id} role={t.type === 'error' ? 'alert' : 'status'}
+             onClick={() => setItems((prev) => prev.filter((x) => x.id !== t.id))}
+             className={`pointer-events-auto max-w-md w-full cursor-pointer whitespace-pre-line rounded-2xl px-4 py-3 text-sm font-bold shadow-lg ${tone[t.type] || tone.error}`}>
+          {t.message}
+        </div>
+      ))}
+    </div>
+  );
+}
 
-  /* ==========================================================================
-     vanilla-calendar-pro — skin theo bộ mã màu Fincheck + liquid glass
-     Chỉ import layout.css + themes/light.css (xem DateField.jsx) để có sẵn
-     các khai báo var(--vc-*), sau đó override toàn bộ giá trị màu tại đây.
-     Nền calendar để trong suốt vì panel bọc ngoài (.glass-surface /
-     .glass-surface-dark) đã lo phần kính mờ + blur + border + shadow.
-     ========================================================================== */
-  .vc-glass .vc {
-    --vc-bg: transparent;
-    --vc-color: var(--blueberry);
-    --vc-focus-outline-color: var(--turquoise);
-
-    --vc-header-color: var(--blueberry);
-    --vc-title-color: var(--blueberry);
-    --vc-title-color-hover: var(--turquoise);
-    --vc-title-color-disabled: var(--light-grey);
-
-    --vc-months-years-bg: transparent;
-    --vc-months-years-color: var(--steel);
-    --vc-months-years-bg-hover: rgba(13, 186, 204, 0.12);
-    --vc-months-years-color-disabled: var(--light-grey);
-    --vc-months-years-bg-selected: var(--turquoise);
-    --vc-months-years-color-selected: var(--white);
-
-    --vc-week-numbers-title-color: var(--steel);
-    --vc-week-number-color: var(--steel);
-    --vc-week-number-color-hover: var(--blueberry);
-    --vc-week-day-color: var(--steel);
-    --vc-week-day-color-hover: var(--blueberry);
-    --vc-week-day-off-color: var(--cotton-candy);
-    --vc-week-day-off-color-hover: var(--cotton-candy);
-
-    --vc-date-bg: transparent;
-    --vc-date-color: var(--blueberry);
-    --vc-date-bg-hover: rgba(13, 186, 204, 0.12);
-    --vc-date-hover-bg: rgba(13, 186, 204, 0.12);
-    --vc-date-hover-edge-bg: rgba(13, 186, 204, 0.22);
-    --vc-date-disabled-color: var(--light-grey);
-    --vc-date-outside-color: var(--light-grey);
-    --vc-date-today-bg: rgba(13, 186, 204, 0.12);
-    --vc-date-today-color: var(--turquoise);
-    --vc-date-today-outside-color: var(--steel);
-    --vc-date-selected-bg: var(--turquoise);
-    --vc-date-selected-color: var(--white);
-    --vc-date-selected-outside-bg: var(--turquoise-light);
-    --vc-date-selected-outside-color: var(--white);
-
-    --vc-date-weekend-color: var(--cotton-candy);
-    --vc-date-weekend-bg-hover: rgba(241, 138, 181, 0.12);
-    --vc-date-weekend-hover-bg: rgba(241, 138, 181, 0.12);
-    --vc-date-weekend-hover-edge-bg: rgba(241, 138, 181, 0.22);
-    --vc-date-weekend-disabled-color: var(--light-grey);
-    --vc-date-weekend-today-color: var(--cotton-candy);
-    --vc-date-weekend-today-disabled-color: var(--light-grey);
-    --vc-date-weekend-outside-bg: transparent;
-    --vc-date-weekend-outside-color: var(--light-grey);
-    --vc-date-weekend-outside-bg-hover: rgba(241, 138, 181, 0.08);
-    --vc-date-weekend-outside-hover-bg: rgba(241, 138, 181, 0.08);
-    --vc-date-weekend-today-outside-color: var(--light-grey);
-    --vc-date-weekend-disabled-outside-color: var(--light-grey);
-    --vc-date-weekend-selected-bg: var(--cotton-candy);
-    --vc-date-weekend-selected-color: var(--white);
-  }
-  .dark .vc-glass .vc {
-    --vc-color: var(--text-primary);
-    --vc-header-color: var(--text-primary);
-    --vc-title-color: var(--text-primary);
-    --vc-title-color-hover: var(--turquoise);
-    --vc-title-color-disabled: var(--text-disabled);
-
-    --vc-months-years-color: var(--text-secondary);
-    --vc-months-years-bg-hover: rgba(13, 186, 204, 0.18);
-    --vc-months-years-color-disabled: var(--text-disabled);
-
-    --vc-week-numbers-title-color: var(--text-secondary);
-    --vc-week-number-color: var(--text-secondary);
-    --vc-week-number-color-hover: var(--text-primary);
-    --vc-week-day-color: var(--text-secondary);
-    --vc-week-day-color-hover: var(--text-primary);
-
-    --vc-date-color: var(--text-primary);
-    --vc-date-bg-hover: rgba(255, 255, 255, 0.08);
-    --vc-date-hover-bg: rgba(255, 255, 255, 0.08);
-    --vc-date-hover-edge-bg: rgba(255, 255, 255, 0.14);
-    --vc-date-disabled-color: var(--text-disabled);
-    --vc-date-outside-color: var(--text-disabled);
-    --vc-date-today-bg: rgba(13, 186, 204, 0.18);
-    --vc-date-today-outside-color: var(--text-tertiary);
-
-    --vc-date-weekend-bg-hover: rgba(241, 138, 181, 0.16);
-    --vc-date-weekend-hover-bg: rgba(241, 138, 181, 0.16);
-    --vc-date-weekend-hover-edge-bg: rgba(241, 138, 181, 0.24);
-    --vc-date-weekend-disabled-color: var(--text-disabled);
-    --vc-date-weekend-today-disabled-color: var(--text-disabled);
-    --vc-date-weekend-outside-color: var(--text-disabled);
-    --vc-date-weekend-outside-bg-hover: rgba(241, 138, 181, 0.1);
-    --vc-date-weekend-outside-hover-bg: rgba(241, 138, 181, 0.1);
-    --vc-date-weekend-today-outside-color: var(--text-disabled);
-    --vc-date-weekend-disabled-outside-color: var(--text-disabled);
-  }
-  /* Bo góc + font đồng bộ với phần còn lại của app */
-  .vc-glass .vc { font-family: 'Nunito', sans-serif; }
-  .vc-glass .vc-date__btn,
-  .vc-glass .vc-months__month,
-  .vc-glass .vc-years__year { border-radius: 9999px; }
-`;
+const _modalStack = []; // modal đang mở, phần tử cuối = modal trên cùng
+function closeTopModal() {
+  const top = _modalStack[_modalStack.length - 1];
+  if (!top) return false;
+  top.handler?.();
+  return true;
+}
+function useEscapeKey(onClose) {
+  const entryRef = useRef({ handler: onClose });
+  useEffect(() => { entryRef.current.handler = onClose; });
+  useEffect(() => {
+    const entry = entryRef.current;
+    _modalStack.push(entry);
+    function onKey(e) { if (e.key === 'Escape' && _modalStack[_modalStack.length - 1] === entry) entry.handler?.(); }
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      const i = _modalStack.indexOf(entry);
+      if (i >= 0) _modalStack.splice(i, 1);
+    };
+  }, []);
+}
 
 /* ==============================================================================
    03. CONSTANTS
@@ -3205,6 +2835,7 @@ function BottomNavMobile({ screen, setScreen, onAddClick, theme, toggleTheme, op
    07. MODALS
    ============================================================================== */
 function AddTransaction({ onClose, accounts, categories, transactions, onSaved, initialType, spendingPoolByPeriod }) {
+  useEscapeKey(onClose); // Esc / nút Back Android đóng modal
   const [type, setType] = useState(initialType || 'expense');
   const [amount, setAmount] = useState('');
   const [selectedCategory, setSelectedCategory] = useState(null);
@@ -3300,8 +2931,8 @@ function AddTransaction({ onClose, accounts, categories, transactions, onSaved, 
   }
 
   async function handleSave() {
-    if (!amount || Number(amount) === 0) { alert('Vui lòng nhập số tiền'); return; }
-    if (!selectedCategory) { alert('Vui lòng chọn danh mục'); return; }
+    if (!amount || Number(amount) === 0) { toast('Vui lòng nhập số tiền'); return; }
+    if (!selectedCategory) { toast('Vui lòng chọn danh mục'); return; }
 
     let accountIdToSave = null;
     let noteToSave = note || null;
@@ -3316,30 +2947,30 @@ function AddTransaction({ onClose, accounts, categories, transactions, onSaved, 
     }
 
     if (type === 'income') {
-      if (!selectedPeriod) { alert('Vui lòng chọn Kỳ'); return; }
+      if (!selectedPeriod) { toast('Vui lòng chọn Kỳ'); return; }
       noteToSave = tagPeriodNote(selectedPeriod, noteToSave);
     } else if (type === 'allocation') {
-      if (!expenseSource) { alert('Vui lòng chọn Nguồn tiền cho khoản nạp quỹ này.'); return; }
+      if (!expenseSource) { toast('Vui lòng chọn Nguồn tiền cho khoản nạp quỹ này.'); return; }
       if (expenseSource === 'income') {
-        if (!selectedPeriod) { alert('Vui lòng chọn Kỳ (nguồn thu nhập để nạp quỹ)'); return; }
-        if (periodOverLimit) { alert('Số tiền nạp vượt quá Thu nhập được chi còn lại của kỳ thu nhập.'); return; }
+        if (!selectedPeriod) { toast('Vui lòng chọn Kỳ (nguồn thu nhập để nạp quỹ)'); return; }
+        if (periodOverLimit) { toast('Số tiền nạp vượt quá Thu nhập được chi còn lại của kỳ thu nhập.'); return; }
         noteToSave = tagPeriodNote(selectedPeriod, noteToSave);
       } else {
-        if (sourceOverBalance) { alert('Số dư nguồn tiền không đủ.'); return; }
+        if (sourceOverBalance) { toast('Số dư nguồn tiền không đủ.'); return; }
         accountIdToSave = expenseSource;
       }
     } else if (type === 'expense') {
       if (isFundCategory) {
         // Chi tiêu từ quỹ: trừ thẳng vào quỹ, không cần chọn nguồn tiền.
-        if (fundOverBalance) { alert('Số dư quỹ không đủ.'); return; }
+        if (fundOverBalance) { toast('Số dư quỹ không đủ.'); return; }
       } else {
-        if (!expenseSource) { alert('Vui lòng chọn Nguồn tiền cho khoản chi tiêu này.'); return; }
+        if (!expenseSource) { toast('Vui lòng chọn Nguồn tiền cho khoản chi tiêu này.'); return; }
         if (expenseSource === 'income') {
-          if (!selectedPeriod) { alert('Vui lòng chọn Kỳ'); return; }
-          if (periodOverLimit) { alert('Số tiền chi vượt quá Thu nhập được chi còn lại của kỳ thu nhập.'); return; }
+          if (!selectedPeriod) { toast('Vui lòng chọn Kỳ'); return; }
+          if (periodOverLimit) { toast('Số tiền chi vượt quá Thu nhập được chi còn lại của kỳ thu nhập.'); return; }
           noteToSave = tagPeriodNote(selectedPeriod, noteToSave);
         } else {
-          if (sourceOverBalance) { alert('Số dư nguồn tiền không đủ.'); return; }
+          if (sourceOverBalance) { toast('Số dư nguồn tiền không đủ.'); return; }
           accountIdToSave = expenseSource;
         }
       }
@@ -3351,7 +2982,7 @@ function AddTransaction({ onClose, accounts, categories, transactions, onSaved, 
       note: noteToSave, date: dateTime.slice(0, 10), created_at: new Date(dateTime).toISOString(),
     });
     setSaving(false);
-    if (error) { alert('Lỗi khi lưu: ' + error.message); return; }
+    if (error) { toast('Lỗi khi lưu: ' + error.message); return; }
     onSaved();
     resetForm();
     setSavedMsg(true);
@@ -3362,7 +2993,7 @@ function AddTransaction({ onClose, accounts, categories, transactions, onSaved, 
     <div className="fixed inset-0 bg-black/0 md:bg-black/40 z-30 md:flex md:items-center md:justify-center md:p-6" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="bg-white dark:bg-[#1e1e32] w-full h-full md:h-auto md:max-h-[88vh] md:max-w-xl md:rounded-3xl md:overflow-y-auto overflow-y-auto relative scrollbar-hide">
         <div className="px-5 pt-8 md:pt-6 flex items-center justify-between sticky top-0 bg-white dark:bg-[#1e1e32] z-10">
-          <button onClick={onClose} className="w-9 h-9 rounded-full bg-ice-cream dark:bg-night-sky flex items-center justify-center"><X size={18} className="text-blueberry dark:text-white" /></button>
+          <button aria-label="Đóng" onClick={onClose} className="w-9 h-9 rounded-full bg-ice-cream dark:bg-night-sky flex items-center justify-center"><X size={18} className="text-blueberry dark:text-white" /></button>
           <h1 className="text-blueberry dark:text-white text-lg font-bold">Thêm giao dịch</h1>
           <div className="w-9 h-9" />
         </div>
@@ -3506,6 +3137,7 @@ function AddTransaction({ onClose, accounts, categories, transactions, onSaved, 
 }
 
 function EditTransaction({ transaction, onClose, accounts, categories, transactions: allTx, onSaved, spendingPoolByPeriod }) {
+  useEscapeKey(onClose); // Esc / nút Back Android đóng modal
   const [type, setType] = useState(transaction.type);
   const [amount, setAmount] = useState(String(transaction.amount));
   const [selectedCategory, setSelectedCategory] = useState(transaction.category_id);
@@ -3579,8 +3211,8 @@ function EditTransaction({ transaction, onClose, accounts, categories, transacti
   }
 
   async function handleSave() {
-    if (!amount || Number(amount) === 0) { alert('Vui lòng nhập số tiền'); return; }
-    if (!selectedCategory) { alert('Vui lòng chọn danh mục'); return; }
+    if (!amount || Number(amount) === 0) { toast('Vui lòng nhập số tiền'); return; }
+    if (!selectedCategory) { toast('Vui lòng chọn danh mục'); return; }
 
     let accountIdToSave = null;
     let noteToSave = note || null;
@@ -3594,29 +3226,29 @@ function EditTransaction({ transaction, onClose, accounts, categories, transacti
     }
 
     if (type === 'income') {
-      if (!selectedPeriod) { alert('Vui lòng chọn Kỳ'); return; }
+      if (!selectedPeriod) { toast('Vui lòng chọn Kỳ'); return; }
       noteToSave = tagPeriodNote(selectedPeriod, noteToSave);
     } else if (type === 'allocation') {
-      if (!expenseSource) { alert('Vui lòng chọn Nguồn tiền cho khoản nạp quỹ này.'); return; }
+      if (!expenseSource) { toast('Vui lòng chọn Nguồn tiền cho khoản nạp quỹ này.'); return; }
       if (expenseSource === 'income') {
-        if (!selectedPeriod) { alert('Vui lòng chọn Kỳ (nguồn thu nhập để nạp quỹ)'); return; }
-        if (periodOverLimit) { alert('Số tiền nạp vượt quá Thu nhập được chi còn lại của kỳ thu nhập.'); return; }
+        if (!selectedPeriod) { toast('Vui lòng chọn Kỳ (nguồn thu nhập để nạp quỹ)'); return; }
+        if (periodOverLimit) { toast('Số tiền nạp vượt quá Thu nhập được chi còn lại của kỳ thu nhập.'); return; }
         noteToSave = tagPeriodNote(selectedPeriod, noteToSave);
       } else {
-        if (sourceOverBalance) { alert('Số dư nguồn tiền không đủ.'); return; }
+        if (sourceOverBalance) { toast('Số dư nguồn tiền không đủ.'); return; }
         accountIdToSave = expenseSource;
       }
     } else if (type === 'expense') {
       if (isFundCategory) {
-        if (fundOverBalance) { alert('Số dư quỹ không đủ.'); return; }
+        if (fundOverBalance) { toast('Số dư quỹ không đủ.'); return; }
       } else {
-        if (!expenseSource) { alert('Vui lòng chọn Nguồn tiền cho khoản chi tiêu này.'); return; }
+        if (!expenseSource) { toast('Vui lòng chọn Nguồn tiền cho khoản chi tiêu này.'); return; }
         if (expenseSource === 'income') {
-          if (!selectedPeriod) { alert('Vui lòng chọn Kỳ'); return; }
-          if (periodOverLimit) { alert('Số tiền chi vượt quá Thu nhập được chi còn lại của kỳ thu nhập.'); return; }
+          if (!selectedPeriod) { toast('Vui lòng chọn Kỳ'); return; }
+          if (periodOverLimit) { toast('Số tiền chi vượt quá Thu nhập được chi còn lại của kỳ thu nhập.'); return; }
           noteToSave = tagPeriodNote(selectedPeriod, noteToSave);
         } else {
-          if (sourceOverBalance) { alert('Số dư nguồn tiền không đủ.'); return; }
+          if (sourceOverBalance) { toast('Số dư nguồn tiền không đủ.'); return; }
           accountIdToSave = expenseSource;
         }
       }
@@ -3628,7 +3260,7 @@ function EditTransaction({ transaction, onClose, accounts, categories, transacti
       note: noteToSave, date: dateTime.slice(0, 10), created_at: new Date(dateTime).toISOString(),
     }).eq('id', transaction.id);
     setSaving(false);
-    if (error) { alert('Lỗi khi lưu: ' + error.message); return; }
+    if (error) { toast('Lỗi khi lưu: ' + error.message); return; }
     onSaved();
     onClose();
   }
@@ -3637,7 +3269,7 @@ function EditTransaction({ transaction, onClose, accounts, categories, transacti
     <div className="fixed inset-0 bg-black/0 md:bg-black/40 z-30 md:flex md:items-center md:justify-center md:p-6" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="bg-white dark:bg-[#1e1e32] w-full h-full md:h-auto md:max-h-[88vh] md:max-w-xl md:rounded-3xl md:overflow-y-auto overflow-y-auto relative scrollbar-hide">
         <div className="px-5 pt-8 md:pt-6 flex items-center justify-between sticky top-0 bg-white dark:bg-[#1e1e32] z-10">
-          <button onClick={onClose} className="w-9 h-9 rounded-full bg-ice-cream dark:bg-night-sky flex items-center justify-center"><X size={18} className="text-blueberry dark:text-white" /></button>
+          <button aria-label="Đóng" onClick={onClose} className="w-9 h-9 rounded-full bg-ice-cream dark:bg-night-sky flex items-center justify-center"><X size={18} className="text-blueberry dark:text-white" /></button>
           <h1 className="text-blueberry dark:text-white text-lg font-bold">Sửa giao dịch</h1>
           <div className="w-9 h-9" />
         </div>
@@ -3774,16 +3406,17 @@ function EditTransaction({ transaction, onClose, accounts, categories, transacti
 }
 
 function EditAccountModal({ account, onClose, onSaved, isNew }) {
+  useEscapeKey(onClose); // Esc / nút Back Android đóng modal
   const [form, setForm] = useState({ name: account?.name || '', icon: account?.icon || '', type: account?.type || 'cash', initial_balance: account?.initial_balance || '' });
   const [saving, setSaving] = useState(false);
 
   async function handleSave() {
-    if (!form.name) { alert('Nhập tên tài khoản'); return; }
+    if (!form.name) { toast('Nhập tên tài khoản'); return; }
     setSaving(true);
     const payload = { name: form.name, icon: form.icon || '💰', type: form.type, initial_balance: form.initial_balance ? Number(form.initial_balance) : 0, is_active: true };
     const { error } = isNew ? await supabase.from('accounts').insert(payload) : await supabase.from('accounts').update(payload).eq('id', account.id);
     setSaving(false);
-    if (error) { alert('Lỗi: ' + error.message); return; }
+    if (error) { toast('Lỗi: ' + error.message); return; }
     onSaved(); onClose();
   }
 
@@ -3799,7 +3432,7 @@ function EditAccountModal({ account, onClose, onSaved, isNew }) {
       <div className="bg-white dark:bg-[#1e1e32] w-full md:max-w-sm rounded-t-3xl md:rounded-3xl p-5" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-4">
           <h3 className="font-bold text-blueberry dark:text-white">{isNew ? 'Thêm ví mới' : 'Sửa tài khoản'}</h3>
-          <button onClick={onClose}><X size={18} className="text-steel dark:text-light-grey" /></button>
+          <button aria-label="Đóng" onClick={onClose}><X size={18} className="text-steel dark:text-light-grey" /></button>
         </div>
         <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Tên tài khoản" className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none mb-3 dark:text-white dark:placeholder:text-light-grey text-blueberry" />
         <input value={form.icon} onChange={(e) => setForm({ ...form, icon: e.target.value })} placeholder="Emoji (vd: 🏦)" className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none mb-3 dark:text-white dark:placeholder:text-light-grey text-blueberry" />
@@ -3817,6 +3450,7 @@ function EditAccountModal({ account, onClose, onSaved, isNew }) {
 }
 
 function EditFundForm({ category, onClose, onSaved, isNew, initialAmount, firstAllocation }) {
+  useEscapeKey(onClose); // Esc / nút Back Android đóng modal
   const [form, setForm] = useState({
     name: category?.name || '',
     icon: category?.icon || '',
@@ -3851,14 +3485,14 @@ function EditFundForm({ category, onClose, onSaved, isNew, initialAmount, firstA
     setUploading(true);
     const fileName = `${Date.now()}-${sanitizeFileName(file.name)}`;
     const { error: uploadError } = await supabase.storage.from('fund-images').upload(fileName, file);
-    if (uploadError) { alert('Lỗi tải ảnh lên: ' + uploadError.message); setUploading(false); return; }
+    if (uploadError) { toast('Lỗi tải ảnh lên: ' + uploadError.message); setUploading(false); return; }
     const { data } = supabase.storage.from('fund-images').getPublicUrl(fileName);
     setForm((f) => ({ ...f, background_url: data.publicUrl }));
     setUploading(false);
   }
 
   async function handleSave() {
-    if (!form.name) { alert('Nhập tên quỹ'); return; }
+    if (!form.name) { toast('Nhập tên quỹ'); return; }
     setSaving(true);
     const payload = {
       name: form.name, icon: form.icon || '💰', type: 'expense', is_fund: true,
@@ -3881,17 +3515,27 @@ function EditFundForm({ category, onClose, onSaved, isNew, initialAmount, firstA
     const initialCreatedAt = isNaN(initialDateTimeObj) ? new Date().toISOString() : initialDateTimeObj.toISOString();
     if (isNew) {
       const { data: newCat, error } = await supabase.from('categories').insert(payload).select().single();
-      if (error) { setSaving(false); alert('Lỗi: ' + error.message); return; }
+      if (error) { setSaving(false); toast('Lỗi: ' + error.message); return; }
       if (form.initial_allocation && Number(form.initial_allocation) > 0) {
-        await supabase.from('transactions').insert({
+        const { error: allocErr } = await supabase.from('transactions').insert({
           category_id: newCat.id, type: 'allocation', amount: Number(form.initial_allocation),
           note: 'Nạp quỹ lần đầu', date: initialDateOnly, created_at: initialCreatedAt,
           is_initial: true, // FIX: đánh dấu rõ đây là khoản nạp ban đầu, không suy luận theo ngày
         });
+        if (allocErr) {
+          // Không để lại quỹ "mồ côi" số dư 0: hoàn tác việc tạo quỹ (soft-delete đúng dòng vừa tạo).
+          const { error: undoErr } = await supabase.from('categories')
+            .update({ deleted_at: new Date().toISOString(), deleted_batch_id: crypto.randomUUID() }).eq('id', newCat.id);
+          setSaving(false);
+          toast('Không lưu được khoản nạp quỹ lần đầu: ' + allocErr.message
+            + (undoErr ? '\nQuỹ vừa tạo chưa được dọn tự động, hãy kiểm tra lại danh sách quỹ.' : '\nQuỹ chưa được tạo, bạn thử lại nhé.'));
+          onSaved(); // tải lại để danh sách khớp với DB
+          return;
+        }
       }
     } else {
       const { error } = await supabase.from('categories').update(payload).eq('id', category.id);
-      if (error) { setSaving(false); alert('Lỗi: ' + error.message); return; }
+      if (error) { setSaving(false); toast('Lỗi: ' + error.message); return; }
       const newInitial = form.initial_allocation ? Number(form.initial_allocation) : 0;
       const firstAllocRaw = firstAllocation ? (firstAllocation.created_at || firstAllocation.date) : null;
       const firstAllocRawDate = firstAllocRaw ? new Date(firstAllocRaw) : null;
@@ -3907,16 +3551,23 @@ function EditFundForm({ category, onClose, onSaved, isNew, initialAmount, firstA
       // khiến quỹ bị cộng dồn sai (VD: dòng cũ 2tr + dòng mới 1tr = 3tr thay vì đúng 1tr).
       // Giờ luôn update thẳng vào dòng cũ và tự gắn cờ is_initial=true cho nó để lần sau
       // không còn bị coi là "fallback" nữa.
+      let allocErr = null;
       if (firstAllocation) {
         if (newInitial > 0 && (newInitial !== Number(initialAmount || 0) || dateChanged || firstAllocation.is_initial !== true)) {
-          await supabase.from('transactions').update({ amount: newInitial, date: initialDateOnly, created_at: initialCreatedAt, is_initial: true }).eq('id', firstAllocation.id);
+          ({ error: allocErr } = await supabase.from('transactions').update({ amount: newInitial, date: initialDateOnly, created_at: initialCreatedAt, is_initial: true }).eq('id', firstAllocation.id));
         }
       } else if (newInitial > 0) {
-        await supabase.from('transactions').insert({
+        ({ error: allocErr } = await supabase.from('transactions').insert({
           category_id: category.id, type: 'allocation', amount: newInitial,
           note: 'Nạp quỹ lần đầu', date: initialDateOnly, created_at: initialCreatedAt,
           is_initial: true,
-        });
+        }));
+      }
+      if (allocErr) {
+        // Thông tin quỹ đã lưu nhưng khoản nạp đầu thì chưa -> báo rõ, KHÔNG đóng form để người dùng bấm Lưu lại.
+        setSaving(false);
+        toast('Đã lưu thông tin quỹ nhưng chưa lưu được số tiền nạp lần đầu: ' + allocErr.message + '\nBấm Lưu lần nữa để thử lại.');
+        return;
       }
     }
     setSaving(false);
@@ -3928,7 +3579,7 @@ function EditFundForm({ category, onClose, onSaved, isNew, initialAmount, firstA
       <div className="bg-white dark:bg-[#1e1e32] w-full md:max-w-md rounded-t-3xl md:rounded-3xl p-5 max-h-[85vh] overflow-y-auto scrollbar-hide" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-4">
           <h3 className="font-bold text-blueberry dark:text-white">{isNew ? 'Tạo quỹ mới' : 'Sửa quỹ'}</h3>
-          <button onClick={onClose}><X size={18} className="text-steel dark:text-light-grey" /></button>
+          <button aria-label="Đóng" onClick={onClose}><X size={18} className="text-steel dark:text-light-grey" /></button>
         </div>
 
         <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Tên quỹ" className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none mb-3 dark:text-white dark:placeholder:text-light-grey text-blueberry" />
@@ -3984,6 +3635,7 @@ function EditFundForm({ category, onClose, onSaved, isNew, initialAmount, firstA
 }
 
 function QuickAllocateWithdrawForm({ category, mode, transaction, onClose, onSaved, transactions, categories, spendingPoolByPeriod }) {
+  useEscapeKey(onClose); // Esc / nút Back Android đóng modal
   const isEditing = !!transaction;
   const [amount, setAmount] = useState(isEditing ? String(transaction.amount) : '');
   const [note, setNote] = useState(isEditing ? stripPeriodTag(transaction.note || '') : '');
@@ -4029,8 +3681,8 @@ function QuickAllocateWithdrawForm({ category, mode, transaction, onClose, onSav
   }
 
   async function handleSave() {
-    if (!amount || Number(amount) === 0) { alert('Nhập số tiền'); return; }
-    if (!dateTime) { alert('Chọn ngày giờ nhập'); return; }
+    if (!amount || Number(amount) === 0) { toast('Nhập số tiền'); return; }
+    if (!dateTime) { toast('Chọn ngày giờ nhập'); return; }
     setSaving(true);
     let noteToSave = note || null;
     if (mode === 'allocation' && selectedPeriod) {
@@ -4046,7 +3698,7 @@ function QuickAllocateWithdrawForm({ category, mode, transaction, onClose, onSav
           date: dateTime.slice(0, 10), created_at: new Date(dateTime).toISOString(),
         });
     setSaving(false);
-    if (error) { alert('Lỗi: ' + error.message); return; }
+    if (error) { toast('Lỗi: ' + error.message); return; }
     onSaved(); onClose();
   }
 
@@ -4059,7 +3711,7 @@ function QuickAllocateWithdrawForm({ category, mode, transaction, onClose, onSav
               ? (mode === 'allocation' ? `Sửa khoản nạp — ${category.name}` : `Sửa khoản rút — ${category.name}`)
               : (mode === 'allocation' ? `Nạp vào ${category.name}` : `Rút từ ${category.name}`)}
           </h3>
-          <button onClick={onClose}><X size={18} className="text-steel dark:text-light-grey" /></button>
+          <button aria-label="Đóng" onClick={onClose}><X size={18} className="text-steel dark:text-light-grey" /></button>
         </div>
         <MoneyInput value={amount} onChange={setAmount} placeholder="Số tiền" className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-lg font-bold outline-none mb-3 dark:text-white dark:placeholder:text-light-grey text-blueberry" />
         <DateTimeField value={dateTime} onChange={setDateTime} className="w-full justify-between bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm mb-3 dark:text-white text-blueberry" />
@@ -4088,6 +3740,7 @@ function QuickAllocateWithdrawForm({ category, mode, transaction, onClose, onSav
 }
 
 function QuickAdjustBalanceForm({ account, currentBalance, onClose, onSaved }) {
+  useEscapeKey(onClose); // Esc / nút Back Android đóng modal
   const [mode, setMode] = useState(null);
   const [amount, setAmount] = useState('');
   // FIX: cho phép chỉnh sửa cả ngày lẫn giờ:phút nhập (trước đây chỉ chỉnh được ngày,
@@ -4098,15 +3751,15 @@ function QuickAdjustBalanceForm({ account, currentBalance, onClose, onSaved }) {
   const [saving, setSaving] = useState(false);
 
   async function handleSave() {
-    if (!amount) { alert('Nhập số tiền'); return; }
-    if (!dateTime) { alert('Chọn ngày giờ nhập'); return; }
+    if (!amount) { toast('Nhập số tiền'); return; }
+    if (!dateTime) { toast('Chọn ngày giờ nhập'); return; }
     setSaving(true);
     let signedAmount;
     if (mode === 'increase') signedAmount = Number(amount);
     else if (mode === 'decrease') signedAmount = -Number(amount);
     else signedAmount = Number(amount) - currentBalance;
 
-    if (signedAmount === 0) { setSaving(false); alert('Số dư không đổi, không cần cập nhật.'); return; }
+    if (signedAmount === 0) { setSaving(false); toast('Số dư không đổi, không cần cập nhật.', 'info'); return; }
 
     const isDirectSet = mode === null;
     const savedNote = note || (mode === 'increase' ? 'Tăng số dư' : mode === 'decrease' ? 'Giảm số dư' : 'Đặt số dư mới');
@@ -4115,7 +3768,7 @@ function QuickAdjustBalanceForm({ account, currentBalance, onClose, onSaved }) {
       note: isDirectSet ? `[SET] ${savedNote}` : savedNote, date: dateTime.slice(0, 10), created_at: new Date(dateTime).toISOString(),
     });
     setSaving(false);
-    if (error) { alert('Lỗi: ' + error.message); return; }
+    if (error) { toast('Lỗi: ' + error.message); return; }
     onSaved(); onClose();
   }
 
@@ -4124,7 +3777,7 @@ function QuickAdjustBalanceForm({ account, currentBalance, onClose, onSaved }) {
       <div className="bg-white dark:bg-[#1e1e32] w-full md:max-w-sm rounded-t-3xl md:rounded-3xl p-5" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-4">
           <h3 className="font-bold text-blueberry dark:text-white">Cập nhật số dư — {account.name}</h3>
-          <button onClick={onClose}><X size={18} className="text-steel dark:text-light-grey" /></button>
+          <button aria-label="Đóng" onClick={onClose}><X size={18} className="text-steel dark:text-light-grey" /></button>
         </div>
         {/* FIX: cùng lỗi active-state mờ + thiếu icon như các tab khác — thêm ring rõ hơn
             và icon TrendingUp/TrendingDown (tăng/giảm số dư) cho nhất quán toàn app. */}
@@ -4146,6 +3799,7 @@ function QuickAdjustBalanceForm({ account, currentBalance, onClose, onSaved }) {
 }
 
 function EditGoalForm({ goal, onClose, onSaved, isNew, softDelete, categories = [], transactions = [] }) {
+  useEscapeKey(onClose); // Esc / nút Back Android đóng modal
   const funds = categories.filter((c) => c.is_fund);
   const [form, setForm] = useState({
     name: goal?.name || '',
@@ -4165,7 +3819,7 @@ function EditGoalForm({ goal, onClose, onSaved, isNew, softDelete, categories = 
   const linkedFundBalance = linkedFund ? fundBalanceWithProfit(linkedFund, transactions) : null;
 
   async function handleSave() {
-    if (!form.name) { alert('Nhập tên mục tiêu'); return; }
+    if (!form.name) { toast('Nhập tên mục tiêu'); return; }
     setSaving(true);
     const payload = {
       name: form.name,
@@ -4181,7 +3835,7 @@ function EditGoalForm({ goal, onClose, onSaved, isNew, softDelete, categories = 
     };
     const { error } = isNew ? await supabase.from('goals').insert(payload) : await supabase.from('goals').update(payload).eq('id', goal.id);
     setSaving(false);
-    if (error) { alert('Lỗi: ' + error.message); return; }
+    if (error) { toast('Lỗi: ' + error.message); return; }
     onSaved(); onClose();
   }
 
@@ -4190,7 +3844,7 @@ function EditGoalForm({ goal, onClose, onSaved, isNew, softDelete, categories = 
     setSaving(true);
     const { error } = await softDelete('goals', goal.id, `Xoá mục tiêu "${goal.name}"`, 'delete_goal');
     setSaving(false);
-    if (error) { alert('Lỗi: ' + error.message); return; }
+    if (error) { toast('Lỗi: ' + error.message); return; }
     onSaved(); onClose();
   }
 
@@ -4199,7 +3853,7 @@ function EditGoalForm({ goal, onClose, onSaved, isNew, softDelete, categories = 
       <div className="bg-white dark:bg-[#1e1e32] w-full md:max-w-md rounded-t-3xl md:rounded-3xl p-5 max-h-[85vh] overflow-y-auto scrollbar-hide" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-4">
           <h3 className="font-bold text-blueberry dark:text-white">{isNew ? 'Mục tiêu mới' : 'Sửa mục tiêu'}</h3>
-          <button onClick={onClose}><X size={18} className="text-steel dark:text-light-grey" /></button>
+          <button aria-label="Đóng" onClick={onClose}><X size={18} className="text-steel dark:text-light-grey" /></button>
         </div>
 
         <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Tên mục tiêu" className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none mb-3 dark:text-white dark:placeholder:text-light-grey text-blueberry" />
@@ -4270,7 +3924,7 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
   async function handleDeleteTx(tx) {
     if (!confirm('Xóa giao dịch này? Bạn có thể khôi phục trong 30 ngày ở mục Lịch sử.')) return;
     const { error } = await softDelete('transactions', tx.id, txDeleteDescription(tx, categories), 'delete_transaction');
-    if (error) { alert('Lỗi: ' + error.message); return; }
+    if (error) { toast('Lỗi: ' + error.message); return; }
     reload();
   }
   const [search, setSearch] = useState('');
@@ -5471,7 +5125,7 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
           <div className="bg-white dark:bg-[#1e1e32] w-full md:max-w-sm rounded-t-3xl md:rounded-3xl p-5" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-3">
               <h3 className="font-bold text-blueberry dark:text-white">Thêm widget</h3>
-              <button onClick={() => setShowAddWidget(false)}><X size={18} className="text-steel dark:text-light-grey" /></button>
+              <button aria-label="Đóng" onClick={() => setShowAddWidget(false)}><X size={18} className="text-steel dark:text-light-grey" /></button>
             </div>
             <p className="text-steel dark:text-light-grey text-sm">Tính năng tuỳ chỉnh widget cho Dashboard đang được xây dựng — bạn sẽ sớm chọn được dữ liệu và nội dung muốn hiển thị ở đây.</p>
           </div>
@@ -5510,7 +5164,7 @@ function Funds({ setScreen, categories, transactions, onOpenFund, reload, softDe
   async function handleDeleteFund(f) {
     if (!confirm(`Xóa quỹ "${f.name}"? Các giao dịch cũ vẫn giữ nguyên số tiền. Bạn có thể khôi phục trong 30 ngày ở mục Lịch sử.`)) return;
     const { error } = await softDelete('categories', f.id, `Xoá danh mục "${f.name}"`, 'delete_category');
-    if (error) { alert('Lỗi: ' + error.message); return; }
+    if (error) { toast('Lỗi: ' + error.message); return; }
     reload();
   }
   const [sortField, setSortField] = useState('created');
@@ -5893,7 +5547,7 @@ function FundDetail({ category, transactions, categories, accounts, onBack, relo
   async function handleDeleteTx(tx) {
     if (!confirm('Xóa giao dịch này? Bạn có thể khôi phục trong 30 ngày ở mục Lịch sử.')) return;
     const { error } = await softDelete('transactions', tx.id, txDeleteDescription(tx, categories), 'delete_transaction');
-    if (error) { alert('Lỗi: ' + error.message); return; }
+    if (error) { toast('Lỗi: ' + error.message); return; }
     reload();
   }
 
@@ -6011,7 +5665,7 @@ function FundDetail({ category, transactions, categories, accounts, onBack, relo
   async function handleDelete() {
     if (!confirm('Xóa quỹ này? Các giao dịch cũ vẫn giữ nguyên số tiền. Bạn có thể khôi phục trong 30 ngày ở mục Lịch sử.')) return;
     const { error } = await softDelete('categories', category.id, `Xoá danh mục "${category.name}"`, 'delete_category');
-    if (error) { alert('Lỗi: ' + error.message); return; }
+    if (error) { toast('Lỗi: ' + error.message); return; }
     reload(); onBack();
   }
 
@@ -6529,14 +6183,14 @@ function AccountDetail({ account, transactions, categories, accounts, onBack, re
   async function handleDelete() {
     if (!confirm('Xóa tài khoản này? Các giao dịch cũ vẫn giữ nguyên số tiền. Bạn có thể khôi phục trong 30 ngày ở mục Lịch sử.')) return;
     const { error } = await softDelete('accounts', account.id, `Xoá ví "${account.name}"`, 'delete_account');
-    if (error) { alert('Lỗi: ' + error.message); return; }
+    if (error) { toast('Lỗi: ' + error.message); return; }
     reload(); onBack();
   }
 
   async function handleDeleteTx(tx) {
     if (!confirm('Xóa giao dịch này? Bạn có thể khôi phục trong 30 ngày ở mục Lịch sử.')) return;
     const { error } = await softDelete('transactions', tx.id, txDeleteDescription(tx, categories), 'delete_transaction');
-    if (error) { alert('Lỗi: ' + error.message); return; }
+    if (error) { toast('Lỗi: ' + error.message); return; }
     reload();
   }
 
@@ -7370,7 +7024,7 @@ function ProfileSection({ user, onUpdated, logActivity }) {
     const { error: uploadError } = await supabase.storage.from('avatars').upload(fileName, file, { upsert: true });
     if (uploadError) {
       console.error('Avatar upload failed:', uploadError);
-      alert('Không thể tải ảnh lên. Vui lòng thử lại.');
+      toast('Không thể tải ảnh lên. Vui lòng thử lại.');
       setUploading(false);
       return;
     }
@@ -7379,7 +7033,7 @@ function ProfileSection({ user, onUpdated, logActivity }) {
     setUploading(false);
     if (error) {
       console.error('Avatar update failed:', error);
-      alert('Không thể cập nhật ảnh. Vui lòng thử lại.');
+      toast('Không thể cập nhật ảnh. Vui lòng thử lại.');
       return;
     }
     setAvatarUrl(data.publicUrl);
@@ -7492,7 +7146,7 @@ function CategorySection({ categories, reload, softDelete, spendingPoolByPeriod,
   const currentPoolValue = spendingPoolByPeriod ? spendingPoolByPeriod[poolPeriodKey] : undefined;
 
   async function handleSavePool() {
-    if (poolAmountInput === '' || Number.isNaN(Number(poolAmountInput))) { alert('Nhập số tiền hợp lệ'); return; }
+    if (poolAmountInput === '' || Number.isNaN(Number(poolAmountInput))) { toast('Nhập số tiền hợp lệ'); return; }
     setSavingPool(true);
     const ok = await saveSpendingPoolForPeriod(poolPeriodKey, poolAmountInput);
     setSavingPool(false);
@@ -7546,7 +7200,7 @@ function CategorySection({ categories, reload, softDelete, spendingPoolByPeriod,
     setUploading(true);
     const fileName = `${Date.now()}-${sanitizeFileName(file.name)}`;
     const { error: uploadError } = await supabase.storage.from('fund-images').upload(fileName, file);
-    if (uploadError) { alert('Lỗi tải ảnh lên: ' + uploadError.message); setUploading(false); return; }
+    if (uploadError) { toast('Lỗi tải ảnh lên: ' + uploadError.message); setUploading(false); return; }
     const { data } = supabase.storage.from('fund-images').getPublicUrl(fileName);
     setForm((f) => ({ ...f, background_url: data.publicUrl }));
     setUploading(false);
@@ -7558,22 +7212,24 @@ function CategorySection({ categories, reload, softDelete, spendingPoolByPeriod,
     const dtObj = new Date(`${dateOnly}T${form.initial_allocation_time || '00:00'}:00`);
     const createdAt = isNaN(dtObj) ? new Date().toISOString() : dtObj.toISOString();
     const newInitial = form.initial_allocation ? Number(form.initial_allocation) : 0;
+    // Trả về { error } để handleSave biết mà xử lý (trước đây lỗi bị nuốt hoàn toàn).
     if (firstAlloc) {
       if (newInitial > 0) {
-        await supabase.from('transactions')
+        return await supabase.from('transactions')
           .update({ amount: newInitial, date: dateOnly, created_at: createdAt, is_initial: true })
           .eq('id', firstAlloc.id);
       }
     } else if (newInitial > 0) {
-      await supabase.from('transactions').insert({
+      return await supabase.from('transactions').insert({
         category_id: catId, type: 'allocation', amount: newInitial,
         note: 'Nạp quỹ lần đầu', date: dateOnly, created_at: createdAt, is_initial: true,
       });
     }
+    return { error: null };
   }
 
   async function handleSave() {
-    if (!form.name) { alert('Nhập tên danh mục'); return; }
+    if (!form.name) { toast('Nhập tên danh mục'); return; }
     setSaving(true);
     const isFundMode = tab === 'expense' && form.is_fund;
     const payload = {
@@ -7596,13 +7252,29 @@ function CategorySection({ categories, reload, softDelete, spendingPoolByPeriod,
     let catId = editing;
     if (editing === 'new') {
       const { data: newCat, error } = await supabase.from('categories').insert(payload).select().single();
-      if (error) { setSaving(false); alert('Lỗi: ' + error.message); return; }
+      if (error) { setSaving(false); toast('Lỗi: ' + error.message); return; }
       catId = newCat?.id;
     } else {
       const { error } = await supabase.from('categories').update(payload).eq('id', editing);
-      if (error) { setSaving(false); alert('Lỗi: ' + error.message); return; }
+      if (error) { setSaving(false); toast('Lỗi: ' + error.message); return; }
     }
-    if (isFundMode && catId) await syncInitialAllocation(catId);
+    if (isFundMode && catId) {
+      const { error: allocErr } = await syncInitialAllocation(catId);
+      if (allocErr) {
+        if (editing === 'new') {
+          // Danh mục/quỹ vừa tạo mà khoản nạp đầu lỗi -> hoàn tác để không còn quỹ mồ côi số dư 0.
+          await supabase.from('categories')
+            .update({ deleted_at: new Date().toISOString(), deleted_batch_id: crypto.randomUUID() }).eq('id', catId);
+          setSaving(false);
+          toast('Không lưu được khoản nạp quỹ lần đầu: ' + allocErr.message + '\nQuỹ chưa được tạo, bạn thử lại nhé.');
+          reload();
+        } else {
+          setSaving(false);
+          toast('Đã lưu thông tin quỹ nhưng chưa lưu được số tiền nạp lần đầu: ' + allocErr.message + '\nBấm Lưu lần nữa để thử lại.');
+        }
+        return; // giữ nguyên form đang mở
+      }
+    }
     setSaving(false);
     setEditing(null); setFirstAlloc(null); reload();
   }
@@ -7611,7 +7283,7 @@ function CategorySection({ categories, reload, softDelete, spendingPoolByPeriod,
     if (!confirm('Xóa danh mục này? Các giao dịch cũ vẫn giữ nguyên số tiền. Bạn có thể khôi phục trong 30 ngày ở mục Lịch sử.')) return;
     const cat = categories.find((c) => c.id === id);
     const { error } = await softDelete('categories', id, `Xoá danh mục "${cat?.name || ''}"`, 'delete_category');
-    if (error) { alert('Lỗi: ' + error.message); return; }
+    if (error) { toast('Lỗi: ' + error.message); return; }
     reload();
   }
 
@@ -7715,7 +7387,7 @@ function CategorySection({ categories, reload, softDelete, spendingPoolByPeriod,
       {editing && createPortal(
         <div className="fixed inset-0 bg-black/40 flex items-end md:items-center justify-center z-[999] p-0 md:p-4" onClick={() => setEditing(null)}>
           <div className="bg-white dark:bg-[#1e1e32] w-full rounded-t-3xl md:rounded-3xl p-5 max-w-sm mx-auto max-h-[85vh] overflow-y-auto scrollbar-hide" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between mb-4"><h3 className="font-bold text-blueberry dark:text-white">{editing === 'new' ? 'Danh mục mới' : 'Sửa danh mục'}</h3><button onClick={() => setEditing(null)}><X size={18} className="text-steel dark:text-light-grey" /></button></div>
+            <div className="flex items-center justify-between mb-4"><h3 className="font-bold text-blueberry dark:text-white">{editing === 'new' ? 'Danh mục mới' : 'Sửa danh mục'}</h3><button aria-label="Đóng" onClick={() => setEditing(null)}><X size={18} className="text-steel dark:text-light-grey" /></button></div>
             <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Tên danh mục" className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none mb-3 dark:text-white dark:placeholder:text-light-grey text-blueberry" />
             <input value={form.icon} onChange={(e) => setForm({ ...form, icon: e.target.value })} placeholder={isFundForm ? 'Emoji icon (vd: 💊)' : 'Emoji (vd: 🍜)'} className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none mb-3 dark:text-white dark:placeholder:text-light-grey text-blueberry" />
             {/* Hạn mức + lãi suất: chỉ dành cho danh mục chi tiêu thường. Khi tích ô "quỹ",
@@ -8058,6 +7730,7 @@ function TxLedgerRow({ tx, categories, accounts, allTx, spendingPoolByPeriod, on
 }
 
 function TxLedgerModal({ title, txs, categories, accounts, allTx, spendingPoolByPeriod, onClose, onDeleteTx }) {
+  useEscapeKey(onClose); // Esc / nút Back Android đóng modal
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [sourceFilter, setSourceFilter] = useState('all');
@@ -8089,7 +7762,7 @@ function TxLedgerModal({ title, txs, categories, accounts, allTx, spendingPoolBy
             <h3 className="font-extrabold text-blueberry dark:text-white text-lg">{title}</h3>
             <p className="text-steel dark:text-light-grey text-xs mt-0.5">{sorted.length} giao dịch · Tổng {formatMoney(total)}</p>
           </div>
-          <button onClick={onClose} className="w-8 h-8 rounded-full hover:bg-ice-cream dark:hover:bg-night-sky/30 flex items-center justify-center flex-shrink-0"><X size={18} className="text-steel dark:text-light-grey" /></button>
+          <button aria-label="Đóng" onClick={onClose} className="w-8 h-8 rounded-full hover:bg-ice-cream dark:hover:bg-night-sky/30 flex items-center justify-center flex-shrink-0"><X size={18} className="text-steel dark:text-light-grey" /></button>
         </div>
 
         <div className="flex flex-wrap items-center gap-2 mb-4 flex-shrink-0">
@@ -8945,6 +8618,7 @@ function ReportHtmlPreview({ data }) {
 }
 
 function ReportExportModal({ onClose, transactions, categories, accounts }) {
+  useEscapeKey(onClose); // Esc / nút Back Android đóng modal
   const [step, setStep] = useState('config'); // 'config' | 'preview'
   const [startDate, setStartDate] = useState(firstDayOfThisMonthStr());
   const [endDate, setEndDate] = useState(todayDateStr());
@@ -9019,7 +8693,7 @@ function ReportExportModal({ onClose, transactions, categories, accounts }) {
             <FileText size={18} className="text-turquoise" />
             <h3 className="font-bold text-blueberry dark:text-white">{step === 'config' ? 'Xuất báo cáo PDF' : 'Xem trước báo cáo'}</h3>
           </div>
-          <button onClick={onClose}><X size={18} className="text-steel dark:text-light-grey" /></button>
+          <button aria-label="Đóng" onClick={onClose}><X size={18} className="text-steel dark:text-light-grey" /></button>
         </div>
 
         {step === 'config' ? (
@@ -9120,7 +8794,7 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
   async function handleDeleteTx(tx) {
     if (!confirm('Xóa giao dịch này? Bạn có thể khôi phục trong 30 ngày ở mục Lịch sử.')) return;
     const { error } = await softDelete('transactions', tx.id, txDeleteDescription(tx, categories), 'delete_transaction');
-    if (error) { alert('Lỗi: ' + error.message); return; }
+    if (error) { toast('Lỗi: ' + error.message); return; }
     reload && reload();
   }
   // Time range state
@@ -9749,7 +9423,7 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
             <h1 className="text-blueberry dark:text-white text-lg font-bold">Báo cáo</h1>
             <div className="flex items-center gap-2">
               <button onClick={() => setShowExportModal(true)} title="Xuất báo cáo PDF" className="w-9 h-9 rounded-full frost-inset flex items-center justify-center"><FileText size={17} className="text-blueberry dark:text-white" /></button>
-              <button onClick={() => setScreen('dashboard')} className="w-9 h-9 rounded-full frost-inset flex items-center justify-center"><X size={18} className="text-blueberry dark:text-white" /></button>
+              <button aria-label="Đóng" onClick={() => setScreen('dashboard')} className="w-9 h-9 rounded-full frost-inset flex items-center justify-center"><X size={18} className="text-blueberry dark:text-white" /></button>
             </div>
           </div>
           <div onClickCapture={captureIncomeCardScrollAnchor} onChangeCapture={captureIncomeCardScrollAnchor} className="px-5 mt-2">
@@ -10273,7 +9947,7 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
  <div className="frost-card w-full max-w-md rounded-3xl p-6 max-h-[80vh] overflow-y-auto scrollbar-hide" onClick={(e) => e.stopPropagation()}>
               <div className="flex justify-between items-center mb-4">
                 <h3 className="font-bold text-blueberry dark:text-white">Chi tiết "{drilldownCategory.name}"</h3>
-                <button onClick={() => setShowDrilldown(false)}><X size={18} className="text-steel dark:text-light-grey" /></button>
+                <button aria-label="Đóng" onClick={() => setShowDrilldown(false)}><X size={18} className="text-steel dark:text-light-grey" /></button>
               </div>
               {drilldownTransactions.length === 0 ? <p className="text-steel dark:text-light-grey">Không có giao dịch.</p> : (
                 <div className="space-y-2">
@@ -10362,7 +10036,7 @@ function MainApp({ user, theme, toggleTheme }) {
     const { error } = await supabase
       .from('period_spending_pool')
       .upsert({ period_key: periodKey, amount: Number(amount) }, { onConflict: 'user_id,period_key' });
-    if (error) { alert('Lỗi lưu Thu nhập được chi: ' + error.message); return false; }
+    if (error) { toast('Lỗi lưu Thu nhập được chi: ' + error.message); return false; }
     setSpendingPoolByPeriod((prev) => ({ ...prev, [periodKey]: Number(amount) }));
     return true;
   }
@@ -10407,13 +10081,17 @@ function MainApp({ user, theme, toggleTheme }) {
   }
 
   async function logActivity(action_type, description, payload = null, restorable = false) {
-    await supabase.from('system_logs').insert({ action_type, description, payload, restorable });
+    const { error } = await supabase.from('system_logs').insert({ action_type, description, payload, restorable });
+    if (error) console.error('logActivity failed:', error); // log lỗi không được chặn thao tác chính
     loadLogs();
   }
 
+  // Lỗi tải dữ liệu (rớt mạng, hết hạn token...) — hiện banner "Thử lại" thay vì im lặng.
+  const [loadError, setLoadError] = useState(null);
+
   async function loadAll() {
     setLoading(true); setLoadingGoals(true);
-    const [{ data: accData }, { data: catData }, { data: txData }, { data: goalData }] = await Promise.all([
+    const [accRes, catRes, txRes, goalRes] = await Promise.all([
       supabase.from('accounts').select('*').eq('is_active', true).is('deleted_at', null),
       supabase.from('categories').select('*').is('deleted_at', null),
       // Chỉ lấy các cột thực sự đang dùng trong app thay vì '*' (giảm dung lượng response).
@@ -10422,6 +10100,18 @@ function MainApp({ user, theme, toggleTheme }) {
       supabase.from('transactions').select('id, account_id, category_id, type, amount, date, created_at, note, seq').is('deleted_at', null).order('created_at', { ascending: false }),
       supabase.from('goals').select('*').is('deleted_at', null).order('created_at', { ascending: false }),
     ]);
+    // QUAN TRỌNG: trước đây chỉ lấy `data` và bỏ qua `error` -> khi rớt mạng/hết hạn token, cả 4
+    // mảng thành rỗng và app trông như "mất sạch dữ liệu". Giờ nếu BẤT KỲ query nào lỗi thì GIỮ
+    // NGUYÊN dữ liệu cũ đang hiển thị (không ghi đè bằng mảng rỗng) và báo lỗi cho người dùng.
+    const firstError = accRes.error || catRes.error || txRes.error || goalRes.error;
+    if (firstError) {
+      console.error('loadAll failed:', firstError);
+      setLoadError(firstError.message || 'Không tải được dữ liệu');
+      setLoading(false); setLoadingGoals(false);
+      return false;
+    }
+    setLoadError(null);
+    const accData = accRes.data, catData = catRes.data, txData = txRes.data, goalData = goalRes.data;
     // Mục tiêu có liên kết quỹ (fund_id) thì "Số tiền hiện có" luôn lấy trực tiếp từ số dư quỹ đó,
     // không dùng giá trị nhập tay đã lưu trước đó.
     const syncedGoals = (goalData || []).map((g) => {
@@ -10434,6 +10124,7 @@ function MainApp({ user, theme, toggleTheme }) {
     setLoading(false); setLoadingGoals(false); setInitialLoadDone(true);
     loadLogs();
     loadSpendingPoolSettings();
+    return true;
   }
 
   useEffect(() => { loadAll(); }, []);
@@ -10447,15 +10138,30 @@ function MainApp({ user, theme, toggleTheme }) {
   const [resettingData, setResettingData] = useState(false);
   async function resetAllData() {
     setResettingData(true);
+    const batchId = crypto.randomUUID();
+    const now = new Date().toISOString();
+    // Thứ tự: dữ liệu phụ thuộc trước (giao dịch, mục tiêu), rồi danh mục, ví.
+    const tables = ['transactions', 'goals', 'categories', 'accounts'];
+    const done = []; // các bảng đã xoá thành công — để hoàn tác nếu 1 bước giữa chừng thất bại
     try {
-      const batchId = crypto.randomUUID();
-      const now = new Date().toISOString();
       const desc = `Reset toàn bộ dữ liệu (${accounts.length} ví, ${categories.length} danh mục, ${transactions.length} giao dịch, ${goals.length} mục tiêu)`;
-      await supabase.from('transactions').update({ deleted_at: now, deleted_batch_id: batchId }).is('deleted_at', null);
-      await supabase.from('goals').update({ deleted_at: now, deleted_batch_id: batchId }).is('deleted_at', null);
-      await supabase.from('categories').update({ deleted_at: now, deleted_batch_id: batchId }).is('deleted_at', null);
-      await supabase.from('accounts').update({ deleted_at: now, deleted_batch_id: batchId }).is('deleted_at', null);
-      await logActivity('reset_data', desc, { batchId, tables: ['transactions', 'goals', 'categories', 'accounts'] }, true);
+      for (const t of tables) {
+        const { error } = await supabase.from(t).update({ deleted_at: now, deleted_batch_id: batchId }).is('deleted_at', null);
+        if (error) throw new Error(`${t}: ${error.message}`);
+        done.push(t);
+      }
+      await logActivity('reset_data', desc, { batchId, tables }, true);
+    } catch (err) {
+      console.error('resetAllData failed:', err);
+      // Hoàn tác các bảng đã lỡ xoá (theo đúng batchId) để không bị reset dở dang.
+      const failedRollback = [];
+      for (const t of done) {
+        const { error } = await supabase.from(t).update({ deleted_at: null, deleted_batch_id: null }).eq('deleted_batch_id', batchId);
+        if (error) failedRollback.push(t);
+      }
+      toast('Reset dữ liệu thất bại: ' + err.message + (failedRollback.length
+        ? `\nKhông hoàn tác được bảng: ${failedRollback.join(', ')}. Vào Lịch sử để khôi phục (batch ${batchId}).`
+        : '\nDữ liệu của bạn đã được giữ nguyên.'));
     } finally {
       await loadAll();
       setResettingData(false);
@@ -10473,8 +10179,17 @@ function MainApp({ user, theme, toggleTheme }) {
   async function restoreLog(log) {
     const { batchId, tables } = log.payload || {};
     if (!batchId || !tables?.length) return;
-    await Promise.all(tables.map((t) => supabase.from(t).update({ deleted_at: null, deleted_batch_id: null }).eq('deleted_batch_id', batchId)));
-    await supabase.from('system_logs').update({ restored_at: new Date().toISOString() }).eq('id', log.id);
+    const results = await Promise.all(tables.map((t) => supabase.from(t).update({ deleted_at: null, deleted_batch_id: null }).eq('deleted_batch_id', batchId)));
+    const failed = results.map((r, i) => (r.error ? `${tables[i]}: ${r.error.message}` : null)).filter(Boolean);
+    if (failed.length) {
+      // Chưa đánh dấu "đã khôi phục" — để người dùng bấm khôi phục lại được (thao tác idempotent).
+      console.error('restoreLog failed:', failed);
+      toast('Khôi phục chưa hoàn tất, thử lại sau.\n' + failed.join('\n'));
+      await loadAll();
+      return;
+    }
+    const { error: logErr } = await supabase.from('system_logs').update({ restored_at: new Date().toISOString() }).eq('id', log.id);
+    if (logErr) console.error('Không đánh dấu được restored_at:', logErr);
     await loadAll();
   }
 
@@ -10498,11 +10213,27 @@ function MainApp({ user, theme, toggleTheme }) {
   function handleAddClick(type = 'expense') {
     setAddType(type);
     if (type === 'transfer') {
-      alert('Tính năng chuyển khoản đang được phát triển.');
+      toast('Tính năng chuyển khoản đang được phát triển.', 'info');
       return;
     }
     setShowAdd(true);
   }
+
+  // Nút Back của Android (Capacitor): đóng modal trên cùng -> lùi từ màn chi tiết -> về Tổng quan -> thoát app.
+  // Trên web/desktop hàm này không làm gì.
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return;
+    let handle = null;
+    let cancelled = false;
+    CapApp.addListener('backButton', () => {
+      if (closeTopModal()) return;
+      if (screen === 'fund-detail') { setScreen(fundReturnScreen); return; }
+      if (screen === 'account-detail') { setScreen(accountReturnScreen); return; }
+      if (screen !== 'dashboard') { setScreen('dashboard'); return; }
+      CapApp.exitApp();
+    }).then((h) => { if (cancelled) h.remove(); else handle = h; });
+    return () => { cancelled = true; if (handle) handle.remove(); };
+  }, [screen, fundReturnScreen, accountReturnScreen]);
 
   // Helper to render screen content inside layout
   function renderScreenContent() {
@@ -10583,6 +10314,15 @@ function MainApp({ user, theme, toggleTheme }) {
 
         {/* MainContent — width: 100%, min-width: 0 */}
         <main className="flex-1 min-w-0 w-full overflow-y-auto overflow-x-hidden md:p-6">
+          {loadError && (
+            <div role="alert" className="mx-4 mt-3 md:mx-0 md:mt-0 mb-3 flex items-center gap-3 rounded-2xl border border-[rgba(241,138,181,0.4)] bg-cotton-candy-light dark:bg-cotton-candy/10 px-4 py-3 text-sm text-blueberry dark:text-white">
+              <AlertTriangle size={18} className="text-cotton-candy shrink-0" />
+              <span className="flex-1 font-semibold">Không tải được dữ liệu ({loadError}). Dữ liệu đang hiển thị có thể chưa mới nhất.</span>
+              <button onClick={loadAll} disabled={loading} className="shrink-0 rounded-full bg-gradient-primary px-4 py-1.5 text-xs font-bold text-white disabled:opacity-60">
+                {loading ? 'Đang tải…' : 'Thử lại'}
+              </button>
+            </div>
+          )}
           {renderScreenContent()}
         </main>
       </div>
@@ -10780,7 +10520,7 @@ function AuthScreen() {
           </p>
 
           <p className="text-center text-[11px] text-blueberry/50 mt-4 font-semibold">
-            Dữ liệu tài chính của bạn được mã hóa và chỉ bạn có thể xem.
+            Dữ liệu tài chính được bảo vệ và chỉ tài khoản của bạn truy cập được.
           </p>
           </div>
         </div>
@@ -10815,16 +10555,13 @@ export default function App() {
 
   function toggleTheme() { setTheme((t) => (t === 'dark' ? 'light' : 'dark')); }
 
-  useEffect(() => {
-    const styleTag = document.createElement('style');
-    styleTag.innerHTML = fincheckStyles;
-    document.head.appendChild(styleTag);
-    return () => { document.head.removeChild(styleTag); };
-  }, []);
-
+  let content;
   if (session === undefined) {
-    return <div className="min-h-[100dvh] flex items-center justify-center bg-ice-cream dark:bg-[#1a1a2e]"><Loader2 size={28} className="animate-spin text-turquoise" /></div>;
+    content = <div className="min-h-[100dvh] flex items-center justify-center bg-ice-cream dark:bg-[#1a1a2e]"><Loader2 size={28} className="animate-spin text-turquoise" /></div>;
+  } else if (!session) {
+    content = <AuthScreen />;
+  } else {
+    content = <MainApp user={session.user} theme={theme} toggleTheme={toggleTheme} />;
   }
-  if (!session) return <AuthScreen />;
-  return <MainApp user={session.user} theme={theme} toggleTheme={toggleTheme} />;
+  return <><ToastHost />{content}</>;
 }

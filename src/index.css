@@ -1,8 +1,35 @@
 @import "tailwindcss";
+/* Self-host font Nunito (gói @fontsource, đã gồm subset tiếng Việt) — không còn tải từ Google Fonts,
+   nên chạy offline trong Capacitor được và không bị chớp font lúc mới mở app.
+   Cài: npm i @fontsource/nunito   (@import phải nằm trên cùng file CSS) */
+@import "@fontsource/nunito/400.css";
+@import "@fontsource/nunito/600.css";
+@import "@fontsource/nunito/700.css";
+@import "@fontsource/nunito/800.css";
+
 @custom-variant dark (&:where(.dark, .dark *));
+
+/* Tailwind v4 cấu hình bằng CSS (không có tailwind.config.js). Khai báo bảng màu Fincheck để
+   bg-turquoise/10, shadow-turquoise/30, ring-turquoise/30... được Tailwind sinh ra. */
+@theme {
+  --color-turquoise: #0DBACC;
+  --color-baby-blue: #74ACEF;
+  --color-cotton-candy: #F18AB5;
+  --color-lavender: #9F7FE0;
+  --color-ice-cream: #EEF0F4;
+  --color-light-grey: #BDBDCB;
+  --color-steel: #7E7F90;
+  --color-blueberry: #303150;
+  --color-night-sky: #2B2B46;
+  --color-turquoise-light: #B4F1F1;
+  --color-baby-blue-light: #C1DDFF;
+  --color-cotton-candy-light: #FFCDDB;
+  --color-lavender-light: #E3D6FF;
+}
+
 body {
   margin: 0;
-  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  font-family: 'Nunito', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
 }
 
 /* Hide scrollbar utility */
@@ -16,3 +43,449 @@ body {
 .hide-scrollbar::-webkit-scrollbar { width: 0; height: 0; }
 .hide-scrollbar::-webkit-scrollbar-thumb { background: transparent; }
 .hide-scrollbar::-webkit-scrollbar-track { background: transparent; }
+
+/* ==============================================================================
+   FINCHECK STYLES (trước đây nằm trong chuỗi fincheckStyles ở App.jsx, inject lúc chạy)
+   Cố ý để NGOÀI @layer: rule không-layer luôn thắng utility của Tailwind v4 (nằm trong
+   @layer utilities) — giống hành vi cũ của <style> inject.
+   LƯU Ý: 2 rule ".dark .dark\:bg-\[\#1e1e32\]" / "#2a2a44" trước đây KHÔNG hoạt động (trong chuỗi
+   JS, "\:" bị hiểu thành ":" nên selector hỏng); giờ ở file CSS thì đúng và có hiệu lực.
+   ============================================================================== */
+* { font-family: 'Nunito', sans-serif; }
+:root {
+  --turquoise: #0DBACC;
+  --baby-blue: #74ACEF;
+  --cotton-candy: #F18AB5;
+  --lavender: #9F7FE0;
+  --ice-cream: #EEF0F4;
+  --white: #FFFFFF;
+  --light-grey: #BDBDCB;
+  --steel: #7E7F90;
+  --blueberry: #303150;
+  --night-sky: #2B2B46;
+  --dodger-blue: #69ADFF;
+  --turquoise-light: #B4F1F1;
+  --baby-blue-light: #C1DDFF;
+  --cotton-candy-light: #FFCDDB;
+  --lavender-light: #E3D6FF;
+  --page-bg: #EDE4FF; /* Lavender nhạt pha thêm trắng — nền pastel đồng nhất cho tất cả các trang, không dùng gradient nữa */
+
+  /* Typography hierarchy (avoid pure #FFFFFF everywhere) */
+  --text-primary: rgba(255,255,255,0.92);
+  --text-secondary: rgba(255,255,255,0.70);
+  --text-tertiary: rgba(255,255,255,0.55);
+  --text-placeholder: rgba(255,255,255,0.48);
+  --text-disabled: rgba(255,255,255,0.35);
+
+  /* Liquid glass tokens — blur/saturate mạnh hơn, viền + highlight rõ hơn
+     để cảm giác "kính lỏng" rõ rệt hơn trên mọi bề mặt, cả sáng lẫn tối. */
+  --glass-bg: rgba(20,20,45,0.50);
+  --glass-border: rgba(255,255,255,0.18);
+  --glass-blur: blur(30px) saturate(190%);
+  --glass-shadow: 0 10px 42px rgba(0,0,0,0.24);
+  --glass-highlight: rgba(255,255,255,0.35);
+}
+
+/* App shell base: avoid the default browser bg (white/black) showing
+   through during elastic/overscroll, which reads as an unintended
+   "black patch" on mobile, especially in dark theme. */
+html, body, #root {
+  width: 100%;
+  min-height: 100%;
+  margin: 0;
+  background-color: var(--ice-cream);
+}
+html.dark, html.dark body, html.dark #root {
+  background-color: #1a1a2e;
+}
+
+/* Liquid glass — reusable surface for auth card / modal / dropdown / popover.
+   Tăng blur/saturate + thêm lớp "sheen" (ánh sáng lướt) chuyển động rất chậm
+   để bề mặt có cảm giác kính lỏng sống động thay vì kính mờ tĩnh. Đồng thời
+   bổ sung biến thể .dark thực sự (trước đây chỉ có .glass-surface-dark —
+   một class không được gắn ở đâu cả nên auth card KHÔNG đổi theo dark mode). */
+.glass-surface {
+  background: rgba(255,255,255,0.24);
+  backdrop-filter: blur(34px) saturate(190%);
+  -webkit-backdrop-filter: blur(34px) saturate(190%);
+  border: 1px solid rgba(255,255,255,0.36);
+  box-shadow: 0 24px 70px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,255,255,0.5),
+    inset 0 0 46px rgba(255,255,255,0.06);
+}
+.glass-surface::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(115deg, rgba(255,255,255,0.5) 0%, rgba(255,255,255,0) 30%, rgba(255,255,255,0) 70%, rgba(255,255,255,0.25) 100%);
+  background-size: 220% 220%;
+  animation: liquidSheen 10s ease-in-out infinite;
+  pointer-events: none;
+  z-index: -1;
+}
+.dark .glass-surface {
+  background: rgba(20,20,45,0.55);
+  backdrop-filter: blur(34px) saturate(190%);
+  -webkit-backdrop-filter: blur(34px) saturate(190%);
+  border: 1px solid rgba(255,255,255,0.16);
+  box-shadow: 0 24px 70px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.12),
+    inset 0 0 46px rgba(255,255,255,0.03);
+}
+@keyframes liquidSheen {
+  0%, 100% { background-position: 0% 0%; }
+  50% { background-position: 100% 100%; }
+}
+.glass-input {
+  background: rgba(255,255,255,0.20);
+  backdrop-filter: blur(18px) saturate(170%);
+  -webkit-backdrop-filter: blur(18px) saturate(170%);
+  border: 1px solid rgba(255,255,255,0.34);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.4);
+  transition: background-color .15s, border-color .15s, box-shadow .15s;
+}
+.glass-input:focus {
+  border-color: rgba(34,211,238,0.65);
+  box-shadow: 0 0 0 3px rgba(34,211,238,0.14), inset 0 1px 0 rgba(255,255,255,0.5);
+  background: rgba(255,255,255,0.28);
+}
+.bg-ice-cream { background-color: var(--ice-cream); }
+.bg-turquoise { background-color: var(--turquoise); }
+.bg-baby-blue { background-color: var(--baby-blue); }
+.bg-cotton-candy { background-color: var(--cotton-candy); }
+.bg-lavender { background-color: var(--lavender); }
+.bg-night-sky { background-color: var(--night-sky); }
+.bg-blueberry { background-color: var(--blueberry); }
+.bg-steel { background-color: var(--steel); }
+.bg-light-grey { background-color: var(--light-grey); }
+.bg-turquoise-light { background-color: var(--turquoise-light); }
+.bg-baby-blue-light { background-color: var(--baby-blue-light); }
+.bg-cotton-candy-light { background-color: var(--cotton-candy-light); }
+.bg-lavender-light { background-color: var(--lavender-light); }
+.text-turquoise { color: var(--turquoise); }
+.text-baby-blue { color: var(--baby-blue); }
+.text-cotton-candy { color: var(--cotton-candy); }
+.text-lavender { color: var(--lavender); }
+.text-blueberry { color: var(--blueberry); }
+.text-steel { color: var(--steel); }
+.text-light-grey { color: var(--light-grey); }
+.text-white { color: var(--white); }
+.text-night-sky { color: var(--night-sky); }
+.border-turquoise { border-color: var(--turquoise); }
+.border-baby-blue { border-color: var(--baby-blue); }
+.border-cotton-candy { border-color: var(--cotton-candy); }
+.border-lavender { border-color: var(--lavender); }
+.border-steel { border-color: var(--steel); }
+.border-light-grey { border-color: var(--light-grey); }
+.shadow-soft { box-shadow: 0 1px 2px rgba(48,49,80,0.04), 0 10px 30px rgba(48,49,80,0.10), inset 0 1px 0 rgba(255,255,255,0.5); }
+.shadow-card { box-shadow: 0 2px 4px rgba(48,49,80,0.05), 0 18px 48px rgba(48,49,80,0.14), inset 0 1px 0 rgba(255,255,255,0.55); }
+.dark .bg-ice-cream { background-color: var(--night-sky); }
+/* "bg-white" / "dark:bg-[#1e1e32]" / "dark:bg-[#2a2a44]" là các nền đặc dùng
+   cho card, modal, dropdown, segmented-control khắp app. Đổi sang kính lỏng
+   (nền bán trong suốt + backdrop-blur) thay vì màu đặc, cả sáng lẫn tối,
+   để hiệu ứng liquid glass nhất quán trên toàn bộ giao diện. */
+.bg-white {
+  background-color: rgba(255,255,255,0.66);
+  backdrop-filter: blur(28px) saturate(190%);
+  -webkit-backdrop-filter: blur(28px) saturate(190%);
+}
+.dark .bg-white {
+  background-color: rgba(30,30,50,0.62);
+  backdrop-filter: blur(28px) saturate(190%);
+  -webkit-backdrop-filter: blur(28px) saturate(190%);
+}
+.dark .dark\:bg-\[\#1e1e32\] {
+  background-color: rgba(30,30,50,0.62);
+  backdrop-filter: blur(28px) saturate(190%);
+  -webkit-backdrop-filter: blur(28px) saturate(190%);
+}
+.dark .dark\:bg-\[\#2a2a44\] {
+  background-color: rgba(42,42,68,0.68);
+  backdrop-filter: blur(18px) saturate(190%);
+  -webkit-backdrop-filter: blur(18px) saturate(190%);
+}
+/* Tăng độ dày mặc định của backdrop-blur (Tailwind) để mọi bề mặt bán
+   trong suốt còn lại (thanh tìm kiếm, nút tròn, menu...) cũng dày kính hơn. */
+.backdrop-blur {
+  backdrop-filter: blur(22px) saturate(190%);
+  -webkit-backdrop-filter: blur(22px) saturate(190%);
+}
+.dark .text-blueberry { color: var(--text-primary); }
+.dark .text-steel { color: var(--light-grey); }
+.dark .border-steel { border-color: #3a3a5a; }
+.dark .border-light-grey { border-color: #3a3a5a; }
+.dark .shadow-soft { box-shadow: 0 4px 24px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.08); }
+.dark .shadow-card { box-shadow: 0 10px 40px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.1); }
+.bg-gradient-primary { background: linear-gradient(135deg, var(--turquoise), var(--baby-blue)); }
+.bg-gradient-secondary { background: linear-gradient(135deg, var(--cotton-candy), var(--lavender)); }
+.bg-gradient-warm { background: linear-gradient(135deg, var(--cotton-candy-light), var(--lavender-light)); }
+.bg-gradient-cool { background: linear-gradient(135deg, var(--turquoise-light), var(--baby-blue-light)); }
+.bg-gradient-hero { background: linear-gradient(135deg, var(--turquoise), var(--lavender)); }
+.bg-page { background-color: var(--page-bg); }
+
+/* ==========================================================================
+   Mobile: Frosted-glass + Neumorphism blend (pastel, layered, soft shadows)
+   Reusable across mobile screens — panels, cards, and inset stat tiles.
+   ========================================================================== */
+.frost-card {
+  position: relative;
+  background: rgba(255,255,255,0.92);
+  backdrop-filter: blur(16px) saturate(150%);
+  -webkit-backdrop-filter: blur(16px) saturate(150%);
+  border: 1px solid rgba(255,255,255,0.6);
+  box-shadow: 0 6px 20px rgba(48,49,80,0.08);
+  isolation: isolate;
+}
+.frost-card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(115deg, rgba(255,255,255,0.22) 0%, rgba(255,255,255,0) 40%, rgba(255,255,255,0) 100%);
+  pointer-events: none;
+  z-index: -1;
+}
+.dark .frost-card {
+  background: rgba(38,38,64,0.82);
+  backdrop-filter: blur(16px) saturate(150%);
+  -webkit-backdrop-filter: blur(16px) saturate(150%);
+  border: 1px solid rgba(255,255,255,0.10);
+  box-shadow: 0 6px 20px rgba(0,0,0,0.28);
+}
+.dark .frost-card::before {
+  background: linear-gradient(115deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0) 40%, rgba(255,255,255,0) 100%);
+}
+.frost-inset {
+  position: relative;
+  background: rgba(255,255,255,0.55);
+  backdrop-filter: blur(8px) saturate(130%);
+  -webkit-backdrop-filter: blur(8px) saturate(130%);
+  border: 1px solid rgba(255,255,255,0.5);
+  box-shadow: 0 2px 10px rgba(48,49,80,0.06);
+}
+.dark .frost-inset {
+  background: rgba(255,255,255,0.05);
+  backdrop-filter: blur(8px) saturate(130%);
+  -webkit-backdrop-filter: blur(8px) saturate(130%);
+  border: 1px solid rgba(255,255,255,0.10);
+  box-shadow: 0 2px 10px rgba(0,0,0,0.22);
+}
+.frost-pill {
+  background: rgba(255,255,255,0.58);
+  backdrop-filter: blur(30px) saturate(220%);
+  -webkit-backdrop-filter: blur(30px) saturate(220%);
+  border: 1px solid rgba(255,255,255,0.85);
+  box-shadow: 8px 8px 18px rgba(48,49,80,0.13), -5px -5px 12px rgba(255,255,255,0.85);
+}
+.dark .frost-pill {
+  background: rgba(255,255,255,0.09);
+  backdrop-filter: blur(30px) saturate(220%);
+  -webkit-backdrop-filter: blur(30px) saturate(220%);
+  border: 1px solid rgba(255,255,255,0.18);
+  box-shadow: 8px 8px 18px rgba(0,0,0,0.4), -5px -5px 12px rgba(255,255,255,0.04);
+}
+/* Soft ambient pastel blobs for layered depth behind frosted panels — bigger & more saturated
+   so the backdrop-blur on cards has real color/contrast to blur (this is what makes the glass
+   effect actually read as "glass" instead of a flat translucent panel). */
+.frost-blob {
+  position: absolute;
+  border-radius: 9999px;
+  filter: blur(50px);
+  pointer-events: none;
+  opacity: 0.9;
+}
+
+
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+/* Thanh cuộn ngang mảnh, chỉ dùng cho các chart cột (TrendBarChart...) — khác với
+   scrollbar-hide (ẩn hoàn toàn), ở đây để lộ một thanh mảnh, mờ để người dùng biết
+   là còn nội dung có thể kéo/cuộn ngang khi số cột (ngày/tháng) vượt quá khung nhìn. */
+.chart-scroll-x {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(48,49,80,0.18) transparent;
+}
+.chart-scroll-x::-webkit-scrollbar {
+  height: 6px;
+}
+.chart-scroll-x::-webkit-scrollbar-track {
+  background: transparent;
+}
+.chart-scroll-x::-webkit-scrollbar-thumb {
+  background: rgba(48,49,80,0.18);
+  border-radius: 999px;
+}
+.chart-scroll-x::-webkit-scrollbar-thumb:hover {
+  background: rgba(48,49,80,0.32);
+}
+.dark .chart-scroll-x {
+  scrollbar-color: rgba(255,255,255,0.22) transparent;
+}
+.dark .chart-scroll-x::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,0.22);
+}
+.dark .chart-scroll-x::-webkit-scrollbar-thumb:hover {
+  background: rgba(255,255,255,0.36);
+}
+
+/* FIX: bấm vào nút / biểu tượng (icon button) không còn hiện con trỏ chữ (I-beam)
+   kiểu ô nhập văn bản, và không bị bôi đen chữ khi bấm nhanh 2 lần.
+   Ô nhập liệu được loại trừ ngay bên dưới để vẫn gõ / bôi đen text bình thường. */
+button,
+[role="button"],
+[role="tab"],
+[role="option"],
+label,
+summary,
+button svg,
+[role="button"] svg,
+label svg {
+  cursor: pointer;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+button:disabled,
+[role="button"][aria-disabled="true"] {
+  cursor: not-allowed;
+}
+/* Các ô nhập liệu vẫn giữ con trỏ chữ và cho phép bôi đen, kể cả khi nằm trong <label> */
+input,
+textarea,
+select,
+[contenteditable="true"] {
+  -webkit-user-select: text;
+  user-select: text;
+}
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="button"]):not([type="submit"]),
+textarea,
+[contenteditable="true"] {
+  cursor: text;
+}
+select,
+input[type="checkbox"],
+input[type="radio"] {
+  cursor: pointer;
+}
+
+/* Mobile: ẩn scrollbar toàn bộ */
+@media (max-width: 767px) {
+  * {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  *::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/* ==========================================================================
+   vanilla-calendar-pro — skin theo bộ mã màu Fincheck + liquid glass
+   Chỉ import layout.css + themes/light.css (xem DateField.jsx) để có sẵn
+   các khai báo var(--vc-*), sau đó override toàn bộ giá trị màu tại đây.
+   Nền calendar để trong suốt vì panel bọc ngoài (.glass-surface /
+   .glass-surface-dark) đã lo phần kính mờ + blur + border + shadow.
+   ========================================================================== */
+.vc-glass .vc {
+  --vc-bg: transparent;
+  --vc-color: var(--blueberry);
+  --vc-focus-outline-color: var(--turquoise);
+
+  --vc-header-color: var(--blueberry);
+  --vc-title-color: var(--blueberry);
+  --vc-title-color-hover: var(--turquoise);
+  --vc-title-color-disabled: var(--light-grey);
+
+  --vc-months-years-bg: transparent;
+  --vc-months-years-color: var(--steel);
+  --vc-months-years-bg-hover: rgba(13, 186, 204, 0.12);
+  --vc-months-years-color-disabled: var(--light-grey);
+  --vc-months-years-bg-selected: var(--turquoise);
+  --vc-months-years-color-selected: var(--white);
+
+  --vc-week-numbers-title-color: var(--steel);
+  --vc-week-number-color: var(--steel);
+  --vc-week-number-color-hover: var(--blueberry);
+  --vc-week-day-color: var(--steel);
+  --vc-week-day-color-hover: var(--blueberry);
+  --vc-week-day-off-color: var(--cotton-candy);
+  --vc-week-day-off-color-hover: var(--cotton-candy);
+
+  --vc-date-bg: transparent;
+  --vc-date-color: var(--blueberry);
+  --vc-date-bg-hover: rgba(13, 186, 204, 0.12);
+  --vc-date-hover-bg: rgba(13, 186, 204, 0.12);
+  --vc-date-hover-edge-bg: rgba(13, 186, 204, 0.22);
+  --vc-date-disabled-color: var(--light-grey);
+  --vc-date-outside-color: var(--light-grey);
+  --vc-date-today-bg: rgba(13, 186, 204, 0.12);
+  --vc-date-today-color: var(--turquoise);
+  --vc-date-today-outside-color: var(--steel);
+  --vc-date-selected-bg: var(--turquoise);
+  --vc-date-selected-color: var(--white);
+  --vc-date-selected-outside-bg: var(--turquoise-light);
+  --vc-date-selected-outside-color: var(--white);
+
+  --vc-date-weekend-color: var(--cotton-candy);
+  --vc-date-weekend-bg-hover: rgba(241, 138, 181, 0.12);
+  --vc-date-weekend-hover-bg: rgba(241, 138, 181, 0.12);
+  --vc-date-weekend-hover-edge-bg: rgba(241, 138, 181, 0.22);
+  --vc-date-weekend-disabled-color: var(--light-grey);
+  --vc-date-weekend-today-color: var(--cotton-candy);
+  --vc-date-weekend-today-disabled-color: var(--light-grey);
+  --vc-date-weekend-outside-bg: transparent;
+  --vc-date-weekend-outside-color: var(--light-grey);
+  --vc-date-weekend-outside-bg-hover: rgba(241, 138, 181, 0.08);
+  --vc-date-weekend-outside-hover-bg: rgba(241, 138, 181, 0.08);
+  --vc-date-weekend-today-outside-color: var(--light-grey);
+  --vc-date-weekend-disabled-outside-color: var(--light-grey);
+  --vc-date-weekend-selected-bg: var(--cotton-candy);
+  --vc-date-weekend-selected-color: var(--white);
+}
+.dark .vc-glass .vc {
+  --vc-color: var(--text-primary);
+  --vc-header-color: var(--text-primary);
+  --vc-title-color: var(--text-primary);
+  --vc-title-color-hover: var(--turquoise);
+  --vc-title-color-disabled: var(--text-disabled);
+
+  --vc-months-years-color: var(--text-secondary);
+  --vc-months-years-bg-hover: rgba(13, 186, 204, 0.18);
+  --vc-months-years-color-disabled: var(--text-disabled);
+
+  --vc-week-numbers-title-color: var(--text-secondary);
+  --vc-week-number-color: var(--text-secondary);
+  --vc-week-number-color-hover: var(--text-primary);
+  --vc-week-day-color: var(--text-secondary);
+  --vc-week-day-color-hover: var(--text-primary);
+
+  --vc-date-color: var(--text-primary);
+  --vc-date-bg-hover: rgba(255, 255, 255, 0.08);
+  --vc-date-hover-bg: rgba(255, 255, 255, 0.08);
+  --vc-date-hover-edge-bg: rgba(255, 255, 255, 0.14);
+  --vc-date-disabled-color: var(--text-disabled);
+  --vc-date-outside-color: var(--text-disabled);
+  --vc-date-today-bg: rgba(13, 186, 204, 0.18);
+  --vc-date-today-outside-color: var(--text-tertiary);
+
+  --vc-date-weekend-bg-hover: rgba(241, 138, 181, 0.16);
+  --vc-date-weekend-hover-bg: rgba(241, 138, 181, 0.16);
+  --vc-date-weekend-hover-edge-bg: rgba(241, 138, 181, 0.24);
+  --vc-date-weekend-disabled-color: var(--text-disabled);
+  --vc-date-weekend-today-disabled-color: var(--text-disabled);
+  --vc-date-weekend-outside-color: var(--text-disabled);
+  --vc-date-weekend-outside-bg-hover: rgba(241, 138, 181, 0.1);
+  --vc-date-weekend-outside-hover-bg: rgba(241, 138, 181, 0.1);
+  --vc-date-weekend-today-outside-color: var(--text-disabled);
+  --vc-date-weekend-disabled-outside-color: var(--text-disabled);
+}
+/* Bo góc + font đồng bộ với phần còn lại của app */
+.vc-glass .vc { font-family: 'Nunito', sans-serif; }
+.vc-glass .vc-date__btn,
+.vc-glass .vc-months__month,
+.vc-glass .vc-years__year { border-radius: 9999px; }
