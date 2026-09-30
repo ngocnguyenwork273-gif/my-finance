@@ -60,6 +60,19 @@ import {
   periodKeysForMonths,
   inclusiveDays,
 } from './lib/finance';
+import {
+  textMatchesSearch,
+  formatMoney,
+  formatMoneySigned,
+  formatMoneyCompact,
+  txDeleteDescription,
+  sanitizeFileName,
+  stripLeadingZeros,
+  evalMoneyExpression,
+  formatWithThousands,
+  countRealCharsBefore,
+  indexAfterRealCharCount,
+} from './lib/format';
 // Cắt bỏ các cột (bucket) nằm HOÀN TOÀN trong tương lai ở CUỐI dãy — các cột này chưa có dữ
 // liệu nên trước đây bị vẽ thành 1 dải cột rỗng kéo dài tới hết trục, gây cảm giác biểu đồ
 // "trống trải" dù dữ liệu thực tế chỉ có ở phần đầu. Luôn giữ lại tối thiểu 1 cột.
@@ -88,12 +101,8 @@ function useMeasuredWidth(ref) {
 
 import { supabase } from './supabaseClient';
 import {
-  Home, Sparkles, Plus, BarChart3, SettingsIcon, TrendingUp, TrendingDown, PiggyBank, HeartPulse,
-  ArrowLeft, Download, X, Check, Loader2, Target, Wallet, Trash2, Pencil, LogOut, Mail, Lock, Search, Bell, Sun, Moon, User,
-  Filter, MoreHorizontal, Eye, EyeOff, LayoutGrid, List, ArrowUpDown, Calendar, Clock, Star,
-  ChevronDown, ChevronRight, ChevronLeft, Camera, KeyRound, UserCog, SlidersHorizontal,
-  AlertTriangle, Info, PieChart, LineChart, BarChart, CircleDollarSign, FileText, SendHorizontal,
-  BadgeCheck, CreditCard, Wifi
+  Home, Sparkles, Plus, BarChart3, SettingsIcon, TrendingUp, TrendingDown, PiggyBank, ArrowLeft, Download, X, Check, Loader2, Target, Wallet, Trash2, Pencil, LogOut, Mail, Lock, Search, Bell, Sun, Moon, Filter, MoreHorizontal, Eye, EyeOff, LayoutGrid, List, ArrowUpDown, Calendar, Clock, Star,
+  ChevronDown, ChevronRight, Camera, KeyRound, AlertTriangle, CircleDollarSign, FileText, BadgeCheck, Wifi
 } from './icons'; // <-- đổi từ 'lucide-react' sang bộ Solar Icons (file wrapper tự viết, xem icons.jsx)
 import ReactCrop, { centerCrop, makeAspectCrop } from 'react-image-crop';
 import 'react-image-crop/dist/ReactCrop.css';
@@ -247,8 +256,6 @@ function ConfirmHost() {
 /* ==============================================================================
    03. CONSTANTS
    ============================================================================== */
-const monthlyLimit = 5000000;
-const monthlySpent = 3420000;
 
 const NAV_ITEMS = [
   { key: 'dashboard', icon: Home, label: 'Trang chủ' },
@@ -341,7 +348,7 @@ function loadImageElement(src) {
   return new Promise((resolve, reject) => {
     const img = new window.Image();
     img.onload = async () => {
-      try { if (typeof img.decode === 'function') await img.decode(); } catch (err) { /* WebView cũ: bỏ qua */ }
+      try { if (typeof img.decode === 'function') await img.decode(); } catch { /* WebView cũ: bỏ qua */ }
       await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
       resolve(img);
     };
@@ -361,7 +368,7 @@ function canvasHasPixels(canvas) {
       }
     }
     return false;
-  } catch (err) {
+  } catch {
     return true; // không đọc được pixel → coi như ổn, không chặn luồng
   }
 }
@@ -485,7 +492,7 @@ function ImageUploader({
     }
     try {
       if (typeof image.decode === 'function') await image.decode();
-    } catch (err) {
+    } catch {
       // Một số WebView cũ không hỗ trợ đầy đủ decode() — bỏ qua, đã có onload/complete
       // ở trên đảm bảo ảnh sẵn sàng, không cần dừng hẳn vì lỗi này.
     }
@@ -527,7 +534,7 @@ function ImageUploader({
         const [r, g, b] = ctx.getImageData(x, y, 1, 1).data;
         return r === 0 && g === 0 && b === 0;
       });
-    } catch (err) {
+    } catch {
       return false; // không đọc được pixel (vd canvas bị taint) — bỏ qua, không chặn luồng lưu ảnh
     }
   }
@@ -674,52 +681,12 @@ function accountCardGradient(type) { return ACCOUNT_TYPE_STYLES[type] || ACCOUNT
 // TÌM KIẾM KHÔNG DẤU + VIẾT TẮT — dùng chung cho mọi ô search trong app (giao dịch,
 // quỹ, mục tiêu...). Ví dụ: gõ "suc khoe", "sk", "khoe" đều khớp "Sức khỏe".
 // ==============================================================================
-function removeDiacritics(str) {
-  return (str || '')
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/đ/g, 'd')
-    .replace(/Đ/g, 'D');
-}
-function normalizeSearchText(str) {
-  return removeDiacritics(str).toLowerCase().trim();
-}
-function textMatchesSearch(text, query) {
-  const q = normalizeSearchText(query);
-  if (!q) return true;
-  const t = normalizeSearchText(text);
-  if (t.includes(q)) return true;
-  // Khớp theo viết tắt chữ cái đầu mỗi từ — ví dụ "Sức khỏe" -> "sk"
-  const initials = t.split(/\s+/).filter(Boolean).map((w) => w[0]).join('');
-  return initials.includes(q);
-}
 
 /* ==============================================================================
    04. UTILITY FUNCTIONS
    ============================================================================== */
-// Làm tròn CHỈ ở bước hiển thị (Math.round) — các phép tính lãi phía trên (tính lãi
-// kép theo ngày) không làm tròn, để không bị hao hụt dần từng ngày; số hiển thị ra
-// màn hình vẫn luôn là số nguyên đồng, gọn gàng như trước.
-function formatMoney(n) {
-  return Math.round(Math.abs(n)).toLocaleString('en-US') + 'đ';
-}
 
-// Giống formatMoney nhưng GIỮ dấu âm — dùng cho các số có thể âm (Dư sau chi...)
-// để không bị lệch với phần trăm âm hiển thị bên cạnh, gây hiểu nhầm số liệu.
-function formatMoneySigned(n) {
-  return (n < 0 ? '-' : '') + Math.round(Math.abs(n)).toLocaleString('en-US') + 'đ';
-}
 
-// Rút gọn số tiền cho nhãn trục tung của biểu đồ (vd: 1.2tr, 500k) — trục tung
-// chỉ cần đọc nhanh độ lớn, không cần chính xác từng đồng như formatMoney.
-function formatMoneyCompact(n) {
-  const abs = Math.abs(n);
-  const trimZero = (s) => s.replace(/\.0$/, '');
-  if (abs >= 1e9) return trimZero((n / 1e9).toFixed(1)) + 'tỷ';
-  if (abs >= 1e6) return trimZero((n / 1e6).toFixed(1)) + 'tr';
-  if (abs >= 1e3) return trimZero((n / 1e3).toFixed(1)) + 'k';
-  return Math.round(n).toLocaleString('en-US');
-}
 
 // ==============================================================================
 // XOÁ GIAO DỊCH TRONG CÁC DÒNG LỊCH SỬ (dùng chung cho mọi màn hình có hiển thị
@@ -729,11 +696,6 @@ function formatMoneyCompact(n) {
 // system_logs, để người dùng có thể khôi phục trong 30 ngày ở Cài đặt > Lịch sử
 // hệ thống — KHÔNG xoá cứng khỏi database.
 // ==============================================================================
-function txDeleteDescription(tx, categories) {
-  const cat = (categories || []).find((c) => c.id === tx.category_id);
-  const label = cat?.name || (tx.type === 'income' ? 'Thu nhập' : tx.type === 'allocation' ? 'Nạp quỹ' : tx.type === 'adjustment' ? 'Cập nhật số dư ví' : 'Chi tiêu');
-  return `Xoá giao dịch "${label}" ${formatMoney(tx.amount)}`;
-}
 
 function TxDeleteButton({ onClick, className = '', size = 14 }) {
   return (
@@ -748,141 +710,27 @@ function TxDeleteButton({ onClick, className = '', size = 14 }) {
   );
 }
 
-// Supabase Storage object key không chấp nhận dấu tiếng Việt, khoảng trắng, ký tự đặc biệt.
-// Chuẩn hoá tên file trước khi upload để tránh lỗi "Invalid key".
-function sanitizeFileName(name) {
-  const dotIndex = name.lastIndexOf('.');
-  const base = dotIndex > -1 ? name.slice(0, dotIndex) : name;
-  const ext = dotIndex > -1 ? name.slice(dotIndex + 1) : '';
-  const cleanBase = base
-    .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // bỏ dấu
-    .replace(/đ/g, 'd').replace(/Đ/g, 'D')
-    .replace(/[^a-zA-Z0-9]+/g, '-') // ký tự khác -> gạch ngang
-    .replace(/^-+|-+$/g, '') // bỏ gạch ngang ở đầu/cuối
-    .toLowerCase() || 'file';
-  const cleanExt = ext.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
-  return cleanExt ? `${cleanBase}.${cleanExt}` : cleanBase;
-}
 
 function fundCardBackground(f, index) {
   if (f.background_url) return `linear-gradient(rgba(0,0,0,0.15),rgba(0,0,0,0.15)), url(${f.background_url})`;
   return FUND_CARD_GRADIENTS[index % FUND_CARD_GRADIENTS.length];
 }
 
-function relativeTime(dateStr) {
-  if (!dateStr) return '';
-  const diffMs = Date.now() - new Date(dateStr).getTime();
-  const hours = Math.floor(diffMs / 3600000);
-  if (hours < 1) return 'Vừa xong';
-  if (hours < 24) return `${hours} giờ trước`;
-  const days = Math.floor(hours / 24);
-  if (days < 30) return `${days} ngày trước`;
-  const months = Math.floor(days / 30);
-  if (months < 12) return `${months} tháng trước`;
-  return `${Math.floor(months / 12)} năm trước`;
-}
 
 
 
 /* ==============================================================================
    05. SHARED COMPONENTS
    ============================================================================== */
-function Gauge({ limit, spent }) {
-  const ticks = 48;
-  const filledTicks = Math.round((spent / limit) * ticks);
-  const radius = 85, center = 100, tickLength = 14;
-  const items = [];
-  for (let i = 0; i < ticks; i++) {
-    const angle = (i / ticks) * 360 - 90;
-    const rad = (angle * Math.PI) / 180;
-    const x1 = center + (radius - tickLength) * Math.cos(rad);
-    const y1 = center + (radius - tickLength) * Math.sin(rad);
-    const x2 = center + radius * Math.cos(rad);
-    const y2 = center + radius * Math.sin(rad);
-    items.push(<line key={i} x1={x1} y1={y1} x2={x2} y2={y2} stroke={i < filledTicks ? '#0DBACC' : '#E3D6FF'} strokeWidth="4" strokeLinecap="round" />);
-  }
-  const labelAngle = (filledTicks / ticks) * 360 - 90;
-  const labelRad = (labelAngle * Math.PI) / 180;
-  const labelX = center + (radius + 24) * Math.cos(labelRad);
-  const labelY = center + (radius + 24) * Math.sin(labelRad);
-  return (
-    <svg viewBox="0 0 200 200" className="w-56 h-56">
-      {items}
-      <foreignObject x={labelX - 34} y={labelY - 14} width="68" height="28"><div className="bg-blueberry text-white text-[11px] font-bold rounded-full px-2 py-1 text-center whitespace-nowrap">{formatMoney(spent)}</div></foreignObject>
-      <text x={center} y={center - 6} textAnchor="middle" fill="#7E7F90" fontSize="11" fontFamily="Nunito">Hạn mức tháng</text>
-      <text x={center} y={center + 18} textAnchor="middle" fill="#303150" fontWeight="700" fontSize="20" fontFamily="Nunito">{formatMoney(limit)}</text>
-    </svg>
-  );
-}
 
 function ProgressBar({ pct, colorClass = 'bg-turquoise', title }) {
   return <div title={title} className={`w-full h-1.5 bg-light-grey/30 dark:bg-light-grey/20 rounded-full overflow-hidden ${title ? 'cursor-help' : ''}`}><div className={`h-full ${colorClass} rounded-full`} style={{ width: `${Math.min(pct, 100)}%` }} /></div>;
 }
 
-function ChangeBadge({ pct, good = true }) {
-  if (pct === null) return null;
-  const isUp = pct >= 0;
-  const isGoodDirection = isUp === good;
-  const Icon = isUp ? TrendingUp : TrendingDown;
-  return (
-    <span className={`inline-flex items-center gap-0.5 text-xs font-semibold ${isGoodDirection ? 'text-turquoise' : 'text-cotton-candy'}`}>
-      <Icon size={12} />{Math.abs(Math.round(pct))}% so với tháng trước
-    </span>
-  );
-}
 
-// FIX: cho phép gõ biểu thức cộng/trừ/nhân/chia (vd "50000+2000") rồi tự tính ra kết quả.
-// Hỗ trợ 2 kiểu: (1) gõ số thường rồi rời khỏi ô/Enter mới tính; (2) gõ kèm dấu "="
-// ở bất kỳ đâu (vd "45000+5000=" hoặc "=45000+5000") sẽ TÍNH NGAY LẬP TỨC, giống máy tính/Excel.
-// FIX: bỏ số 0 thừa ở đầu mỗi cụm số ("012334" -> "12334"). Bắt buộc phải làm trước khi
-// tính biểu thức: ở strict mode, "012334" bị coi là số bát phân kiểu cũ và ném SyntaxError,
-// khiến evalMoneyExpression trả về null -> ô tiền bị xoá trắng thay vì hiện 12,334.
-// Không đụng tới "0.5" (sau số 0 là dấu chấm) và cũng không xoá số 0 đứng một mình.
-function stripLeadingZeros(text) {
-  return (text || '').replace(/(^|[^\d.])0+(\d)/g, '$1$2');
-}
 
-function evalMoneyExpression(str) {
-  const cleaned = stripLeadingZeros((str || '').replace(/[^0-9+\-*/.() ]/g, ''));
-  if (!cleaned.trim()) return 0;
-  try {
-    // eslint-disable-next-line no-new-func
-    const result = Function('"use strict"; return (' + cleaned + ')')();
-    if (typeof result === 'number' && isFinite(result)) return Math.round(result);
-  } catch (e) { /* biểu thức không hợp lệ -> bỏ qua, giữ giá trị cũ */ }
-  return null;
-}
 
-// Thêm dấu phẩy ngăn cách hàng nghìn vào TỪNG phần số trong chuỗi (chuỗi có thể
-// là biểu thức toán như "1000+2000" — MoneyInput cho phép gõ +-*/() để tính nhanh).
-// Phần thập phân sau dấu "." KHÔNG bị chèn dấu phẩy.
-function formatWithThousands(text) {
-  if (!text) return '';
-  return text.split(/([+\-*/()])/).map((part) => {
-    if (/^[+\-*/()]$/.test(part)) return part;
-    return part.replace(/\d+/g, (digits, offset, str) => {
-      // Nếu ngay trước cụm số này là dấu "." thì đây là phần thập phân -> giữ nguyên
-      if (str[offset - 1] === '.') return digits;
-      return digits.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-    });
-  }).join('');
-}
 
-// Đếm số ký tự "thật" (không tính dấu phẩy hiển thị) đứng trước vị trí index trong str.
-function countRealCharsBefore(str, index) {
-  let count = 0;
-  for (let i = 0; i < index && i < str.length; i++) { if (str[i] !== ',') count++; }
-  return count;
-}
-// Tìm vị trí trong str sao cho có đúng "count" ký tự thật đứng trước nó.
-function indexAfterRealCharCount(str, count) {
-  if (count <= 0) return 0;
-  let seen = 0;
-  for (let i = 0; i < str.length; i++) {
-    if (str[i] !== ',') { seen++; if (seen === count) return i + 1; }
-  }
-  return str.length;
-}
 
 function MoneyInput({ value, onChange, placeholder, className }) {
   const [focused, setFocused] = useState(false);
@@ -1275,16 +1123,15 @@ function CategoryBarChart({ series, maxVal, buckets }) {
   // Trục tung: 4 mốc từ 0 đến maxVal (maxVal đã được tính theo tổng cả cột mỗi kỳ).
   const yTicks = [0, 0.33, 0.66, 1].map((f) => maxVal * f);
   const yPct = (v) => Math.min((v / maxVal) * 100, 100); // % chiều cao tính từ đáy lên
-  // FIX: bề rộng mỗi cột trước đây LUÔN CỐ ĐỊNH (56px) nên khi ít kỳ (vd 5 kỳ) trên 1 thẻ
-  // rộng, cột dồn hết về bên trái, để lại 1 khoảng trống lớn bên phải — nhìn như biểu đồ
-  // "trống". Giờ cột GIÃN RA để lấp đầy bề ngang thực tế của khung chứa (đo qua
-  // useMeasuredWidth), miễn không vượt quá bucketMaxWidth (đỡ bị "mập" khi chỉ có 1-2 kỳ).
-  // Khi nhiều kỳ khiến cột phải nhỏ hơn bucketMinWidth thì giữ nguyên mức tối thiểu này và
-  // tự cuộn ngang (overflow-x-auto) — giữ đúng hành vi cũ cho trường hợp nhiều dữ liệu.
+  // FIX: bề rộng mỗi cột trước đây LUÔN CỐ ĐỊNH (56px) nên khi ít kỳ trên 1 thẻ rộng, cột
+  // dồn hết về bên trái, để lại khoảng trống lớn bên phải — nhìn như biểu đồ "trống". Giờ
+  // cột GIÃN RA đúng bằng bề ngang thực tế của khung chứa (đo qua useMeasuredWidth), luôn
+  // lấp đầy 100%. Khi nhiều kỳ khiến cột phải nhỏ hơn bucketMinWidth thì giữ nguyên mức tối
+  // thiểu này và tự cuộn ngang (overflow-x-auto) — giữ đúng hành vi cũ cho trường hợp nhiều
+  // dữ liệu.
   const bucketMinWidth = 56;
-  const bucketMaxWidth = 110;
   const bucketWidth = containerWidth > 0
-    ? Math.min(bucketMaxWidth, Math.max(bucketMinWidth, containerWidth / buckets.length))
+    ? Math.max(bucketMinWidth, containerWidth / buckets.length)
     : bucketMinWidth;
   const plotWidth = Math.max(buckets.length * bucketWidth, 1);
   const xCenter = (bi) => (bi + 0.5) * bucketWidth; // toạ độ px, canh giữa mỗi cột
@@ -1348,7 +1195,7 @@ function CategoryBarChart({ series, maxVal, buckets }) {
                             style={{
                               height: `${h}%`,
                               minHeight: v > 0 ? 3 : 0,
-                              background: palette[i % palette.length],
+                              background: s.isOther ? '#BDBDCB' : palette[i % palette.length],
                               borderTopLeftRadius: isTop ? 6 : 0,
                               borderTopRightRadius: isTop ? 6 : 0,
                               borderBottomLeftRadius: isBottom ? 6 : 0,
@@ -3304,8 +3151,13 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
     if (error) { toast('Lỗi: ' + error.message); return; }
     reload();
   }
-  const [search, setSearch] = useState('');
   const [editingTx, setEditingTx] = useState(null);
+  // FIX: legend "Tổng thu nhập"/"Tổng chi tiêu" (desktop) trước đây cắt cứng .slice(0, 4),
+  // phần danh mục còn lại biến mất không dấu vết (% các dòng hiện ra không cộng đủ 100%,
+  // gây khó hiểu). Giờ mặc định vẫn chỉ hiện 4 dòng đầu nhưng có nút "Xem tất cả X danh
+  // mục" để mở rộng — cùng cách làm với SpendingDonut ở mobile.
+  const [showAllIncomeYearLegend, setShowAllIncomeYearLegend] = useState(false);
+  const [showAllExpenseYearLegend, setShowAllExpenseYearLegend] = useState(false);
   const [showAddWidget, setShowAddWidget] = useState(false);
   useEscapeKey(() => setShowAddWidget(false), showAddWidget);
   const [showWalletPopover, setShowWalletPopover] = useState(false);
@@ -3319,6 +3171,7 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
   const [walletActiveIndex, setWalletActiveIndex] = useState(0);
   const walletTouchStartX = useRef(null);
   const walletWheelLocked = useRef(false);
+  const walletStackRef = useRef(null);
   function goToWalletIndex(idx) {
     setWalletActiveIndex((cur) => {
       const clamped = Math.max(0, Math.min(accounts.length - 1, idx));
@@ -3354,6 +3207,16 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
     walletStep(dir);
     setTimeout(() => { walletWheelLocked.current = false; }, 380);
   }
+  // FIX: "Unable to preventDefault inside passive event listener invocation." — từ React 17,
+  // React tự gắn onWheel ở chế độ passive nên preventDefault() trong handler JSX (onWheel={...})
+  // bị trình duyệt bỏ qua. Gắn listener THỦ CÔNG với { passive: false } thì preventDefault()
+  // mới có tác dụng thật, đúng mục đích chặn trang cuộn theo khi đang lướt đổi thẻ ví.
+  useEffect(() => {
+    const el = walletStackRef.current;
+    if (!el) return;
+    el.addEventListener('wheel', handleWalletWheel, { passive: false });
+    return () => el.removeEventListener('wheel', handleWalletWheel);
+  });
   function walletStackStyle(depth) {
     if (depth < 0) return { transform: 'translateY(14px) scale(0.92)', opacity: 0, zIndex: 0, pointerEvents: 'none' };
     if (depth === 0) return { transform: 'translateY(0px) scale(1)', opacity: 1, zIndex: 30 };
@@ -3439,21 +3302,10 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
   const fundCategories = categories.filter((c) => c.is_fund);
   const expenseCats = categories.filter((c) => c.type === 'expense');
   const incomeCats = categories.filter((c) => c.type === 'income');
-  const spentByCat = expenseCats.map((c) => ({ ...c, amount: transactions.filter((t) => t.category_id === c.id && t.type === 'expense').reduce((s, t) => s + Number(t.amount), 0) })).filter((c) => c.amount > 0);
-  const total = spentByCat.reduce((s, c) => s + c.amount, 0) || 1;
-  // palette/radius/circumference giờ dùng chung ở module scope (xem ghi chú cạnh
-  // SpendingDonut/CategoryBarChart/TrendBarChart/SegmentDonut ở đầu file) — KHÔNG khai
-  // báo lại ở đây nữa, để tránh các chart đó bị unmount/remount (gây trống trên WebView)
-  // mỗi lần Dashboard re-render.
-  const weekDayLabels = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'];
 
   // Buckets + chuỗi số liệu cho từng card — tất cả dùng CHUNG globalFilter (bộ lọc thời
   // gian duy nhất của Dashboard), không còn bộ lọc riêng cho từng card nữa.
-  const mobileBuckets = computePeriodBuckets(globalFilter);
-  const mobileIncomeSeries = buildCategorySeriesFor(transactions, incomeCats, 'income', mobileBuckets, globalFilter.period, globalFilter.periodKey, globalFilter.year);
-  const mobileExpenseSeries = buildCategorySeriesFor(transactions, expenseCats, 'expense', mobileBuckets, globalFilter.period, globalFilter.periodKey, globalFilter.year);
-  const mobileMaxIncome = Math.max(...mobileIncomeSeries.flatMap((c) => c.values), 1);
-  const mobileMaxExpense = Math.max(...mobileExpenseSeries.flatMap((c) => c.values), 1);
+  const mobileBuckets = trimFutureBuckets(computePeriodBuckets(globalFilter));
 
   // Dữ liệu cho 2 card mới trên Trang chủ (mobile): "Chi tiêu theo danh mục" (donut)
   // và "Thu và Chi" (cột) — TÁCH RIÊNG thành 2 card thay vì gộp chung 1 card, và cùng
@@ -3538,13 +3390,12 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
     // Trục tung: 5 mốc từ 0 đến maxVal (maxVal = tổng thu nhập cao nhất, xem costMaxVal).
     const yTicks = [0, 0.25, 0.5, 0.75, 1].map((f) => maxVal * f);
     const yPct = (v) => Math.min((v / maxVal) * 100, 100); // % chiều cao tính từ đáy lên
-    // FIX: cùng vấn đề "trống bên phải" như CategoryBarChart — cột giờ giãn ra lấp đầy bề
-    // ngang thực tế của khung chứa (đo qua useMeasuredWidth), tối đa bucketMaxWidth để
-    // không bị "mập" khi ít kỳ; nhiều kỳ vẫn giữ mức tối thiểu + tự cuộn ngang như cũ.
+    // FIX: cùng vấn đề "trống bên phải" như CategoryBarChart — cột giờ giãn ra đúng bằng bề
+    // ngang thực tế của khung chứa (đo qua useMeasuredWidth), luôn lấp đầy 100%; nhiều kỳ
+    // vẫn giữ mức tối thiểu + tự cuộn ngang như cũ.
     const bucketMinWidth = 56;
-    const bucketMaxWidth = 110;
     const bucketWidth = containerWidth > 0
-      ? Math.min(bucketMaxWidth, Math.max(bucketMinWidth, containerWidth / buckets.length))
+      ? Math.max(bucketMinWidth, containerWidth / buckets.length)
       : bucketMinWidth;
     const plotWidth = Math.max(buckets.length * bucketWidth, 1);
     const xCenter = (bi) => (bi + 0.5) * bucketWidth; // toạ độ px, canh giữa mỗi cột
@@ -3587,7 +3438,18 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
                 <div className="absolute inset-0 flex items-end">
                   {buckets.map((b, bi) => {
                     const bucketTotal = bucketTotals[bi];
-                    const visible = series.map((c, i) => ({ c, i, v: c.values[bi] })).filter((s) => s.v > 0);
+                    const visibleAll = series.map((c, i) => ({ c, i, v: c.values[bi] })).filter((s) => s.v > 0);
+                    // FIX: cùng vấn đề "sọc dày ở đỉnh cột" như CategoryBarChart — nhiều danh
+                    // mục nhỏ đều bị ép minHeight 3px cộng dồn. Gộp phần đuôi (sau
+                    // CATEGORY_SEG_LIMIT danh mục lớn nhất, series đã sort giảm dần) thành 1
+                    // đoạn "Khác" duy nhất.
+                    const CATEGORY_SEG_LIMIT = 6;
+                    let visible = visibleAll;
+                    if (visibleAll.length > CATEGORY_SEG_LIMIT) {
+                      const kept = visibleAll.slice(0, CATEGORY_SEG_LIMIT - 1);
+                      const otherV = visibleAll.slice(CATEGORY_SEG_LIMIT - 1).reduce((s, x) => s + x.v, 0);
+                      visible = [...kept, { c: { id: `__other_${bi}`, name: `Khác (${visibleAll.length - (CATEGORY_SEG_LIMIT - 1)} danh mục)` }, i: -1, v: otherV, isOther: true }];
+                    }
                     return (
                       <div key={bi} className="h-full flex flex-col-reverse items-stretch px-2.5 box-border flex-shrink-0 gap-[2px]" style={{ width: bucketWidth }}>
                         {visible.map((s, vi) => {
@@ -3606,7 +3468,7 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
                               style={{
                                 height: `${h}%`,
                                 minHeight: v > 0 ? 3 : 0,
-                                background: palette[i % palette.length],
+                                background: s.isOther ? '#BDBDCB' : palette[i % palette.length],
                                 borderTopLeftRadius: isTop ? 6 : 0,
                                 borderTopRightRadius: isTop ? 6 : 0,
                                 borderBottomLeftRadius: isBottom ? 6 : 0,
@@ -3701,22 +3563,11 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
   const now = new Date();
   const curPeriodKey = currentPeriodKey(now);
   const { start: curPeriodStart, end: curPeriodEnd } = periodKeyToRange(curPeriodKey);
-  const thisMonthTx = transactions.filter((t) => transactionPeriodKey(t) === curPeriodKey);
-  const incomeThisMonth = thisMonthTx.filter((t) => t.type === 'income').reduce((s, t) => s + Number(t.amount), 0);
-  const expenseThisMonth = thisMonthTx.filter((t) => t.type === 'expense').reduce((s, t) => s + Number(t.amount), 0);
 
   // Thẻ "Thu nhập được chi kỳ này" đã được gỡ khỏi Dashboard theo yêu cầu — việc cài đặt
   // Thu nhập được chi cho từng kỳ nay chuyển sang mục Cài đặt > Danh mục (xem CategorySection).
 
   const prevPeriodDate = new Date(curPeriodStart); prevPeriodDate.setDate(prevPeriodDate.getDate() - 1);
-  const prevPeriodKey = currentPeriodKey(prevPeriodDate);
-  const prevMonthTx = transactions.filter((t) => transactionPeriodKey(t) === prevPeriodKey);
-  const incomePrevMonth = prevMonthTx.filter((t) => t.type === 'income').reduce((s, t) => s + Number(t.amount), 0);
-  const expensePrevMonth = prevMonthTx.filter((t) => t.type === 'expense').reduce((s, t) => s + Number(t.amount), 0);
-  function pctChange(current, prev) { return prev > 0 ? ((current - prev) / prev) * 100 : null; }
-  const incomeChange = pctChange(incomeThisMonth, incomePrevMonth);
-  const expenseChange = pctChange(expenseThisMonth, expensePrevMonth);
-  const savedChange = pctChange(incomeThisMonth - expenseThisMonth, incomePrevMonth - expensePrevMonth);
 
   const monthLabels = [];
   const monthTotals = [];
@@ -3726,24 +3577,11 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
     monthLabels.push(`Th${d.getMonth() + 1}`);
     monthTotals.push(sum);
   }
-  const maxMonthTotal = Math.max(...monthTotals, 1);
-  const monthShades = ['#E3D6FF', '#C1DDFF', '#B4F1F1', '#74ACEF', '#0DBACC', '#9F7FE0'];
 
   // FIX: trước đây Math.round((end - start) / 86400000) + 1 ra 31 cho kỳ 30 ngày (end là 23:59:59 nên phần lẻ đã
   // tròn lên đủ 1 ngày, +1 nữa là thừa) -> chart "Biến động tài sản" có thêm cột thứ 31 ("21 → 21").
   const daysInMonth = inclusiveDays(curPeriodStart, curPeriodEnd);
-  const periodDayOffset = (t) => {
-    const d = new Date(t.date || t.created_at);
-    return Math.min(daysInMonth - 1, Math.max(0, Math.round((d - curPeriodStart) / 86400000)));
-  };
-  const dailySpend = Array.from({ length: daysInMonth }, (_, i) => thisMonthTx.filter((t) => t.type === 'expense' && periodDayOffset(t) === i).reduce((s, t) => s + Number(t.amount), 0));
-  const dailyIncome = Array.from({ length: daysInMonth }, (_, i) => thisMonthTx.filter((t) => t.type === 'income' && periodDayOffset(t) === i).reduce((s, t) => s + Number(t.amount), 0));
-  const maxDaily = Math.max(...dailySpend, ...dailyIncome, 1);
 
-  const todayOffset = Math.min(daysInMonth - 1, Math.max(0, Math.round((now - curPeriodStart) / 86400000)));
-  const last7Start = Math.max(0, todayOffset - 6);
-  const last7 = Array.from({ length: todayOffset - last7Start + 1 }, (_, i) => last7Start + i);
-  const last7Date = (offset) => { const d = new Date(curPeriodStart); d.setDate(d.getDate() + offset); return d; };
 
   // Buckets cho chart "Biến động tài sản" ở Tổng quan tài sản — đi theo globalPeriod
   // (Tuần/Tháng/Năm) của widget lọc chung. Mỗi cột là SỐ DƯ LUỸ KẾ của Tiền ví và Tiền
@@ -3787,11 +3625,9 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
   const trendBucketsTrimmed = trimFutureBuckets(trendBuckets);
   // maxTrend tính theo total (luôn là giá trị lớn nhất mỗi cột) để đủ chỗ cho cột "Tổng" mới
   const maxTrend = Math.max(...trendBucketsTrimmed.map((b) => b.total), 1);
-  const fmtDMY = (iso) => { const [y, m, d] = String(iso).split('-'); return `${d}/${m}`; };
+  const fmtDMY = (iso) => { const [, m, d] = String(iso).split('-'); return `${d}/${m}`; };
   const trendTitle = globalPeriod === 'year' ? `Biến động tài sản theo kỳ (Năm ${globalYear})` : globalPeriod === 'month' ? 'Biến động tài sản theo ngày (kỳ hiện tại)' : `Biến động tài sản theo ngày (${fmtDMY(globalWeekStart)} - ${fmtDMY(globalWeekEnd)})`;
 
-  const totalMonthlyLimit = categories.filter((c) => c.type === 'expense' && c.monthly_limit).reduce((s, c) => s + Number(c.monthly_limit), 0);
-  const limitPct = totalMonthlyLimit > 0 ? (expenseThisMonth / totalMonthlyLimit) * 100 : 0;
 
   // Thay cho catTotalsForYear (có bộ lọc Tháng/Năm RIÊNG) trước đây — giờ đọc thẳng
   // globalFilter (bộ lọc thời gian DUY NHẤT của Dashboard), hỗ trợ cả 3 chế độ Tuần/
@@ -3843,7 +3679,6 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
   const totalExpenseYear = expenseByCatYear.reduce((s, c) => s + c.amount, 0) || 1;
   const expenseYearSegments = pieSegments(expenseByCatYear, totalExpenseYear);
 
-  const savingsRate = incomeThisMonth > 0 ? Math.max(0, Math.min(100, ((incomeThisMonth - expenseThisMonth) / incomeThisMonth) * 100)) : 0;
 
   function groupTransactionsByDate(txs) {
     const groups = {};
@@ -3865,11 +3700,6 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
     return date.toLocaleDateString('vi-VN', { weekday: 'long', day: 'numeric', month: 'short' });
   }
 
-  const filteredTx = transactions.filter((t) => {
-    if (!search) return true;
-    const cat = categories.find((c) => c.id === t.category_id);
-    return textMatchesSearch(cat?.name, search) || textMatchesSearch(t.note, search);
-  });
 
   // "Hoạt động gần đây" giờ ăn theo globalFilter (bộ lọc chung của Dashboard) — không
   // còn dropdown Tuần/Tháng/Năm riêng của card này nữa.
@@ -4256,11 +4086,11 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
                 </button>
               ) : (
                 <div
+                  ref={walletStackRef}
                   className="relative isolate w-full overflow-hidden"
                   style={{ height: 172 }}
                   onTouchStart={handleWalletTouchStart}
                   onTouchEnd={handleWalletTouchEnd}
-                  onWheel={handleWalletWheel}
                 >
                   {accounts.map((acc, idx) => {
                     const depth = idx - walletActiveIndex;
@@ -4394,7 +4224,7 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
                 <div className="flex flex-col items-center gap-4">
                   <SegmentDonut segments={incomeYearSegments} centerLabel="Tổng" centerValue={formatMoney(totalIncomeYear)} />
                   <div className="flex flex-col gap-2 text-sm w-full max-w-xs mx-auto">
-                    {incomeYearSegments.slice(0, 4).map((c, i) => (
+                    {(showAllIncomeYearLegend ? incomeYearSegments : incomeYearSegments.slice(0, 4)).map((c, i) => (
                       <div key={c.id} className="flex items-center gap-2">
                         <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: palette[i % palette.length] }} />
                         <span className="text-blueberry dark:text-white truncate font-semibold">{c.name}</span>
@@ -4402,6 +4232,11 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
                         <span className="text-steel dark:text-light-grey text-xs w-9 text-right flex-shrink-0">{Math.round(c.pct * 100)}%</span>
                       </div>
                     ))}
+                    {incomeYearSegments.length > 4 && (
+                      <button onClick={() => setShowAllIncomeYearLegend((v) => !v)} className="text-turquoise text-xs font-bold text-left mt-1 hover:underline">
+                        {showAllIncomeYearLegend ? 'Thu gọn' : `Xem tất cả ${incomeYearSegments.length} danh mục`}
+                      </button>
+                    )}
                   </div>
                 </div>
               )}
@@ -4415,7 +4250,7 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
                 <div className="flex flex-col items-center gap-4">
                   <SegmentDonut segments={expenseYearSegments} centerLabel="Tổng" centerValue={formatMoney(totalExpenseYear)} />
                   <div className="flex flex-col gap-2 text-sm w-full max-w-xs mx-auto">
-                    {expenseYearSegments.slice(0, 4).map((c, i) => (
+                    {(showAllExpenseYearLegend ? expenseYearSegments : expenseYearSegments.slice(0, 4)).map((c, i) => (
                       <div key={c.id} className="flex items-center gap-2">
                         <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: palette[i % palette.length] }} />
                         <span className="text-blueberry dark:text-white truncate font-semibold">{c.name}</span>
@@ -4423,6 +4258,11 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
                         <span className="text-steel dark:text-light-grey text-xs w-9 text-right flex-shrink-0">{Math.round(c.pct * 100)}%</span>
                       </div>
                     ))}
+                    {expenseYearSegments.length > 4 && (
+                      <button onClick={() => setShowAllExpenseYearLegend((v) => !v)} className="text-turquoise text-xs font-bold text-left mt-1 hover:underline">
+                        {showAllExpenseYearLegend ? 'Thu gọn' : `Xem tất cả ${expenseYearSegments.length} danh mục`}
+                      </button>
+                    )}
                   </div>
                 </div>
               )}
@@ -4438,12 +4278,26 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
             )}
           </div>
 
-          <div style={{ gridArea: 'goal' }} className="frost-card rounded-3xl p-6">
+          <div style={{ gridArea: 'goal' }} className="frost-card rounded-3xl p-6 flex flex-col">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-blueberry dark:text-white font-extrabold">Mục tiêu</h3>
               <button onClick={() => setScreen('goals')} className="text-turquoise text-xs font-bold">Xem tất cả</button>
             </div>
-            {(!goals || goals.length === 0) ? <p className="text-steel dark:text-light-grey text-sm text-center py-4">Chưa có mục tiêu nào.</p> : (
+            {/* FIX: trước đây rỗng chỉ có 1 dòng chữ "Chưa có mục tiêu nào." căn giữa theo
+                py-4, còn thẻ này lại cao bằng thẻ "Phân tích chi phí" bên cạnh (chart khá cao)
+                nên phần lớn thẻ là khoảng trống vô nghĩa. Giờ khối rỗng chiếm trọn phần còn
+                lại của thẻ (flex-1) và có icon + lời mời tạo mục tiêu, biến chỗ trống thành
+                1 lời gọi hành động thay vì chỉ là khoảng trắng. */}
+            {(!goals || goals.length === 0) ? (
+              <button
+                onClick={() => setScreen('goals')}
+                className="flex-1 flex flex-col items-center justify-center gap-2 text-center rounded-2xl border border-dashed border-steel/25 dark:border-light-grey/20 hover:border-turquoise/50 hover:bg-turquoise/5 transition-colors py-6"
+              >
+                <Target size={22} className="text-steel dark:text-light-grey" />
+                <p className="text-steel dark:text-light-grey text-sm">Chưa có mục tiêu nào.</p>
+                <span className="text-turquoise text-xs font-bold">+ Tạo mục tiêu đầu tiên</span>
+              </button>
+            ) : (
               <div className="flex flex-col gap-4">
                 {goals.slice(0, 3).map((g) => {
                   const pct = g.target_amount ? Math.min(100, (g.current_amount / g.target_amount) * 100) : 0;
@@ -8018,18 +7872,48 @@ function ReportHtmlPreview({ data }) {
   );
 }
 
+// Nhớ lựa chọn mục báo cáo của lần xuất gần nhất (trên chính máy này) để lần sau khỏi tick lại.
+const REPORT_SECTIONS_STORAGE_KEY = 'pandafi-report-sections';
+function loadSavedSections() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(REPORT_SECTIONS_STORAGE_KEY) || '{}');
+    return Object.fromEntries(REPORT_SECTIONS.map((s) => [s.key, s.key in saved ? !!saved[s.key] : true]));
+  } catch {
+    return Object.fromEntries(REPORT_SECTIONS.map((s) => [s.key, true]));
+  }
+}
+
 function ReportExportModal({ onClose, transactions, categories, accounts, spendingPoolByPeriod }) {
   useEscapeKey(onClose); // Esc / nút Back Android đóng modal
   const [step, setStep] = useState('config'); // 'config' | 'preview'
   const [startDate, setStartDate] = useState(firstDayOfThisMonthStr());
   const [endDate, setEndDate] = useState(todayDateStr());
-  const [selectedSections, setSelectedSections] = useState(() => Object.fromEntries(REPORT_SECTIONS.map((s) => [s.key, true])));
+  const [selectedSections, setSelectedSections] = useState(loadSavedSections);
   const [reportData, setReportData] = useState(null);
   const [downloading, setDownloading] = useState(false);
   const [error, setError] = useState('');
 
-  function toggleSection(key) { setSelectedSections((s) => ({ ...s, [key]: !s[key] })); }
+  function toggleSection(key) {
+    setSelectedSections((s) => {
+      const next = { ...s, [key]: !s[key] };
+      try { localStorage.setItem(REPORT_SECTIONS_STORAGE_KEY, JSON.stringify(next)); } catch {}
+      return next;
+    });
+  }
   const anySelected = REPORT_SECTIONS.some((s) => selectedSections[s.key]);
+
+  // Cảnh báo nhẹ nếu ngày bắt đầu được chọn nằm trước giao dịch đầu tiên trong app — khi đó
+  // "tài sản đầu kỳ" trong báo cáo sẽ tính từ 0/số dư khởi tạo, dễ gây hiểu lầm là thiếu dữ liệu.
+  const earliestTxDate = useMemo(() => {
+    let min = null;
+    (transactions || []).forEach((t) => {
+      if (t.deleted_at) return;
+      const d = (t.date || localDateStr(t.created_at));
+      if (!min || d < min) min = d;
+    });
+    return min;
+  }, [transactions]);
+  const startsBeforeData = earliestTxDate && startDate < earliestTxDate;
 
   // Chọn nhanh khoảng thời gian. Kỳ tài chính của app chạy từ ngày 21 tháng trước đến ngày 20;
   // ngày cuối không được vượt quá hôm nay (kỳ chưa kết thúc thì báo cáo tính đến hôm nay).
@@ -8111,6 +7995,11 @@ function ReportExportModal({ onClose, transactions, categories, accounts, spendi
               <span className="text-steel dark:text-light-grey text-sm">-</span>
               <DateField value={endDate} onChange={setEndDate} max={todayDateStr()} align="right" showIcon={false} clearable={false} className="flex-1 justify-between bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm text-blueberry dark:text-white" />
             </div>
+            {startsBeforeData && (
+              <p className="text-amber-500 text-xs font-semibold -mt-3 mb-5">
+                ⚠️ Ngày bắt đầu nằm trước giao dịch đầu tiên của bạn ({reportDmy(earliestTxDate)}) — "Tổng tài sản đầu kỳ" sẽ tính từ số dư khởi tạo, không có gì để so sánh.
+              </p>
+            )}
             <p className="text-blueberry dark:text-white font-bold text-sm mb-2">Mục muốn đưa vào báo cáo</p>
             <div className="flex flex-col gap-2 mb-2">
               {REPORT_SECTIONS.map((s) => (
@@ -8125,9 +8014,22 @@ function ReportExportModal({ onClose, transactions, categories, accounts, spendi
           </div>
         ) : (
           <div className="flex-1 min-h-0 overflow-y-auto scrollbar-hide p-5 md:p-8 bg-[#fafafa] dark:bg-[#17172a]">
-            {reportData && <ReportHtmlPreview data={reportData} />}
+            {/* id này được style @media print bên dưới dùng để chỉ in đúng vùng báo cáo,
+                ẩn hết phần khung modal/nút bấm khi người dùng bấm "In". */}
+            <div id="pandafi-report-print-area">
+              {reportData && <ReportHtmlPreview data={reportData} />}
+            </div>
           </div>
         )}
+
+        {/* Chỉ áp dụng khi đang in (Ctrl+P / nút In) — không ảnh hưởng gì lúc xem bình thường. */}
+        <style>{`
+          @media print {
+            body * { visibility: hidden; }
+            #pandafi-report-print-area, #pandafi-report-print-area * { visibility: visible; }
+            #pandafi-report-print-area { position: absolute; left: 0; top: 0; width: 100%; }
+          }
+        `}</style>
 
         <div className="flex items-center justify-between gap-3 px-6 py-4 border-t border-light-grey/30 flex-shrink-0">
           {error && <p className="text-cotton-candy text-xs font-semibold flex-1">{error}</p>}
@@ -8140,9 +8042,14 @@ function ReportExportModal({ onClose, transactions, categories, accounts, spendi
                 Xem trước
               </button>
             ) : (
-              <button onClick={downloadPdf} disabled={downloading} className="flex items-center gap-2 px-5 py-2.5 rounded-full text-sm font-bold text-white bg-gradient-primary disabled:opacity-50 shadow-md shadow-turquoise/30">
-                {downloading ? <Loader2 size={15} className="animate-spin" /> : <Download size={15} />} Tải PDF
-              </button>
+              <>
+                <button onClick={() => window.print()} className="hidden md:block px-5 py-2.5 rounded-full text-sm font-bold text-steel dark:text-light-grey bg-ice-cream dark:bg-[#2a2a44]">
+                  In
+                </button>
+                <button onClick={downloadPdf} disabled={downloading} className="flex items-center gap-2 px-5 py-2.5 rounded-full text-sm font-bold text-white bg-gradient-primary disabled:opacity-50 shadow-md shadow-turquoise/30">
+                  {downloading ? <Loader2 size={15} className="animate-spin" /> : <Download size={15} />} Tải PDF
+                </button>
+              </>
             )}
           </div>
         </div>
@@ -8580,7 +8487,6 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
   // Hover-card breakdown data (dùng đúng periodTxs / mốc "end" của filter thời gian đang chọn)
   const incomeDetailItems = incomeBreakdown.map(c => ({ key: c.id, name: c.name, amount: c.amount }));
   const poolIncomeDetailItems = incomeBreakdown.filter(c => c.include_in_spending_pool !== false).map(c => ({ key: c.id, name: c.name, amount: c.amount }));
-  const specialIncomeDetailItems = incomeBreakdown.filter(c => c.include_in_spending_pool === false).map(c => ({ key: c.id, name: c.name, amount: c.amount }));
   // Các mục cấu thành "Còn lại" của kỳ — luôn liệt kê đủ cả 3 mục (Thu nhập được chi,
   // Nạp quỹ, Chi tiêu) dù mục đó có phát sinh biến động (giao dịch) trong kỳ hay không.
   const expenseFundWithdrawn = fundCats.map(c => ({
@@ -8724,11 +8630,6 @@ function Report({ setScreen, transactions, categories, accounts, goals, onAddCli
     if (t.type !== 'income') return false;
     const c = categories.find((c2) => c2.id === t.category_id);
     return c ? c.include_in_spending_pool !== false : true;
-  });
-  const specialIncomeLedgerTxs = periodTxs.filter((t) => {
-    if (t.type !== 'income') return false;
-    const c = categories.find((c2) => c2.id === t.category_id);
-    return c ? c.include_in_spending_pool === false : false;
   });
   const expenseLedgerTxs = periodTxs.filter((t) => t.type === 'expense');
 

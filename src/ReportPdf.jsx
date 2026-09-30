@@ -1,7 +1,7 @@
 // Tài liệu PDF báo cáo — dùng @react-pdf/renderer. File này được App.jsx import ĐỘNG
 // (await import('./ReportPdf')) nên thư viện chỉ tải khi người dùng bấm xem trước/xuất.
 // Dữ liệu (đã định dạng sẵn thành chuỗi) do buildReportData() trong App.jsx cung cấp.
-import { Document, Page, View, Text, Font, StyleSheet, Svg, Circle, pdf } from '@react-pdf/renderer';
+import { Document, Page, View, Text, Font, StyleSheet, Svg, Circle, Path, pdf } from '@react-pdf/renderer';
 
 const BASE = import.meta.env.BASE_URL || '/';
 // Font phải hỗ trợ tiếng Việt (Helvetica mặc định không có dấu). File nằm ở public/fonts/.
@@ -68,6 +68,18 @@ const s = StyleSheet.create({
   legendDot: { width: 8, height: 8, borderRadius: 4, marginRight: 6 },
   dayHead: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 3, paddingHorizontal: 6, marginTop: 7, marginBottom: 2, borderRadius: 3 },
   footer: { position: 'absolute', bottom: 22, left: 40, right: 40, flexDirection: 'row', justifyContent: 'space-between', fontSize: 8, color: C.steel },
+  // Trang bìa
+  coverPage: { fontFamily: 'Nunito', color: C.ink, paddingHorizontal: 44, paddingTop: 70, paddingBottom: 44 },
+  coverBar: { height: 5, width: 56, backgroundColor: C.turquoise, borderRadius: 3, marginBottom: 22 },
+  coverBrand: { fontSize: 12, fontWeight: 700, color: C.steel, letterSpacing: 1.5, textTransform: 'uppercase', marginBottom: 10 },
+  coverTitle: { fontSize: 30, fontWeight: 700, lineHeight: 1.25 },
+  coverPeriod: { fontSize: 13, color: C.steel, marginTop: 10 },
+  coverHero: { marginTop: 56, borderWidth: 1, borderColor: C.line, borderLeftWidth: 4, borderLeftColor: C.turquoise, borderRadius: 10, padding: 18, backgroundColor: tint(C.turquoise, 0.05) },
+  coverHeroLabel: { fontSize: 10, color: C.steel },
+  coverHeroValue: { fontSize: 26, fontWeight: 700, marginTop: 6 },
+  coverHeroSub: { fontSize: 9, marginTop: 6, fontWeight: 700 },
+  coverStatsRow: { flexDirection: 'row', gap: 10, marginTop: 12 },
+  coverFooter: { position: 'absolute', bottom: 44, left: 44, right: 44, fontSize: 8, color: C.steel, flexDirection: 'row', justifyContent: 'space-between' },
 });
 
 // Emoji không hiển thị được nếu chưa đăng ký nguồn emoji → bỏ khỏi PDF, chỉ giữ tên.
@@ -154,33 +166,47 @@ function BarList({ rows, labelKey = 'name' }) {
   );
 }
 
-// Biểu đồ tròn (donut) cơ cấu tài sản — vẽ bằng SVG thuần (nhiều <Circle> chồng lên nhau,
-// mỗi cung 1 đoạn strokeDasharray), không cần thư viện chart ngoài.
+// Biểu đồ tròn (donut) cơ cấu tài sản — vẽ bằng SVG thuần.
+// Lưu ý: KHÔNG dùng kỹ thuật nhiều <Circle> chồng nhau + strokeDasharray/strokeDashoffset +
+// transform rotate — cách đó hiển thị đúng trên PDF.js (trình xem PDF nhúng trong Chrome/app)
+// nhưng vỡ màu (chỉ còn 1 màu) khi mở bằng trình đọc PDF khác sau khi tải file về, vì đây
+// không phải cách PDF chuẩn hỗ trợ tốt ở mọi renderer. Thay vào đó vẽ từng cung là 1 <Path>
+// với lệnh arc (A) — tương thích rộng, không phụ thuộc dash pattern hay transform.
+function polarPoint(cx, cy, r, angleDeg) {
+  const rad = ((angleDeg - 90) * Math.PI) / 180;
+  return { x: cx + r * Math.cos(rad), y: cy + r * Math.sin(rad) };
+}
 function DonutChart({ items, size = 84, thickness = 13 }) {
   const r = (size - thickness) / 2;
   const cx = size / 2, cy = size / 2;
-  const circumference = 2 * Math.PI * r;
+  const total = items.reduce((s, it) => s + it.pctNum, 0);
+  // Chỉ 1 mục chiếm gần như toàn bộ (hoặc chỉ có 1 mục) -> vẽ 1 vòng tròn kín, tránh cung suy biến.
+  if (items.length === 1 || total <= 0) {
+    const color = items[0]?.color || C.soft;
+    return (
+      <Svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+        <Circle cx={cx} cy={cy} r={r} stroke={color} strokeWidth={thickness} fill="none" />
+      </Svg>
+    );
+  }
   let acc = 0;
+  const GAP = 1.2; // độ — khoảng hở nhỏ giữa các cung cho dễ phân biệt
+  const arcs = items.map((it, i) => {
+    const sweep = (it.pctNum / 100) * 360;
+    const startAngle = acc + (sweep < 360 ? GAP / 2 : 0);
+    const endAngle = acc + sweep - (sweep < 360 ? GAP / 2 : 0);
+    acc += sweep;
+    const p1 = polarPoint(cx, cy, r, startAngle);
+    const p2 = polarPoint(cx, cy, r, endAngle);
+    const largeArc = endAngle - startAngle > 180 ? 1 : 0;
+    return { key: i, color: it.color, d: `M ${p1.x} ${p1.y} A ${r} ${r} 0 ${largeArc} 1 ${p2.x} ${p2.y}` };
+  });
   return (
     <Svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
       <Circle cx={cx} cy={cy} r={r} stroke={C.soft} strokeWidth={thickness} fill="none" />
-      {items.map((it, i) => {
-        const len = (it.pctNum / 100) * circumference;
-        const node = (
-          <Circle
-            key={i}
-            cx={cx} cy={cy} r={r}
-            stroke={it.color}
-            strokeWidth={thickness}
-            fill="none"
-            strokeDasharray={`${len} ${circumference - len}`}
-            strokeDashoffset={-acc}
-            transform={`rotate(-90 ${cx} ${cy})`}
-          />
-        );
-        acc += len;
-        return node;
-      })}
+      {arcs.map((a) => (
+        <Path key={a.key} d={a.d} stroke={a.color} strokeWidth={thickness} fill="none" strokeLinecap="butt" />
+      ))}
     </Svg>
   );
 }
@@ -416,10 +442,46 @@ function TransactionsSection({ days, count }) {
   );
 }
 
+// Trang bìa — hiện khi có mục "Tổng quan": tên báo cáo, kỳ, và tổng tài sản cuối kỳ nổi bật
+// để người nhận (vợ/chồng, người thân...) nắm ngay con số quan trọng nhất trước khi đọc chi tiết.
+function CoverPage({ data }) {
+  const o = data.overview;
+  return (
+    <Page size="A4" style={s.coverPage}>
+      <View style={s.coverBar} />
+      <Text style={s.coverBrand}>PandaFi</Text>
+      <Text style={s.coverTitle}>Báo cáo tài chính</Text>
+      <Text style={s.coverPeriod}>Kỳ từ {data.startDate} đến {data.endDate}</Text>
+
+      {o && (
+        <View style={s.coverHero}>
+          <Text style={s.coverHeroLabel}>Tổng tài sản cuối kỳ</Text>
+          <Text style={s.coverHeroValue}>{o.assetsEnd}</Text>
+          {o.assetsChangePct && (
+            <Text style={[s.coverHeroSub, { color: o.assetsPositive ? C.turquoise : C.pink }]}>
+              {o.assetsChange} ({o.assetsChangePct}) so với đầu kỳ
+            </Text>
+          )}
+          <View style={s.coverStatsRow}>
+            <Card label="Thu nhập trong kỳ" value={o.income} color={C.turquoise} />
+            <Card label="Chi tiêu trong kỳ" value={o.expense} color={C.pink} />
+          </View>
+        </View>
+      )}
+
+      <View style={s.coverFooter} fixed>
+        <Text>Xuất lúc {data.generatedAt}</Text>
+        <Text>PandaFi — Báo cáo tài chính cá nhân</Text>
+      </View>
+    </Page>
+  );
+}
+
 function ReportDocument({ data }) {
   const sec = data.sections;
   return (
     <Document title="Báo cáo tài chính PandaFi" author="PandaFi">
+      <CoverPage data={data} />
       <Page size="A4" style={s.page}>
         <View style={s.header}>
           <View>

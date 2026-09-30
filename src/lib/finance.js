@@ -27,7 +27,7 @@ export function nowForInput() {
 }
 
 // Quy tắc "kỳ nhận lợi nhuận đầu tiên" của Túi Thần Tài:
-// - Nạp tiền Thứ 2 -> Thứ 5: nhận lợi nhuận kỳ đầu vào "ngày kia" (nạp + 2 ngày)
+// - Nạp tiền Thứ 2 -> Thứ 5: nhận lợi nhuận kỳ đầu sau 3 ngày (nạp T2 -> nhận T5)
 // - Nạp tiền Thứ 6 -> Chủ nhật: nhận lợi nhuận kỳ đầu vào Thứ 3 tuần kế tiếp
 // Getday(): 0=CN, 1=T2, 2=T3, 3=T4, 4=T5, 5=T6, 6=T7
 export function firstProfitCreditDate(depositDate) {
@@ -53,7 +53,7 @@ export function firstProfitCreditDate(depositDate) {
 // = firstProfitCreditDate(ngày nạp) - 1 ngày (vì lợi nhuận của "ngày sinh lời X"
 // luôn được hiển thị vào ngày X+1, nên gốc phải sẵn sàng từ ngày X = creditDate-1
 // để lợi nhuận đầu tiên hiển thị đúng vào creditDate).
-// => Nạp T2-T5: gốc bắt đầu sinh lời từ hôm sau (nạp +1 ngày).
+// => Nạp T2-T5: gốc bắt đầu sinh lời sau 2 ngày (nạp T2 -> sinh lời từ T4, nhận lời T5).
 // => Nạp T6/T7/CN: gốc bắt đầu sinh lời từ đúng Thứ 2 tuần kế tiếp.
 // Tiền nạp vẫn được cộng vào SỐ DƯ (balance) ngay lập tức để hiển thị đúng —
 // chỉ riêng phần TÍNH LÃI là bị delay theo quy tắc này.
@@ -133,7 +133,7 @@ export function fundBalance(categoryId, transactions) {
 // Cache kết quả tính lãi theo quỹ — tránh lặp lại vòng lặp tốn kém mỗi lần render.
 // Cache được khóa theo: mảng transactions hiện tại (WeakMap tự giải phóng khi data cũ bị thay),
 // + id quỹ + lãi suất + ngày hôm nay (để qua ngày mới thì tự tính lại đúng).
-export const _fundBalanceCache = new WeakMap();
+const _fundBalanceCache = new WeakMap();
 
 export function fundBalanceWithProfit(category, transactions) {
   let cacheForTx = _fundBalanceCache.get(transactions);
@@ -150,7 +150,7 @@ export function fundBalanceWithProfit(category, transactions) {
   return result;
 }
 
-export function _computeFundBalanceWithProfit(category, transactions) {
+function _computeFundBalanceWithProfit(category, transactions) {
   const rate = Number(category.interest_rate || 0);
   const history = transactions
     .filter((t) => t.category_id === category.id && (t.type === 'allocation' || t.type === 'expense'))
@@ -202,7 +202,7 @@ export function _computeFundBalanceWithProfit(category, transactions) {
 
 // Cache tương tự fundBalanceWithProfit — Report và FundDetail gọi hàm này rất nhiều lần
 // (mỗi quỹ x nhiều mốc ngày), nếu không cache thì vòng lặp từng-ngày chạy lại liên tục gây lag.
-export const _fundBalanceAtDateCache = new WeakMap();
+const _fundBalanceAtDateCache = new WeakMap();
 
 export function fundBalanceAtDate(category, transactions, cutoffDate, cutoffTx = null) {
   let cacheForTx = _fundBalanceAtDateCache.get(transactions);
@@ -221,7 +221,7 @@ export function fundBalanceAtDate(category, transactions, cutoffDate, cutoffTx =
   return result;
 }
 
-export function _computeFundBalanceAtDate(category, transactions, cutoffDate, cutoffTx = null) {
+function _computeFundBalanceAtDate(category, transactions, cutoffDate, cutoffTx = null) {
   const rate = Number(category.interest_rate || 0);
   const dailyRate = rate / 100 / 365;
   const history = transactions
@@ -269,7 +269,7 @@ export function _computeFundBalanceAtDate(category, transactions, cutoffDate, cu
   return balance;
 }
 
-export const _accountBalanceAtDateCache = new WeakMap();
+const _accountBalanceAtDateCache = new WeakMap();
 export function accountBalanceAtDate(account, transactions, cutoffDate, cutoffTx = null) {
   // FIX HIỆU NĂNG: trước đây hàm này KHÔNG cache — mỗi lần gọi đều lọc lại TOÀN BỘ mảng
   // transactions. Riêng chart "Biến động tài sản" ở Trang chủ gọi hàm này cho MỖI ví × MỖI
@@ -465,13 +465,13 @@ export function durationText(startStr, endStr) {
   return parts.join(' ');
 }
 
-export const PERIOD_TAG_RE = /^\[KY:(\d{4}-\d{2})\]\s?/;
+const PERIOD_TAG_RE = /^\[KY:(\d{4}-\d{2})\]\s?/;
 export function tagPeriodNote(periodKey, note) { return periodKey ? `[KY:${periodKey}] ${note || ''}`.trim() : (note || null); }
 export function parsePeriodTag(note) { const m = (note || '').match(PERIOD_TAG_RE); return m ? m[1] : null; }
 export function stripPeriodTag(note) { return (note || '').replace(PERIOD_TAG_RE, ''); }
 // Tag "[Vượt hạn mức]" chỉ là cờ kỹ thuật để hiện NHÃN "Vượt hạn mức" trên dòng giao dịch — không
 // nên lặp lại trong phần ghi chú hiển thị. Bỏ mọi lần xuất hiện (dữ liệu cũ có thể bị lặp 2-3 lần).
-export const OVER_LIMIT_TAG_RE = /\[Vượt hạn mức\]\s*/g;
+const OVER_LIMIT_TAG_RE = /\[Vượt hạn mức\]\s*/g;
 export function stripOverLimitTag(note) { return (note || '').replace(OVER_LIMIT_TAG_RE, '').trim(); }
 // Ghi chú dùng để HIỂN THỊ trên dòng lịch sử: bỏ tag kỳ + tag vượt hạn mức.
 export function displayTxNote(note) { return stripOverLimitTag(stripPeriodTag(note)); }
@@ -535,8 +535,8 @@ export function transactionPeriodKey(t) {
 //
 // ⚠️ QUAN TRỌNG: 2 tên category dưới đây phải khớp CHÍNH XÁC (kể cả hoa/thường, dấu cách)
 // với tên bạn đã đặt trong Danh mục. Nếu tên thực tế khác, sửa lại 2 hằng số này.
-export const MEAL_ALLOWANCE_FIXED_PER_PERIOD = 600000; // "Tiền cơm" cố định mỗi kỳ
-export const BASE_SALARY_CATEGORY_NAME = 'Lương cơ bản';
+const MEAL_ALLOWANCE_FIXED_PER_PERIOD = 600000; // "Tiền cơm" cố định mỗi kỳ
+const BASE_SALARY_CATEGORY_NAME = 'Lương cơ bản';
 export const ACCUMULATION_FUND_CATEGORY_NAME = 'Tích lũy trước chi';
 // Tính số tiền ĐÚNG (theo công thức) cần có trong quỹ "Tích lũy trước chi" của 1 kỳ.
 // Trả về null nếu chưa đủ điều kiện để tính (chưa có category "Lương cơ bản", hoặc kỳ đó
@@ -572,7 +572,7 @@ export function periodKeyToRange(periodKey) {
 // - Mốc là hôm nay/tương lai: chỉ ghi nhận những gì đã xảy ra tới hiện tại, KHÔNG cộng lãi dự kiến
 //   cho ngày chưa tới. Ví: mọi giao dịch có ngày ≤ hôm nay. Quỹ: fundBalanceWithProfit (lãi tới hết
 //   hôm qua + giao dịch hôm nay) — đúng số dư quỹ đang hiển thị ở các màn khác.
-export function assetCutoffIsNotPast(cutoff) {
+function assetCutoffIsNotPast(cutoff) {
   const startOfToday = new Date(); startOfToday.setHours(0, 0, 0, 0);
   return new Date(cutoff) >= startOfToday;
 }
@@ -591,7 +591,6 @@ export function isRangeInFuture(rangeStart) {
 
 // Danh sách năm cố định cho các dropdown lọc "Năm" trong Dashboard: 2025 -> 2035.
 export const YEAR_OPTIONS = Array.from({ length: 11 }, (_, i) => 2025 + i);
-export const PERIOD_WEEK_DAY_LABELS = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'];
 
 // Số ngày lịch từ start đến end, TÍNH CẢ 2 ĐẦU (vd 24/09 → 30/09 = 7 ngày).
 // FIX: trước đây dùng Math.round((end - start) / 86400000) + 1 với end = 23:59:59 → phần lẻ gần
@@ -795,14 +794,6 @@ export function getPreviousPeriod(type, value, year) {
     return { start: prevStart, end: prevEnd };
   }
   return null;
-}
-
-// Filter transactions within date range (using date field)
-export function filterTransactionsByDate(transactions, start, end) {
-  return transactions.filter(t => {
-    const d = new Date(t.date || t.created_at);
-    return d >= start && d <= end;
-  });
 }
 
 // Aggregate period data. "Quỹ" và "danh mục chi tiêu thường" được phân biệt qua
