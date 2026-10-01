@@ -151,6 +151,11 @@ export function buildReportData({ startDate, endDate, transactions, categories, 
   const poolAllocTotal = sum(poolAllocByFundRaw, (g) => g.total);
   const poolNonFundExpense = sum(rangeTxs.filter((t) => t.type === 'expense' && !catById.get(t.category_id)?.is_fund && t.account_id === null));
   const poolRemaining = spendingPoolTotal - poolAllocTotal - poolNonFundExpense;
+  // Tổng đã CHI ra từ Thu nhập được chi trong kỳ = nạp quỹ (lấy nguồn Thu nhập) + chi tiêu
+  // khác cũng lấy từ nguồn này (không tính quỹ). Trước đây 2 con số này tách rời (1 thẻ
+  // "Đã góp quỹ", 1 dòng ghi chú nhỏ "Đã chi tiêu ngoài quỹ"), không có chỗ nào cộng gộp lại
+  // thành 1 con số "đã chi bao nhiêu trong khoản được chi" — phải tự cộng tay mới ra.
+  const poolTotalSpent = poolAllocTotal + poolNonFundExpense;
   const poolAllocation = (spendingPoolTotal > 0 || poolAllocTotal > 0) ? {
     hasPool: true,
     pool: formatMoney(spendingPoolTotal),
@@ -162,6 +167,12 @@ export function buildReportData({ startDate, endDate, transactions, categories, 
     })),
     totalPct: pctOf(poolAllocTotal, spendingPoolTotal),
     total: formatMoney(poolAllocTotal),
+    // Tổng chi trong Thu nhập được chi = nạp quỹ + chi tiêu khác (không tính quỹ), cộng gộp
+    // sẵn 1 con số duy nhất, kèm % trên tổng Thu nhập được chi và breakdown nạp quỹ/chi khác
+    // để hiển thị thành 1 thẻ "Tổng chi" rõ ràng thay vì phải tự cộng 2 số rải rác.
+    totalSpent: formatMoney(poolTotalSpent),
+    totalSpentPct: pctOf(poolTotalSpent, spendingPoolTotal),
+    totalSpentBreakdown: `Nạp quỹ: ${formatMoney(poolAllocTotal)} · Chi khác: ${formatMoney(poolNonFundExpense)}`,
     nonFundExpense: poolNonFundExpense > 0 ? formatMoney(poolNonFundExpense) : null,
     remaining: formatMoneySigned(poolRemaining),
     remainingPositive: poolRemaining >= 0,

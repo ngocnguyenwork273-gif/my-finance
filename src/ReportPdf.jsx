@@ -238,13 +238,10 @@ function PoolAllocationBlock({ p }) {
       <Text style={s.groupTitle}>Thu nhập được chi — góp quỹ theo mục</Text>
       <View style={s.cards}>
         <Card label="Thu nhập được chi" value={p.pool} color={C.turquoise} />
-        <Card label={`Đã góp quỹ (${p.totalPct})`} value={p.total} color="#8E6CF1" />
+        <Card label={`Tổng chi (${p.totalSpentPct})`} value={p.totalSpent} color="#8E6CF1" sub={p.totalSpentBreakdown} />
         <Card label="Còn lại được chi trong kỳ" value={p.remaining} color={p.remainingPositive ? C.turquoise : C.pink} />
       </View>
       {p.rows.length > 0 && <BarList rows={p.rows} labelKey="name" />}
-      {p.nonFundExpense && (
-        <Text style={s.note}>Đã chi tiêu (ngoài quỹ) từ Thu nhập được chi: {p.nonFundExpense}.</Text>
-      )}
     </>
   );
 }

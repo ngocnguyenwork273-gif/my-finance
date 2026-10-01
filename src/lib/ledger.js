@@ -24,6 +24,16 @@ export function txSourceInfo(tx, categories, accounts) {
   const cat = categories.find((c) => c.id === tx.category_id);
   const account = tx.account_id ? accounts.find((a) => a.id === tx.account_id) : null;
   if (tx.type === 'expense' && cat?.is_fund) return { key: `fund:${cat.id}`, label: `Quỹ: ${cat.name}` };
+  // FIX: "Nạp quỹ lần đầu" là số tiền TỰ NHẬP khi tạo/sửa quỹ (vd số dư quỹ đã có sẵn từ
+  // trước khi dùng app) — không hề được trừ ra từ Thu nhập được chi hay từ ví nào cả. Trước
+  // đây giao dịch này (allocation, không gắn account_id) lọt xuống nhánh mặc định cuối hàm
+  // và bị gắn nhầm nguồn "Thu nhập được chi", khiến báo cáo (cả màn hình lẫn PDF) hiểu sai
+  // là khoản này lấy từ thu nhập trong kỳ. Giờ nhận diện riêng bằng isInitialAllocationTx
+  // (đúng điều kiện đã dùng ở txBalanceAfter bên dưới) và gắn nhãn "Tự nhập", không tính
+  // vào bất kỳ nguồn tiền nào trong app.
+  if (tx.type === 'allocation' && isInitialAllocationTx(tx) && !tx.account_id) {
+    return { key: 'manual-initial', label: 'Tự nhập (không qua nguồn nào)' };
+  }
   if (account) return { key: `account:${account.id}`, label: account.name };
   // Khoản thu nhập: chỉ gắn nhãn "Thu nhập được chi" nếu danh mục thật sự được tính vào
   // Chi pool (include_in_spending_pool !== false). "Thu nhập đặc biệt" (vd: Thưởng Lễ/Tết)
