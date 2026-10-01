@@ -1,7 +1,7 @@
 /* ==============================================================================
    01. IMPORTS
    ============================================================================== */
-import { useState, useEffect, useLayoutEffect, useRef, useMemo, Fragment, Children } from 'react';
+import { useState, useEffect, useLayoutEffect, useRef, useMemo, Fragment, Children, createContext, useContext, Component } from 'react';
 import { createPortal } from 'react-dom';
 import { Capacitor } from '@capacitor/core';
 import { App as CapApp } from '@capacitor/app'; // nút Back Android (cần: npm i @capacitor/app)
@@ -256,6 +256,27 @@ function ConfirmHost() {
 /* ==============================================================================
    03. CONSTANTS
    ============================================================================== */
+
+/* ==============================================================================
+   02c. CONTEXT DÙNG CHUNG (thay cho việc truyền ~15–20 props giống nhau vào từng màn hình)
+   - ShellContext: giao diện/điều hướng (theme, sidebar, mở form thêm, chuyển màn hình, thông tin người dùng)
+   - DataContext : dữ liệu & hành động dùng chung (ví, danh mục, giao dịch, mục tiêu, tải lại, xoá mềm...)
+   Cả hai được cung cấp bởi MainApp. Màn hình chỉ lấy đúng những gì nó dùng:
+       const { setScreen, theme } = useShell();
+       const { transactions, reload } = useAppData();
+   ============================================================================== */
+const ShellContext = createContext(null);
+const DataContext = createContext(null);
+function useShell() {
+  const v = useContext(ShellContext);
+  if (!v) throw new Error('useShell phải được dùng bên trong <MainApp>');
+  return v;
+}
+function useAppData() {
+  const v = useContext(DataContext);
+  if (!v) throw new Error('useAppData phải được dùng bên trong <MainApp>');
+  return v;
+}
 
 const NAV_ITEMS = [
   { key: 'dashboard', icon: Home, label: 'Trang chủ' },
@@ -1422,7 +1443,9 @@ function MiniRing({ pct, color, label }) {
    06. LAYOUT COMPONENTS (Sidebar, Header, BottomNav)
    ============================================================================== */
 
-function SidebarDesktop({ screen, setScreen, sidebarCollapsed, toggleSidebar, theme, toggleTheme, appLogoUrl, openSettings, settingsSection }) {
+function SidebarDesktop({ screen, appLogoUrl, settingsSection }) {
+  // Lấy state dùng chung từ Context (không nhận qua props nữa)
+  const { setScreen, sidebarCollapsed, toggleSidebar, theme, toggleTheme, openSettings } = useShell();
   const isDark = theme === 'dark';
   return (
     <aside
@@ -1667,7 +1690,10 @@ function useGlobalSearchResults(query, { accounts, categories, transactions, goa
   return groups;
 }
 
-function HeaderDesktop({ onAddClick, displayName, avatarUrl, theme, toggleTheme, openSettings, accounts, categories, transactions, goals, setScreen, onOpenAccount, onOpenFund }) {
+function HeaderDesktop() {
+  // Lấy state dùng chung từ Context (không nhận qua props nữa)
+  const { onAddClick, displayName, avatarUrl, theme, openSettings, setScreen } = useShell();
+  const { accounts, categories, transactions, goals, onOpenAccount, onOpenFund } = useAppData();
   const [search, setSearch] = useState('');
   const [searchFocused, setSearchFocused] = useState(false);
   const isDark = theme === 'dark';
@@ -1764,7 +1790,9 @@ function HeaderDesktop({ onAddClick, displayName, avatarUrl, theme, toggleTheme,
   );
 }
 
-function BottomNavMobile({ screen, setScreen, onAddClick, theme, toggleTheme, openSettings, settingsSection }) {
+function BottomNavMobile({ screen, onAddClick, settingsSection }) {
+  // Lấy state dùng chung từ Context (không nhận qua props nữa)
+  const { setScreen, theme, openSettings } = useShell();
   const isDark = theme === 'dark';
   // "Quản lý" (funds / accounts / goals) floating glass sub-menu
   const [manageOpen, setManageOpen] = useState(false);
@@ -3144,7 +3172,10 @@ function DashboardSkeleton() {
   );
 }
 
-function Dashboard({ setScreen, transactions, categories, accounts, goals, loading, initialLoadDone, displayName, avatarUrl, onAddClick, theme, toggleTheme, onOpenFund, onOpenAccount, reload, softDelete, openSettings, sidebarCollapsed, toggleSidebar, spendingPoolByPeriod, saveSpendingPoolForPeriod }) {
+function Dashboard() {
+  // Lấy state dùng chung từ Context (không nhận qua props nữa)
+  const { setScreen, displayName, avatarUrl, theme, openSettings } = useShell();
+  const { transactions, categories, accounts, goals, loading, initialLoadDone, onOpenFund, onOpenAccount, reload, softDelete, spendingPoolByPeriod } = useAppData();
   async function handleDeleteTx(tx) {
     if (!(await confirmDialog('Xóa giao dịch này? Bạn có thể khôi phục trong 30 ngày ở mục Lịch sử.', { title: 'Xác nhận xóa', confirmText: 'Xóa', danger: true }))) return;
     const { error } = await softDelete('transactions', tx.id, txDeleteDescription(tx, categories), 'delete_transaction');
@@ -3173,7 +3204,7 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
   const walletWheelLocked = useRef(false);
   const walletStackRef = useRef(null);
   function goToWalletIndex(idx) {
-    setWalletActiveIndex((cur) => {
+    setWalletActiveIndex((_cur) => {
       const clamped = Math.max(0, Math.min(accounts.length - 1, idx));
       return clamped;
     });
@@ -4388,7 +4419,10 @@ function Dashboard({ setScreen, transactions, categories, accounts, goals, loadi
 /* ==============================================================================
    09. FUNDS
    ============================================================================== */
-function Funds({ setScreen, categories, transactions, onOpenFund, reload, softDelete, onAddClick, displayName, avatarUrl, theme, toggleTheme, openSettings, sidebarCollapsed, toggleSidebar }) {
+function Funds() {
+  // Lấy state dùng chung từ Context (không nhận qua props nữa)
+  const { theme } = useShell();
+  const { categories, transactions, onOpenFund, reload, softDelete } = useAppData();
   const [showCreate, setShowCreate] = useState(false);
   const [editingFund, setEditingFund] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
@@ -4770,7 +4804,9 @@ function Funds({ setScreen, categories, transactions, onOpenFund, reload, softDe
 /* ==============================================================================
    10. FUND DETAIL
    ============================================================================== */
-function FundDetail({ category, transactions, categories, accounts, onBack, reload, softDelete, setScreen, onAddClick, displayName, avatarUrl, theme, toggleTheme, openSettings, sidebarCollapsed, toggleSidebar, spendingPoolByPeriod }) {
+function FundDetail({ category, onBack }) {
+  // Lấy state dùng chung từ Context (không nhận qua props nữa)
+  const { transactions, categories, reload, softDelete, spendingPoolByPeriod } = useAppData();
   const [filter, setFilter] = useState('all');
   const [showEdit, setShowEdit] = useState(false);
   const [quickMode, setQuickMode] = useState(null);
@@ -5269,7 +5305,10 @@ function FundDetail({ category, transactions, categories, accounts, onBack, relo
 /* ==============================================================================
    11. ACCOUNTS
    ============================================================================== */
-function Accounts({ setScreen, accounts, transactions, onOpenAccount, reload, onAddClick, displayName, avatarUrl, theme, toggleTheme, openSettings, sidebarCollapsed, toggleSidebar }) {
+function Accounts() {
+  // Lấy state dùng chung từ Context (không nhận qua props nữa)
+  const { setScreen, theme } = useShell();
+  const { accounts, transactions, onOpenAccount, reload } = useAppData();
   const [showCreate, setShowCreate] = useState(false);
   const totalBalance = accounts.reduce((s, a) => s + accountBalance(a, transactions), 0);
   const totalExcludingGold = accounts.filter((a) => a.type !== 'gold').reduce((s, a) => s + accountBalance(a, transactions), 0);
@@ -5408,7 +5447,9 @@ function Accounts({ setScreen, accounts, transactions, onOpenAccount, reload, on
 /* ==============================================================================
    12. ACCOUNT DETAIL
    ============================================================================== */
-function AccountDetail({ account, transactions, categories, accounts, onBack, reload, softDelete, setScreen, onAddClick, displayName, avatarUrl, theme, toggleTheme, openSettings, sidebarCollapsed, toggleSidebar, spendingPoolByPeriod }) {
+function AccountDetail({ account, onBack }) {
+  // Lấy state dùng chung từ Context (không nhận qua props nữa)
+  const { transactions, categories, accounts, reload, softDelete, spendingPoolByPeriod } = useAppData();
   const [showAdjust, setShowAdjust] = useState(false);
   const [showEdit, setShowEdit] = useState(false);
   const [editingTx, setEditingTx] = useState(null);
@@ -5607,7 +5648,10 @@ function AccountDetail({ account, transactions, categories, accounts, onBack, re
 /* ==============================================================================
    13. GOALS
    ============================================================================== */
-function Goals({ setScreen, goals, loadingGoals, reload, softDelete, onAddClick, displayName, avatarUrl, theme, toggleTheme, openSettings, sidebarCollapsed, toggleSidebar, categories = [], transactions = [] }) {
+function Goals() {
+  // Lấy state dùng chung từ Context (không nhận qua props nữa)
+  const { setScreen, theme } = useShell();
+  const { goals, loadingGoals, reload, softDelete, categories, transactions } = useAppData();
   const [editingGoal, setEditingGoal] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [page, setPage] = useState(1);
@@ -5944,9 +5988,10 @@ function Goals({ setScreen, goals, loadingGoals, reload, softDelete, onAddClick,
 /* ==============================================================================
    14. SETTINGS
    ============================================================================== */
-function Settings({ setScreen, categories, accounts, reload, softDelete, user, onProfileUpdated, onAddClick, theme, toggleTheme, initialSection, openSettings, sidebarCollapsed, toggleSidebar, onResetData, resettingData, logs, logActivity, restoreLog, spendingPoolByPeriod, saveSpendingPoolForPeriod }) {
-  const displayName = user?.user_metadata?.first_name || user?.user_metadata?.full_name;
-  const avatarUrl = user?.user_metadata?.avatar_url;
+function Settings({ user, onProfileUpdated, initialSection, onResetData, resettingData, logs, logActivity, restoreLog }) {
+  // Lấy state dùng chung từ Context (không nhận qua props nữa)
+  const { setScreen, theme, toggleTheme } = useShell();
+  const { categories, reload, softDelete, spendingPoolByPeriod, saveSpendingPoolForPeriod } = useAppData();
   // Mặc định mở thẻ "Danh mục" (thẻ đầu tiên còn lại trên thanh tab) — thẻ "Hồ sơ" không
   // còn hiện trên thanh tab nữa (chỉ mở được qua menu bấm avatar), nên bỏ mặc định 'profile'.
   const [section, setSection] = useState(initialSection || 'categories');
@@ -8059,7 +8104,10 @@ function ReportExportModal({ onClose, transactions, categories, accounts, spendi
   );
 }
 
-function Report({ setScreen, transactions, categories, accounts, goals, onAddClick, displayName, avatarUrl, theme, toggleTheme, openSettings, sidebarCollapsed, toggleSidebar, spendingPoolByPeriod, saveSpendingPoolForPeriod, reload, softDelete, openFund }) {
+function Report() {
+  // Lấy state dùng chung từ Context (không nhận qua props nữa)
+  const { setScreen, theme } = useShell();
+  const { transactions, categories, accounts, goals, spendingPoolByPeriod, reload, softDelete, onOpenFund: openFund } = useAppData();
   const [editingTx, setEditingTx] = useState(null);
   const [showExportModal, setShowExportModal] = useState(false);
   // Bộ lọc "Hoạt động gần đây": lọc theo Loại giao dịch trước (Thu nhập / Chi tiêu /
@@ -9549,7 +9597,7 @@ function MainApp({ user, theme, toggleTheme }) {
         if (initialLoadDone) { setScreen('dashboard'); return null; }
         return null;
       }
-      return <FundDetail category={cat} transactions={transactions} categories={categories} accounts={accounts} onBack={() => setScreen(fundReturnScreen)} reload={loadAll} softDelete={softDelete} setScreen={setScreen} onAddClick={() => setShowAdd(true)} displayName={displayName} avatarUrl={avatarUrl} theme={theme} toggleTheme={toggleTheme} openSettings={goToSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} spendingPoolByPeriod={spendingPoolByPeriod} />;
+      return <FundDetail category={cat} onBack={() => setScreen(fundReturnScreen)} />;
     }
     if (screen === 'account-detail') {
       const acc = accounts.find((a) => a.id === selectedAccountId);
@@ -9558,25 +9606,38 @@ function MainApp({ user, theme, toggleTheme }) {
         if (initialLoadDone) { setScreen('accounts'); return null; }
         return null;
       }
-      return <AccountDetail account={acc} transactions={transactions} categories={categories} accounts={accounts} onBack={() => setScreen(accountReturnScreen)} reload={loadAll} softDelete={softDelete} setScreen={setScreen} onAddClick={() => setShowAdd(true)} displayName={displayName} avatarUrl={avatarUrl} theme={theme} toggleTheme={toggleTheme} openSettings={goToSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} spendingPoolByPeriod={spendingPoolByPeriod} />;
+      return <AccountDetail account={acc} onBack={() => setScreen(accountReturnScreen)} />;
     }
-    if (screen === 'funds') return <Funds setScreen={setScreen} categories={categories} transactions={transactions} onOpenFund={openFund} reload={loadAll} softDelete={softDelete} onAddClick={() => setShowAdd(true)} displayName={displayName} avatarUrl={avatarUrl} theme={theme} toggleTheme={toggleTheme} openSettings={goToSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} />;
-    if (screen === 'goals') return <Goals setScreen={setScreen} goals={goals} loadingGoals={loadingGoals} reload={loadAll} softDelete={softDelete} onAddClick={() => setShowAdd(true)} displayName={displayName} avatarUrl={avatarUrl} theme={theme} toggleTheme={toggleTheme} openSettings={goToSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} categories={categories} transactions={transactions} />;
-    if (screen === 'accounts') return <Accounts setScreen={setScreen} accounts={accounts} transactions={transactions} onOpenAccount={openAccount} reload={loadAll} onAddClick={() => setShowAdd(true)} displayName={displayName} avatarUrl={avatarUrl} theme={theme} toggleTheme={toggleTheme} openSettings={goToSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} />;
+    if (screen === 'funds') return <Funds />;
+    if (screen === 'goals') return <Goals />;
+    if (screen === 'accounts') return <Accounts />;
     // key: ép React unmount/mount lại hẳn Settings mỗi khi chuyển qua lại giữa "Hồ sơ tài
     // khoản" (settingsSection === 'profile', mở từ avatar) và "Cài đặt" (các thẻ Danh
     // mục/Hệ thống/Lịch sử/Giao diện, mở từ icon Cài đặt) — kể cả khi đang đứng sẵn ở màn
     // Cài đặt rồi bấm "Hồ sơ" (hoặc ngược lại) thì cũng chắc chắn đổi đúng giao diện, không
     // phụ thuộc timing của effect đồng bộ state bên trong Settings nữa.
-    if (screen === 'settings') return <Settings key={settingsSection === 'profile' ? 'settings-profile' : 'settings-tabs'} setScreen={setScreen} categories={categories} accounts={accounts} reload={loadAll} softDelete={softDelete} user={currentUser} onProfileUpdated={refreshUser} onAddClick={() => setShowAdd(true)} theme={theme} toggleTheme={toggleTheme} initialSection={settingsSection} openSettings={goToSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} onResetData={resetAllData} resettingData={resettingData} logs={logs} logActivity={logActivity} restoreLog={restoreLog} spendingPoolByPeriod={spendingPoolByPeriod} saveSpendingPoolForPeriod={saveSpendingPoolForPeriod} />;
-    if (screen === 'report') return <Report setScreen={setScreen} transactions={transactions} categories={categories} accounts={accounts} goals={goals} onAddClick={() => setShowAdd(true)} displayName={displayName} avatarUrl={avatarUrl} theme={theme} toggleTheme={toggleTheme} openSettings={goToSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} spendingPoolByPeriod={spendingPoolByPeriod} saveSpendingPoolForPeriod={saveSpendingPoolForPeriod} reload={loadAll} softDelete={softDelete} openFund={openFund} />;
+    if (screen === 'settings') return <Settings key={settingsSection === 'profile' ? 'settings-profile' : 'settings-tabs'} user={currentUser} onProfileUpdated={refreshUser} initialSection={settingsSection} onResetData={resetAllData} resettingData={resettingData} logs={logs} logActivity={logActivity} restoreLog={restoreLog} />;
+    if (screen === 'report') return <Report />;
     // Dashboard default
-    return <Dashboard setScreen={setScreen} transactions={transactions} categories={categories} accounts={accounts} goals={goals} loading={loading} initialLoadDone={initialLoadDone} displayName={displayName} avatarUrl={avatarUrl} onAddClick={() => setShowAdd(true)} theme={theme} toggleTheme={toggleTheme} onOpenFund={openFund} onOpenAccount={openAccount} reload={loadAll} softDelete={softDelete} openSettings={goToSettings} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} spendingPoolByPeriod={spendingPoolByPeriod} saveSpendingPoolForPeriod={saveSpendingPoolForPeriod} />;
+    return <Dashboard />;
   }
+
+  // Giá trị chia sẻ qua Context cho mọi màn hình bên dưới (xem 02c).
+  const shellValue = {
+    setScreen, onAddClick: () => setShowAdd(true), openSettings: goToSettings,
+    sidebarCollapsed, toggleSidebar, theme, toggleTheme, displayName, avatarUrl,
+  };
+  const dataValue = {
+    accounts, categories, transactions, goals, loading, initialLoadDone, loadingGoals,
+    reload: loadAll, softDelete, spendingPoolByPeriod, saveSpendingPoolForPeriod,
+    onOpenAccount: openAccount, onOpenFund: openFund,
+  };
 
   // Layout wrapper — true flex-row App Shell (Sidebar is a real flex item,
   // no fixed positioning / margin-left offset hack).
   return (
+    <ShellContext.Provider value={shellValue}>
+    <DataContext.Provider value={dataValue}>
     <div
       className="flex w-full min-h-[100dvh] dark:bg-[#1a1a2e]"
       style={theme === 'dark' ? undefined : {
@@ -9586,13 +9647,7 @@ function MainApp({ user, theme, toggleTheme }) {
       {/* Sidebar Desktop — flex item, flex-shrink: 0 */}
       <SidebarDesktop
         screen={screen}
-        setScreen={setScreen}
-        sidebarCollapsed={sidebarCollapsed}
-        toggleSidebar={toggleSidebar}
-        theme={theme}
-        toggleTheme={toggleTheme}
         appLogoUrl={appLogoUrl}
-        openSettings={goToSettings}
         settingsSection={settingsSection}
       />
 
@@ -9600,19 +9655,6 @@ function MainApp({ user, theme, toggleTheme }) {
       <div className="flex-1 flex flex-col min-w-0 w-full">
         {/* Desktop Header — width: 100%, no manual offset math */}
         <HeaderDesktop
-          onAddClick={() => setShowAdd(true)}
-          displayName={displayName}
-          avatarUrl={avatarUrl}
-          theme={theme}
-          toggleTheme={toggleTheme}
-          openSettings={goToSettings}
-          accounts={accounts}
-          categories={categories}
-          transactions={transactions}
-          goals={goals}
-          setScreen={setScreen}
-          onOpenAccount={openAccount}
-          onOpenFund={openFund}
         />
 
         {/* MainContent — width: 100%, min-width: 0 */}
@@ -9633,11 +9675,7 @@ function MainApp({ user, theme, toggleTheme }) {
       {/* Mobile BottomNav */}
       <BottomNavMobile
         screen={screen}
-        setScreen={setScreen}
         onAddClick={handleAddClick}
-        theme={theme}
-        toggleTheme={toggleTheme}
-        openSettings={goToSettings}
         settingsSection={settingsSection}
       />
 
@@ -9654,6 +9692,8 @@ function MainApp({ user, theme, toggleTheme }) {
         />
       )}
     </div>
+    </DataContext.Provider>
+    </ShellContext.Provider>
   );
 }
 
@@ -9832,6 +9872,51 @@ function AuthScreen() {
   );
 }
 
+// Trước đây app KHÔNG có error boundary nào — bất kỳ lỗi JS chưa lường tới ở bất cứ đâu
+// (ví dụ rõ nhất: xử lý ảnh upload từ điện thoại — ảnh quá lớn, định dạng lạ, hết bộ nhớ
+// khi vẽ canvas...) đều khiến React gỡ sạch toàn bộ giao diện, hiện đúng "màn hình trắng"
+// không có cách nào thoát ra ngoài việc tắt hẳn app/tải lại trang theo cách thủ công.
+// ErrorBoundary này chặn lại: hiện màn hình lỗi thân thiện + nút tải lại, đồng thời log lỗi
+// ra console để biết chính xác nguyên nhân (mở DevTools / chrome://inspect để xem).
+class ErrorBoundary extends Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+  componentDidCatch(error, info) {
+    console.error('Lỗi chưa xử lý làm app bị sập:', error, info?.componentStack);
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="min-h-[100dvh] flex items-center justify-center bg-ice-cream dark:bg-[#1a1a2e] p-6">
+          <div className="max-w-sm w-full text-center">
+            <p className="text-5xl mb-4">🐼💥</p>
+            <h2 className="text-blueberry dark:text-white font-extrabold text-lg mb-2">Có lỗi xảy ra</h2>
+            <p className="text-steel dark:text-light-grey text-sm mb-5">
+              Ứng dụng gặp sự cố ngoài dự kiến (có thể do ảnh vừa chọn quá lớn hoặc không đọc được).
+              Thử tải lại trang — dữ liệu của bạn vẫn an toàn trên máy chủ.
+            </p>
+            <button
+              onClick={() => window.location.reload()}
+              className="bg-gradient-primary text-white rounded-full px-6 py-2.5 text-sm font-bold shadow-md shadow-turquoise/30"
+            >
+              Tải lại trang
+            </button>
+            {this.state.error && (
+              <p className="text-steel/60 dark:text-light-grey/50 text-[11px] mt-4 break-words">{String(this.state.error?.message || this.state.error)}</p>
+            )}
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 export default function App() {
   const [session, setSession] = useState(undefined);
   const [theme, setTheme] = useState(() => {
@@ -9866,5 +9951,5 @@ export default function App() {
   } else {
     content = <MainApp user={session.user} theme={theme} toggleTheme={toggleTheme} />;
   }
-  return <><ToastHost /><ConfirmHost />{content}</>;
+  return <ErrorBoundary><ToastHost /><ConfirmHost />{content}</ErrorBoundary>;
 }
