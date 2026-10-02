@@ -3,20 +3,6 @@
    ============================================================================== */
 import { useEffect, useRef, useState } from 'react';
 
-// Đóng dropdown/menu khi nhấn ESC. Việc đóng khi click ra ngoài đã được xử lý
-// riêng ở từng nơi gọi (thường bằng 1 lớp overlay fixed inset-0), hook này
-// chỉ bổ sung phần ESC cho đồng bộ hành vi trên toàn app.
-export function useCloseOnEscape(isOpen, onClose) {
-  useEffect(() => {
-    if (!isOpen) return;
-    function handleKey(e) {
-      if (e.key === 'Escape') onClose();
-    }
-    document.addEventListener('keydown', handleKey);
-    return () => document.removeEventListener('keydown', handleKey);
-  }, [isOpen, onClose]);
-}
-
 // Trả về số CỘT lưới thẻ (card grid) đang thực sự hiển thị theo bề rộng màn hình
 // hiện tại — mốc breakpoint khớp CHÍNH XÁC với class Tailwind dùng trên các lưới
 // thẻ (grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5), để nơi gọi tính

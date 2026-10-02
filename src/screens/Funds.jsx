@@ -7,7 +7,7 @@ import { useAppData, useShell } from '../context';
 import { confirmDialog, toast } from '../feedback';
 import { EditFundForm } from '../forms/EditFundForm';
 import { useResponsiveGridColumns } from '../hooks';
-import { ArrowUpDown, Calendar, Check, Eye, Filter, LayoutGrid, List, MoreHorizontal, Pencil, PiggyBank, Plus, Search, Sparkles, Star, Trash2, TrendingDown, TrendingUp, X } from '../icons';
+import { ArrowUpDown, Calendar, Check, Filter, LayoutGrid, List, MoreHorizontal, Pencil, PiggyBank, Plus, Search, Sparkles, Star, Trash2, TrendingDown, TrendingUp, X } from '../icons';
 import { FUND_RATE_TIERS, findInitialAllocation, fundBalanceWithProfit, fundRateStyle } from '../lib/finance';
 import { formatMoney, textMatchesSearch } from '../lib/format';
 
@@ -156,7 +156,7 @@ export function Funds() {
                     </span>
                     <span className="absolute bottom-3 right-3 flex items-center gap-1 text-white text-[10px] font-bold bg-black/30 backdrop-blur px-2 py-0.5 rounded-full">
                       <span className="w-1.5 h-1.5 rounded-full" style={{ background: rStyle.color }} />
-                      {rStyle.value} {f.interest_rate > 0 && `(${f.interest_rate}%)`}
+                      {f.interest_rate > 0 ? `${f.interest_rate}%/năm` : rStyle.value}
                     </span>
                   </button>
                 );
@@ -293,9 +293,9 @@ export function Funds() {
                         </button>
                         {openMenuId === f.id && (
  <div onClick={(e) => e.stopPropagation()} style={{ position: 'absolute' }} className="top-10 right-2.5 z-20 frost-card rounded-xl shadow-card py-1 w-40 text-left">
-                            <button onClick={() => { onOpenFund(f.id, 'funds'); setOpenMenuId(null); }} className="w-full flex items-center gap-2 px-3 py-2 text-sm text-blueberry dark:text-white hover:bg-ice-cream dark:hover:bg-night-sky/30">
-                              <Eye size={14} /> Xem chi tiết
-                            </button>
+                            {/* FIX: bỏ "Xem chi tiết" — cả thẻ (div onClick) đã mở chi tiết
+                                quỹ khi bấm vào bất kỳ đâu trên thẻ rồi, mục này trong menu 3
+                                chấm chỉ trùng lặp chức năng. */}
                             <button onClick={() => { setEditingFund(f); setOpenMenuId(null); }} className="w-full flex items-center gap-2 px-3 py-2 text-sm text-blueberry dark:text-white hover:bg-ice-cream dark:hover:bg-night-sky/30">
                               <Pencil size={14} /> Chỉnh sửa
                             </button>
@@ -316,7 +316,7 @@ export function Funds() {
                         </div>
                         <div className="flex items-center gap-1.5 mb-2 flex-wrap">
                           <span className="text-[10px] font-bold px-2 py-1 rounded-full" style={{ color: rStyle.color, background: rStyle.bg }}>
-                            {rStyle.value} {f.interest_rate > 0 && `(${f.interest_rate}%)`}
+                            {f.interest_rate > 0 ? `${f.interest_rate}%/năm` : rStyle.value}
                           </span>
                           <span className={`text-[10px] font-bold px-2 py-1 rounded-full ${isDone ? 'bg-turquoise/10 text-turquoise' : 'bg-ice-cream text-steel dark:bg-night-sky dark:text-light-grey'}`}>{target > 0 ? (isDone ? 'Đã đạt' : 'Đang tích lũy') : 'Chưa đặt mục tiêu'}</span>
                         </div>
@@ -336,9 +336,12 @@ export function Funds() {
                     <tr className="text-left text-steel dark:text-light-grey border-b border-[rgba(189,189,203,0.2)] dark:border-[rgba(189,189,203,0.1)]">
                       <th className="p-4 font-bold">Tên quỹ</th>
                       <th className="p-4 font-bold">Lãi suất</th>
-                      <th className="p-4 font-bold text-right">Số dư hiện tại</th>
-                      <th className="p-4 font-bold text-right">Mục tiêu</th>
-                      <th className="p-4 font-bold">Tiến độ</th>
+                      {/* FIX: trước đây "Số dư hiện tại" và "Mục tiêu" là 2 cột tách rời, cùng
+                          kể 1 câu chuyện (đang có bao nhiêu / cần bao nhiêu) nhưng mắt phải
+                          nhảy qua lại giữa 2 cột mới ghép được ý. Gộp lại 1 cột, nhường bề
+                          rộng cho cột Tiến độ để bar dài và dễ so sánh giữa các dòng hơn. */}
+                      <th className="p-4 font-bold text-right">Số dư / Mục tiêu</th>
+                      <th className="p-4 font-bold w-48">Tiến độ</th>
                       <th className="p-4 font-bold">Trạng thái</th>
                       <th className="p-4 font-bold text-right">Action</th>
                     </tr>
@@ -359,14 +362,30 @@ export function Funds() {
                             </div>
                           </td>
                           <td className="p-4">
+                            {/* FIX: trước đây luôn hiện CẢ nhãn phân loại ("<5%/năm") LẪN số
+                                thật trong ngoặc ("(4%)") — thừa, lặp lại cùng 1 ý trong 1 badge
+                                nhỏ. Giờ chỉ hiện đúng số thật (rõ ràng, chính xác hơn khoảng
+                                phân loại); khi chưa có lãi suất mới hiện nhãn "Không lãi suất". */}
                             <span className="text-xs font-bold px-2 py-1 rounded-full whitespace-nowrap" style={{ color: rStyle.color, background: rStyle.bg }}>
-                              {rStyle.value} {f.interest_rate > 0 && `(${f.interest_rate}%)`}
+                              {f.interest_rate > 0 ? `${f.interest_rate}%/năm` : rStyle.value}
                             </span>
                           </td>
-                          <td className="p-4 text-right text-blueberry dark:text-white">{formatMoney(balance)}</td>
-                          <td className="p-4 text-right text-steel dark:text-light-grey">{target > 0 ? formatMoney(target) : '—'}</td>
-                          <td className="p-4 w-32">
-                            {target > 0 ? (<><ProgressBar pct={pct} colorClass={isDone ? 'bg-turquoise' : 'bg-baby-blue'} /><p className="text-steel dark:text-light-grey text-xs mt-1">{Math.round(pct)}%</p></>) : <span className="text-light-grey">—</span>}
+                          {/* FIX: gộp "Số dư hiện tại" + "Mục tiêu" thành 1 cột dạng "đang có /
+                              cần có" — đọc 1 chỗ là hiểu ngay thay vì ghép 2 cột rời. */}
+                          <td className="p-4 text-right whitespace-nowrap">
+                            <span className="text-blueberry dark:text-white font-semibold">{formatMoney(balance)}</span>
+                            {target > 0 && <span className="text-steel dark:text-light-grey"> / {formatMoney(target)}</span>}
+                          </td>
+                          <td className="p-4 w-48">
+                            {/* FIX: bar và % trước đây xếp 2 DÒNG (bar trên, % dưới) trong cột
+                                hẹp 128px — giờ nằm NGANG trong cột rộng hơn (192px), bar dài
+                                hơn hẳn nên dễ so sánh tiến độ giữa các dòng bằng mắt hơn. */}
+                            {target > 0 ? (
+                              <div className="flex items-center gap-2">
+                                <div className="flex-1"><ProgressBar pct={pct} colorClass={isDone ? 'bg-turquoise' : 'bg-baby-blue'} /></div>
+                                <span className="text-steel dark:text-light-grey text-xs font-semibold w-9 text-right flex-shrink-0">{Math.round(pct)}%</span>
+                              </div>
+                            ) : <span className="text-light-grey">—</span>}
                           </td>
                           <td className="p-4">
                             <span className={`text-xs font-bold px-2 py-1 rounded-full ${isDone ? 'bg-turquoise/10 text-turquoise' : 'bg-ice-cream text-steel dark:bg-night-sky dark:text-light-grey'}`}>{target > 0 ? (isDone ? 'Đã đạt' : 'Đang tích lũy') : 'Chưa đặt mục tiêu'}</span>
@@ -377,9 +396,9 @@ export function Funds() {
                             </button>
                             {openMenuId === f.id && (
  <div onClick={(e) => e.stopPropagation()} style={{ position: 'absolute' }} className="right-4 top-12 z-20 frost-card rounded-xl shadow-card py-1 w-40 text-left">
-                                <button onClick={() => { onOpenFund(f.id, 'funds'); setOpenMenuId(null); }} className="w-full flex items-center gap-2 px-3 py-2 text-sm text-blueberry dark:text-white hover:bg-ice-cream dark:hover:bg-night-sky/30">
-                                  <Eye size={14} /> Xem chi tiết
-                                </button>
+                                {/* FIX: bỏ "Xem chi tiết" — cả dòng (tr onClick) đã mở chi
+                                    tiết quỹ khi bấm vào bất kỳ đâu trên dòng rồi, mục này
+                                    trong menu 3 chấm chỉ trùng lặp chức năng. */}
                                 <button onClick={() => { setEditingFund(f); setOpenMenuId(null); }} className="w-full flex items-center gap-2 px-3 py-2 text-sm text-blueberry dark:text-white hover:bg-ice-cream dark:hover:bg-night-sky/30">
                                   <Pencil size={14} /> Chỉnh sửa
                                 </button>

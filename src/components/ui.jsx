@@ -2,7 +2,7 @@
    Thành phần giao diện nhỏ dùng chung (emoji tròn, thanh tiến độ, vòng tiến độ, thẻ tóm tắt, tooltip biểu đồ, menu avatar).
    ============================================================================== */
 import { useEffect, useRef, useState } from 'react';
-import { useCloseOnEscape } from '../hooks';
+import { useEscapeKey } from '../feedback';
 import { BadgeCheck, ChevronDown, LogOut } from '../icons';
 import { supabase } from '../supabaseClient';
 
@@ -68,7 +68,8 @@ export function MiniRing({ pct, color, label }) {
 // React thuần vì project này không cài shadcn/ui (@/components/ui/...).
 export function AvatarMenu({ avatarUrl, displayName, openSettings, variant = 'desktop' }) {
   const [open, setOpen] = useState(false);
-  useCloseOnEscape(open, () => setOpen(false));
+  // Esc / nút Back Android đóng menu; nếu menu mở trong modal thì chỉ đóng lớp trên cùng
+  useEscapeKey(() => setOpen(false), open);
 
   // Bấm avatar giờ chỉ hiện đúng 2 việc: xem/sửa "Hồ sơ" (tên, ảnh đại diện, mật khẩu...)
   // và Đăng xuất — các mục Danh mục/Giao diện/Hệ thống/Lịch sử đã chuyển sang icon Cài đặt

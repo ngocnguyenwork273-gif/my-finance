@@ -4,7 +4,7 @@
 import { App as CapApp } from '@capacitor/app';
 import { Capacitor } from '@capacitor/core';
 import { useEffect, useState } from 'react';
-import appLogoAsset from './assets/app-logo.svg';
+import appLogoAsset from './assets/app-logo.png';
 import { DataContext, ShellContext } from './context';
 import { closeTopModal, toast } from './feedback';
 import { AddTransaction } from './forms/AddTransaction';

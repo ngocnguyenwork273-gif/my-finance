@@ -90,10 +90,10 @@ export function buildReportData({ startDate, endDate, transactions, categories, 
   const prevAllocTxs = prevTxs.filter((t) => t.type === 'allocation' && !isInitialAllocationTx(t));
   const prevExpense = sum(prevTxs.filter((t) => t.type === 'expense' || (REPORT_COUNT_FUND_DEPOSIT_AS_EXPENSE && prevAllocTxs.includes(t))));
   function vsPrev(cur, prev, higherIsGood) {
-    if (prev <= 0) return cur > 0 ? { label: 'Mới so với kỳ trước', good: higherIsGood } : null;
+    if (prev <= 0) return cur > 0 ? { label: 'Mới so với kỳ trước', good: higherIsGood, pct: null } : null;
     const pct = ((cur - prev) / prev) * 100;
     const rising = pct >= 0;
-    return { label: `${rising ? '▲' : '▼'} ${Math.abs(pct).toFixed(1)}% so với kỳ trước`, good: rising === higherIsGood };
+    return { label: `${rising ? '▲' : '▼'} ${Math.abs(pct).toFixed(1)}% so với kỳ trước`, good: rising === higherIsGood, pct };
   }
   const incomeVsPrev = vsPrev(totalIncome, prevIncome, true);
   const expenseVsPrev = vsPrev(totalExpense, prevExpense, false);
@@ -111,7 +111,7 @@ export function buildReportData({ startDate, endDate, transactions, categories, 
   const toCatRows = (groups, whole) => groups.map((g) => ({ name: g.name, count: String(g.count), amount: formatMoney(g.total), pct: pctOf(g.total, whole) }));
 
   const incomeByCat = toCatRows(groupBy(incomeTxs, (t) => t.category_id || 'none', (t) => catById.get(t.category_id)?.name || 'Không rõ danh mục'), totalIncome);
-  const expenseByCat = toCatRows(groupBy(
+  const expenseByCatGroups = groupBy(
     expenseTxs,
     (t) => `${t.category_id || 'none'}:${t.type}`,
     (t) => {
@@ -119,7 +119,8 @@ export function buildReportData({ startDate, endDate, transactions, categories, 
       if (c?.is_fund) return t.type === 'allocation' ? `Nạp quỹ: ${c.name}` : `Rút từ quỹ: ${c.name}`;
       return c?.name || 'Không rõ danh mục';
     },
-  ), totalExpense);
+  );
+  const expenseByCat = toCatRows(expenseByCatGroups, totalExpense);
   const expenseBySource = groupBy(expenseTxs, (t) => txSourceInfo(t, cats, accs).key, (t) => txSourceInfo(t, cats, accs).label)
     .map((g) => ({ label: g.name, amount: formatMoney(g.total), pct: pctOf(g.total, totalExpense), pctNum: totalExpense > 0 ? (g.total / totalExpense) * 100 : 0 }));
 
@@ -151,11 +152,6 @@ export function buildReportData({ startDate, endDate, transactions, categories, 
   const poolAllocTotal = sum(poolAllocByFundRaw, (g) => g.total);
   const poolNonFundExpense = sum(rangeTxs.filter((t) => t.type === 'expense' && !catById.get(t.category_id)?.is_fund && t.account_id === null));
   const poolRemaining = spendingPoolTotal - poolAllocTotal - poolNonFundExpense;
-  // Tổng đã CHI ra từ Thu nhập được chi trong kỳ = nạp quỹ (lấy nguồn Thu nhập) + chi tiêu
-  // khác cũng lấy từ nguồn này (không tính quỹ). Trước đây 2 con số này tách rời (1 thẻ
-  // "Đã góp quỹ", 1 dòng ghi chú nhỏ "Đã chi tiêu ngoài quỹ"), không có chỗ nào cộng gộp lại
-  // thành 1 con số "đã chi bao nhiêu trong khoản được chi" — phải tự cộng tay mới ra.
-  const poolTotalSpent = poolAllocTotal + poolNonFundExpense;
   const poolAllocation = (spendingPoolTotal > 0 || poolAllocTotal > 0) ? {
     hasPool: true,
     pool: formatMoney(spendingPoolTotal),
@@ -167,16 +163,46 @@ export function buildReportData({ startDate, endDate, transactions, categories, 
     })),
     totalPct: pctOf(poolAllocTotal, spendingPoolTotal),
     total: formatMoney(poolAllocTotal),
-    // Tổng chi trong Thu nhập được chi = nạp quỹ + chi tiêu khác (không tính quỹ), cộng gộp
-    // sẵn 1 con số duy nhất, kèm % trên tổng Thu nhập được chi và breakdown nạp quỹ/chi khác
-    // để hiển thị thành 1 thẻ "Tổng chi" rõ ràng thay vì phải tự cộng 2 số rải rác.
-    totalSpent: formatMoney(poolTotalSpent),
-    totalSpentPct: pctOf(poolTotalSpent, spendingPoolTotal),
-    totalSpentBreakdown: `Nạp quỹ: ${formatMoney(poolAllocTotal)} · Chi khác: ${formatMoney(poolNonFundExpense)}`,
     nonFundExpense: poolNonFundExpense > 0 ? formatMoney(poolNonFundExpense) : null,
     remaining: formatMoneySigned(poolRemaining),
     remainingPositive: poolRemaining >= 0,
   } : { hasPool: false };
+
+  /* ---------- Nhận xét tự động ----------
+     1-2 câu ngắn gọn, ưu tiên điều ĐÁNG CHÚ Ý NHẤT trước: chi vượt Thu nhập được chi (cảnh
+     báo) > danh mục chi tiêu áp đảo (>= 25% tổng chi) > biến động tổng tài sản > biến động
+     thu/chi so với kỳ trước. Chỉ dùng số liệu đã tính sẵn ở trên, không query gì thêm. */
+  const insightCandidates = [];
+  if (poolAllocation.hasPool && poolRemaining < -1) {
+    insightCandidates.push({ text: `Đã chi vượt "Thu nhập được chi" ${formatMoney(Math.abs(poolRemaining))} trong kỳ này.`, tone: 'warn' });
+  }
+  if (expenseByCatGroups.length > 0 && totalExpense > 0) {
+    const top = expenseByCatGroups[0];
+    const topPct = (top.total / totalExpense) * 100;
+    if (topPct >= 25) {
+      insightCandidates.push({ text: `"${top.name}" chiếm ${topPct.toFixed(1)}% tổng chi tiêu trong kỳ (${formatMoney(top.total)}).`, tone: 'info' });
+    }
+  }
+  if (assetsStart > 0) {
+    const assetPctAbs = Math.abs((assetsDiff / assetsStart) * 100);
+    insightCandidates.push({
+      text: `Tổng tài sản ${assetsDiff >= 0 ? 'tăng' : 'giảm'} ${assetPctAbs.toFixed(1)}% so với đầu kỳ (${assetsDiff >= 0 ? '+' : '-'}${formatMoney(Math.abs(assetsDiff))}).`,
+      tone: assetsDiff >= 0 ? 'good' : 'warn',
+    });
+  }
+  if (incomeVsPrev && incomeVsPrev.pct != null) {
+    insightCandidates.push({
+      text: `Thu nhập ${incomeVsPrev.pct >= 0 ? 'tăng' : 'giảm'} ${Math.abs(incomeVsPrev.pct).toFixed(1)}% so với kỳ trước.`,
+      tone: incomeVsPrev.good ? 'good' : 'warn',
+    });
+  }
+  if (expenseVsPrev && expenseVsPrev.pct != null && Math.abs(expenseVsPrev.pct) >= 15) {
+    insightCandidates.push({
+      text: `Chi tiêu ${expenseVsPrev.pct >= 0 ? 'tăng' : 'giảm'} ${Math.abs(expenseVsPrev.pct).toFixed(1)}% so với kỳ trước.`,
+      tone: expenseVsPrev.good ? 'good' : 'warn',
+    });
+  }
+  const insights = insightCandidates.slice(0, 2);
 
   /* ---------- Ví ---------- */
   const walletRow = (a) => {
@@ -299,6 +325,7 @@ export function buildReportData({ startDate, endDate, transactions, categories, 
     endDate: reportDmy(endDate),
     generatedAt: new Date().toLocaleString('vi-VN'),
     sections,
+    insights,
     overview: {
       assetsStart: formatMoneySigned(assetsStart),
       assetsEnd: formatMoneySigned(assetsEnd),

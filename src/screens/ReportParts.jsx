@@ -331,9 +331,11 @@ function RStat({ label, value, color, sub, subColor }) {
   );
 }
 
-function RSection({ title, accent = '#7E7F90', children }) {
+function RSection({ id, title, accent = '#7E7F90', children }) {
   return (
-    <div className="mb-6 pl-3" style={{ borderLeft: `3px solid ${accent}` }}>
+    // scroll-mt-4: chừa khoảng trống phía trên khi nhảy tới bằng scrollIntoView, tránh dính
+    // sát mép trên khung xem trước.
+    <div id={id} className="mb-6 pl-3 scroll-mt-4" style={{ borderLeft: `3px solid ${accent}` }}>
       <h4 className="font-bold text-sm mb-2.5" style={{ color: accent }}>{title}</h4>
       {children}
     </div>
@@ -432,6 +434,24 @@ function RTransactionsByDay({ days, accent }) {
   );
 }
 
+// Nhận xét tự động — 1-2 câu nổi bật nhất (chi vượt mức, danh mục áp đảo, biến động tài
+// sản/thu/chi so với kỳ trước), hiện ngay dưới tiêu đề để người đọc nắm nhanh trước khi
+// vào chi tiết.
+function RInsights({ insights }) {
+  if (!insights || insights.length === 0) return null;
+  const toneColor = (t) => (t === 'warn' ? '#E0568F' : t === 'good' ? '#0DBACC' : '#303150');
+  return (
+    <div className="mb-5 rounded-2xl bg-ice-cream dark:bg-night-sky px-4 py-3.5 flex flex-col gap-2">
+      {insights.map((it, i) => (
+        <div key={i} className="flex items-start gap-2 text-sm">
+          <span className="mt-1.5 w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: toneColor(it.tone) }} />
+          <span className="text-blueberry dark:text-white font-semibold">{it.text}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function ReportHtmlPreview({ data }) {
   const sec = data.sections;
   const o = data.overview;
@@ -442,8 +462,10 @@ export function ReportHtmlPreview({ data }) {
         <p className="text-xs text-steel dark:text-light-grey mt-0.5">Từ {data.startDate} đến {data.endDate} · Xuất lúc {data.generatedAt}</p>
       </div>
 
+      {sec.overview && <RInsights insights={data.insights} />}
+
       {sec.overview && (
-        <RSection title="Tổng quan" accent={R_ACCENT.overview}>
+        <RSection id="report-sec-overview" title="Tổng quan" accent={R_ACCENT.overview}>
           <div className="flex flex-wrap gap-2 mb-2">
             <RStat label="Tổng tài sản đầu kỳ" value={o.assetsStart} />
             <RStat label="Tổng tài sản cuối kỳ" value={o.assetsEnd} />
@@ -484,7 +506,7 @@ export function ReportHtmlPreview({ data }) {
       )}
 
       {sec.income_by_cat && (
-        <RSection title="Thu nhập trong kỳ — theo nguồn" accent={R_ACCENT.income_by_cat}>
+        <RSection id="report-sec-income_by_cat" title="Thu nhập trong kỳ — theo nguồn" accent={R_ACCENT.income_by_cat}>
           <RTable
             accent={R_ACCENT.income_by_cat}
             cols={[{ key: 'name', label: 'Nguồn / Danh mục' }, { key: 'count', label: 'Số GD', align: 'right' }, { key: 'amount', label: 'Số tiền', align: 'right' }, { key: 'pct', label: 'Tỷ trọng', align: 'right' }]}
@@ -495,7 +517,7 @@ export function ReportHtmlPreview({ data }) {
       )}
 
       {sec.expense_by_cat && (
-        <RSection title="Chi tiêu trong kỳ — theo nguồn" accent={R_ACCENT.expense_by_cat}>
+        <RSection id="report-sec-expense_by_cat" title="Chi tiêu trong kỳ — theo nguồn" accent={R_ACCENT.expense_by_cat}>
           <RTable
             accent={R_ACCENT.expense_by_cat}
             cols={[{ key: 'name', label: 'Nguồn / Danh mục' }, { key: 'count', label: 'Số GD', align: 'right' }, { key: 'amount', label: 'Số tiền', align: 'right' }, { key: 'pct', label: 'Tỷ trọng', align: 'right' }]}
@@ -506,7 +528,7 @@ export function ReportHtmlPreview({ data }) {
       )}
 
       {sec.funds && (
-        <RSection title="Quỹ — số dư cuối kỳ" accent={R_ACCENT.funds}>
+        <RSection id="report-sec-funds" title="Quỹ — số dư cuối kỳ" accent={R_ACCENT.funds}>
           <RTable
             accent={R_ACCENT.funds}
             cols={[
@@ -521,7 +543,7 @@ export function ReportHtmlPreview({ data }) {
       )}
 
       {sec.wallets && (
-        <RSection title="Ví — tổng quan" accent={R_ACCENT.wallets}>
+        <RSection id="report-sec-wallets" title="Ví — tổng quan" accent={R_ACCENT.wallets}>
           {data.walletGroups.map((g, i) => (
             <div key={i} className="mb-4">
               <p className="text-xs font-bold text-blueberry dark:text-white mb-1.5">{g.title}</p>
@@ -541,7 +563,7 @@ export function ReportHtmlPreview({ data }) {
       )}
 
       {sec.fund_history && (
-        <RSection title="Lịch sử quỹ trong kỳ" accent={R_ACCENT.fund_history}>
+        <RSection id="report-sec-fund_history" title="Lịch sử quỹ trong kỳ" accent={R_ACCENT.fund_history}>
           {data.fundHistory.map((f, i) => (
             <div key={i} className="mb-4">
               <div className="flex items-center justify-between gap-2 mb-1.5">
@@ -562,7 +584,7 @@ export function ReportHtmlPreview({ data }) {
       )}
 
       {sec.transactions && (
-        <RSection title={`Tất cả giao dịch trong kỳ (${data.txCount})`} accent={R_ACCENT.transactions}>
+        <RSection id="report-sec-transactions" title={`Tất cả giao dịch trong kỳ (${data.txCount})`} accent={R_ACCENT.transactions}>
           <RTransactionsByDay days={data.txsByDay} accent={R_ACCENT.transactions} />
         </RSection>
       )}

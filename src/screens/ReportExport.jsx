@@ -11,13 +11,13 @@ import { buildReportData, firstDayOfThisMonthStr, reportDmy } from '../lib/repor
 import { ReportHtmlPreview } from './ReportParts';
 
 const REPORT_SECTIONS = [
-  { key: 'overview', label: 'Tổng quan (tài sản đầu/cuối kỳ, thu nhập, chi tiêu)' },
-  { key: 'income_by_cat', label: 'Thu nhập trong kỳ — theo nguồn' },
-  { key: 'expense_by_cat', label: 'Chi tiêu trong kỳ — theo nguồn' },
-  { key: 'funds', label: 'Quỹ — số dư cuối kỳ' },
-  { key: 'wallets', label: 'Ví — tổng quan (gồm những ví nào, số dư đầu/cuối)' },
-  { key: 'fund_history', label: 'Lịch sử quỹ (nạp/rút trong kỳ)' },
-  { key: 'transactions', label: 'Tất cả giao dịch trong kỳ' },
+  { key: 'overview', label: 'Tổng quan (tài sản đầu/cuối kỳ, thu nhập, chi tiêu)', shortLabel: 'Tổng quan' },
+  { key: 'income_by_cat', label: 'Thu nhập trong kỳ — theo nguồn', shortLabel: 'Thu nhập' },
+  { key: 'expense_by_cat', label: 'Chi tiêu trong kỳ — theo nguồn', shortLabel: 'Chi tiêu' },
+  { key: 'funds', label: 'Quỹ — số dư cuối kỳ', shortLabel: 'Quỹ' },
+  { key: 'wallets', label: 'Ví — tổng quan (gồm những ví nào, số dư đầu/cuối)', shortLabel: 'Ví' },
+  { key: 'fund_history', label: 'Lịch sử quỹ (nạp/rút trong kỳ)', shortLabel: 'Lịch sử quỹ' },
+  { key: 'transactions', label: 'Tất cả giao dịch trong kỳ', shortLabel: 'Giao dịch' },
 ];
 
 // Nhớ lựa chọn mục báo cáo của lần xuất gần nhất (trên chính máy này) để lần sau khỏi tick lại.
@@ -40,7 +40,16 @@ export function ReportExportModal({ onClose, transactions, categories, accounts,
   const [selectedSections, setSelectedSections] = useState(loadSavedSections);
   const [reportData, setReportData] = useState(null);
   const [downloading, setDownloading] = useState(false);
+  const [downloadingExcel, setDownloadingExcel] = useState(false);
   const [error, setError] = useState('');
+  const [activeSection, setActiveSection] = useState(null); // mục đang bôi đậm trên thanh tab xem trước
+
+  // Nhảy nhanh tới 1 mục trong bản xem trước thay vì phải cuộn dài qua hết — chỉ cuộn khung
+  // xem trước (không cuộn cả trang), vì mỗi RSection đã có id="report-sec-<key>" tương ứng.
+  function jumpToSection(key) {
+    setActiveSection(key);
+    document.getElementById(`report-sec-${key}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
 
   function toggleSection(key) {
     setSelectedSections((s) => {
@@ -89,6 +98,7 @@ export function ReportExportModal({ onClose, transactions, categories, accounts,
     try {
       const data = buildReportData({ startDate, endDate, transactions, categories, accounts, sections: selectedSections, spendingPoolByPeriod });
       setReportData(data);
+      setActiveSection(REPORT_SECTIONS.find((s) => selectedSections[s.key])?.key || null);
       setStep('preview');
     } catch (e) {
       setError('Không tính được báo cáo: ' + (e?.message || ''));
@@ -117,6 +127,38 @@ export function ReportExportModal({ onClose, transactions, categories, accounts,
         : 'Tạo PDF thất bại: ' + msg);
     }
     setDownloading(false);
+  }
+
+  // In: Chrome/Edge/Firefox tự thêm "đầu trang & chân trang" riêng (ngày giờ - tiêu đề trang -
+  // URL, lặp lại mỗi trang) khi người dùng bật tuỳ chọn đó trong hộp thoại in — nằm ngoài khả
+  // năng tắt bằng CSS của trang web. Mình không tắt được hộ họ, nhưng đổi tạm document.title
+  // (tên tab) từ "PandaFi" sang tên + kỳ báo cáo, để nếu phần đầu trang đó CÓ hiện ra thì ít
+  // nhất cũng là thông tin hữu ích thay vì chữ "PandaFi" lặp vô nghĩa; trả lại tên tab cũ ngay
+  // sau khi đóng hộp thoại in.
+  function printReport() {
+    if (!reportData) return;
+    const prevTitle = document.title;
+    document.title = `Bao cao tai chinh ${startDate} - ${endDate}`;
+    const restore = () => { document.title = prevTitle; window.removeEventListener('afterprint', restore); };
+    window.addEventListener('afterprint', restore);
+    window.print();
+  }
+
+  // Tải Excel: tương tự PDF — chỉ tải thư viện xlsx khi thật sự bấm, dùng đúng reportData đang hiện.
+  async function downloadExcel() {
+    if (!reportData) return;
+    setDownloadingExcel(true);
+    setError('');
+    try {
+      const { downloadReportExcel } = await import('../lib/reportExcel');
+      downloadReportExcel(reportData, `bao-cao-pandafi_${startDate}_${endDate}.xlsx`);
+    } catch (e) {
+      const msg = e?.message || '';
+      setError(/Failed to resolve|Cannot find module|Failed to fetch dynamically/.test(msg)
+        ? 'Chưa cài thư viện. Chạy "npm install xlsx" rồi khởi động lại dev server.'
+        : 'Tạo Excel thất bại: ' + msg);
+    }
+    setDownloadingExcel(false);
   }
 
   return createPortal(
@@ -162,18 +204,44 @@ export function ReportExportModal({ onClose, transactions, categories, accounts,
            </div>
           </div>
         ) : (
-          <div className="flex-1 min-h-0 overflow-y-auto scrollbar-hide p-5 md:p-8 bg-[#fafafa] dark:bg-[#17172a]">
-            {/* id này được style @media print bên dưới dùng để chỉ in đúng vùng báo cáo,
-                ẩn hết phần khung modal/nút bấm khi người dùng bấm "In". */}
-            <div id="pandafi-report-print-area">
-              {reportData && <ReportHtmlPreview data={reportData} />}
+          <div className="flex-1 min-h-0 flex flex-col">
+            {/* Thanh tab nhảy nhanh tới từng mục — đứng ngoài khung cuộn nên luôn cố định phía
+                trên, không bị cuộn trôi mất, và không bị in ra (nằm ngoài vùng print bên dưới). */}
+            <div className="flex-shrink-0 overflow-x-auto scrollbar-hide border-b border-light-grey/30 bg-white dark:bg-[#1e1e32] px-5 md:px-8">
+              <div className="flex gap-1.5 py-2.5 min-w-max">
+                {REPORT_SECTIONS.filter((s) => reportData?.sections?.[s.key]).map((s) => (
+                  <button
+                    key={s.key}
+                    onClick={() => jumpToSection(s.key)}
+                    className={`px-3.5 py-1.5 rounded-full text-xs font-bold whitespace-nowrap transition-colors ${
+                      activeSection === s.key
+                        ? 'bg-gradient-primary text-white'
+                        : 'bg-ice-cream dark:bg-night-sky text-steel dark:text-light-grey'
+                    }`}
+                  >
+                    {s.shortLabel}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="flex-1 min-h-0 overflow-y-auto scrollbar-hide p-5 md:p-8 bg-[#fafafa] dark:bg-[#17172a]">
+              {/* id này được style @media print bên dưới dùng để chỉ in đúng vùng báo cáo,
+                  ẩn hết phần khung modal/nút bấm khi người dùng bấm "In". */}
+              <div id="pandafi-report-print-area">
+                {reportData && <ReportHtmlPreview data={reportData} />}
+              </div>
             </div>
           </div>
         )}
 
-        {/* Chỉ áp dụng khi đang in (Ctrl+P / nút In) — không ảnh hưởng gì lúc xem bình thường. */}
+        {/* Chỉ áp dụng khi đang in (Ctrl+P / nút In) — không ảnh hưởng gì lúc xem bình thường.
+            Lưu ý: phần "đầu trang/chân trang" (ngày giờ, tên trang, URL, số trang) lặp lại mỗi
+            trang KHÔNG đến từ đây — đó là tuỳ chọn riêng của trình duyệt trong hộp thoại in
+            ("Đầu trang và chân trang" / "Headers and footers"), web không tắt được bằng CSS;
+            người dùng tự bỏ tick ô đó trong "Chế độ cài đặt khác" nếu không muốn thấy. */}
         <style>{`
           @media print {
+            @page { margin: 14mm 12mm; }
             body * { visibility: hidden; }
             #pandafi-report-print-area, #pandafi-report-print-area * { visibility: visible; }
             #pandafi-report-print-area { position: absolute; left: 0; top: 0; width: 100%; }
@@ -192,8 +260,11 @@ export function ReportExportModal({ onClose, transactions, categories, accounts,
               </button>
             ) : (
               <>
-                <button onClick={() => window.print()} className="hidden md:block px-5 py-2.5 rounded-full text-sm font-bold text-steel dark:text-light-grey bg-ice-cream dark:bg-[#2a2a44]">
+                <button onClick={printReport} className="hidden md:block px-5 py-2.5 rounded-full text-sm font-bold text-steel dark:text-light-grey bg-ice-cream dark:bg-[#2a2a44]">
                   In
+                </button>
+                <button onClick={downloadExcel} disabled={downloadingExcel} className="flex items-center gap-2 px-5 py-2.5 rounded-full text-sm font-bold text-steel dark:text-light-grey bg-ice-cream dark:bg-[#2a2a44] disabled:opacity-50">
+                  {downloadingExcel ? <Loader2 size={15} className="animate-spin" /> : <Download size={15} />} Tải Excel
                 </button>
                 <button onClick={downloadPdf} disabled={downloading} className="flex items-center gap-2 px-5 py-2.5 rounded-full text-sm font-bold text-white bg-gradient-primary disabled:opacity-50 shadow-md shadow-turquoise/30">
                   {downloading ? <Loader2 size={15} className="animate-spin" /> : <Download size={15} />} Tải PDF

@@ -2,10 +2,7 @@
 /* Self-host font Nunito (gói @fontsource, đã gồm subset tiếng Việt) — không còn tải từ Google Fonts,
    nên chạy offline trong Capacitor được và không bị chớp font lúc mới mở app.
    Cài: npm i @fontsource/nunito   (@import phải nằm trên cùng file CSS) */
-@import "@fontsource/nunito/400.css";
-@import "@fontsource/nunito/600.css";
-@import "@fontsource/nunito/700.css";
-@import "@fontsource/nunito/800.css";
+@import "./fonts.css";
 
 @custom-variant dark (&:where(.dark, .dark *));
 

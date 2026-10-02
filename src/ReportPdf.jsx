@@ -67,6 +67,7 @@ const s = StyleSheet.create({
   legendRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 5 },
   legendDot: { width: 8, height: 8, borderRadius: 4, marginRight: 6 },
   dayHead: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 3, paddingHorizontal: 6, marginTop: 7, marginBottom: 2, borderRadius: 3 },
+  sparkRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 5 },
   footer: { position: 'absolute', bottom: 22, left: 40, right: 40, flexDirection: 'row', justifyContent: 'space-between', fontSize: 8, color: C.steel },
   // Trang bìa
   coverPage: { fontFamily: 'Nunito', color: C.ink, paddingHorizontal: 44, paddingTop: 70, paddingBottom: 44 },
@@ -80,6 +81,10 @@ const s = StyleSheet.create({
   coverHeroSub: { fontSize: 9, marginTop: 6, fontWeight: 700 },
   coverStatsRow: { flexDirection: 'row', gap: 10, marginTop: 12 },
   coverFooter: { position: 'absolute', bottom: 44, left: 44, right: 44, fontSize: 8, color: C.steel, flexDirection: 'row', justifyContent: 'space-between' },
+  coverInsights: { marginTop: 16, gap: 7 },
+  coverInsightRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 7 },
+  coverInsightDot: { width: 5, height: 5, borderRadius: 2.5, marginTop: 4 },
+  coverInsightText: { fontSize: 10, fontWeight: 700, color: C.ink, flex: 1 },
 });
 
 // Emoji không hiển thị được nếu chưa đăng ký nguồn emoji → bỏ khỏi PDF, chỉ giữ tên.
@@ -238,10 +243,13 @@ function PoolAllocationBlock({ p }) {
       <Text style={s.groupTitle}>Thu nhập được chi — góp quỹ theo mục</Text>
       <View style={s.cards}>
         <Card label="Thu nhập được chi" value={p.pool} color={C.turquoise} />
-        <Card label={`Tổng chi (${p.totalSpentPct})`} value={p.totalSpent} color="#8E6CF1" sub={p.totalSpentBreakdown} />
+        <Card label={`Đã góp quỹ (${p.totalPct})`} value={p.total} color="#8E6CF1" />
         <Card label="Còn lại được chi trong kỳ" value={p.remaining} color={p.remainingPositive ? C.turquoise : C.pink} />
       </View>
       {p.rows.length > 0 && <BarList rows={p.rows} labelKey="name" />}
+      {p.nonFundExpense && (
+        <Text style={s.note}>Đã chi tiêu (ngoài quỹ) từ Thu nhập được chi: {p.nonFundExpense}.</Text>
+      )}
     </>
   );
 }
@@ -365,13 +373,41 @@ function WalletsSection({ groups }) {
   );
 }
 
+// Đường xu hướng nhỏ (sparkline) cho số dư quỹ theo thời gian trong kỳ — 1 đường nối các
+// điểm, không trục/nhãn, chỉ để nhìn nhanh xu hướng tăng/giảm. Dùng <Path> đơn giản (không
+// dash pattern/transform) để tương thích tốt mọi trình đọc PDF, giống bài học từ donut chart.
+function Sparkline({ values, width = 92, height = 26, color = C.steel }) {
+  if (!values || values.length < 2) return null;
+  const min = Math.min(...values), max = Math.max(...values);
+  const range = max - min || 1;
+  const stepX = width / (values.length - 1);
+  const pad = 2;
+  const pts = values.map((v, i) => ({
+    x: i * stepX,
+    y: pad + (1 - (v - min) / range) * (height - pad * 2),
+  }));
+  const d = pts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(' ');
+  const last = pts[pts.length - 1];
+  return (
+    <Svg width={width} height={height} viewBox={`0 0 ${width} ${height}`}>
+      <Path d={d} stroke={color} strokeWidth={1.6} fill="none" />
+      <Circle cx={last.x} cy={last.y} r={2} fill={color} />
+    </Svg>
+  );
+}
+
 function FundHistorySection({ history }) {
   const accent = ACCENT.fund_history;
   return (
     <Section title="Lịch sử quỹ trong kỳ" accent={accent}>
       {history.length === 0 ? <Text style={s.empty}>Chưa có quỹ nào.</Text> : history.map((f, i) => (
         <View key={i} style={{ marginBottom: 8 }}>
-          <Text style={s.groupTitle} minPresenceAhead={50}>{clean(f.name)}</Text>
+          <View style={s.sparkRow} wrap={false}>
+            <Text style={[s.groupTitle, { marginTop: 0, marginBottom: 0, flex: 1 }]}>{clean(f.name)}</Text>
+            {f.sparkline && f.sparkline.length > 1 && (
+              <Sparkline values={f.sparkline} color={f.sparkline[f.sparkline.length - 1] >= f.sparkline[0] ? C.turquoise : C.pink} />
+            )}
+          </View>
           {f.rows.length === 0 ? <Text style={s.empty}>Không có nạp/rút trong kỳ.</Text> : (
             <Table
               accent={accent}
@@ -463,6 +499,17 @@ function CoverPage({ data }) {
             <Card label="Thu nhập trong kỳ" value={o.income} color={C.turquoise} />
             <Card label="Chi tiêu trong kỳ" value={o.expense} color={C.pink} />
           </View>
+        </View>
+      )}
+
+      {data.insights && data.insights.length > 0 && (
+        <View style={s.coverInsights}>
+          {data.insights.map((it, i) => (
+            <View key={i} style={s.coverInsightRow}>
+              <View style={[s.coverInsightDot, { backgroundColor: it.tone === 'warn' ? C.pink : it.tone === 'good' ? C.turquoise : C.ink }]} />
+              <Text style={s.coverInsightText}>{it.text}</Text>
+            </View>
+          ))}
         </View>
       )}
 
