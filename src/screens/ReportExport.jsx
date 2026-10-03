@@ -10,6 +10,16 @@ import { currentPeriodKey, localDateStr, periodKeyToRange, todayDateStr } from '
 import { buildReportData, firstDayOfThisMonthStr, reportDmy } from '../lib/reportData';
 import { ReportHtmlPreview } from './ReportParts';
 
+/* ==============================================================================
+   XUẤT BÁO CÁO PDF — chọn khoảng ngày tự do + chọn mục muốn đưa vào. PDF được dựng
+   bằng @react-pdf/renderer (chữ thật, ngắt trang chuẩn) trong src/ReportPdf.jsx,
+   import động để không làm nặng bundle chính.
+   YÊU CẦU: npm install @react-pdf/renderer  +  đặt font vào public/fonts/.
+
+   Số liệu tài sản đầu/cuối kỳ dùng ĐÚNG cách chốt sổ của trang Báo cáo:
+   - Cuối kỳ = số dư chốt cuối ngày cuối kỳ (kỳ chưa kết thúc thì tính đến hôm nay).
+   - Đầu kỳ  = số dư chốt cuối ngày liền trước ngày bắt đầu (= cuối kỳ trước).
+   ============================================================================== */
 const REPORT_SECTIONS = [
   { key: 'overview', label: 'Tổng quan (tài sản đầu/cuối kỳ, thu nhập, chi tiêu)', shortLabel: 'Tổng quan' },
   { key: 'income_by_cat', label: 'Thu nhập trong kỳ — theo nguồn', shortLabel: 'Thu nhập' },
@@ -151,11 +161,11 @@ export function ReportExportModal({ onClose, transactions, categories, accounts,
     setError('');
     try {
       const { downloadReportExcel } = await import('../lib/reportExcel');
-      downloadReportExcel(reportData, `bao-cao-pandafi_${startDate}_${endDate}.xlsx`);
+      await downloadReportExcel(reportData, `bao-cao-pandafi_${startDate}_${endDate}.xlsx`);
     } catch (e) {
       const msg = e?.message || '';
       setError(/Failed to resolve|Cannot find module|Failed to fetch dynamically/.test(msg)
-        ? 'Chưa cài thư viện. Chạy "npm install xlsx" rồi khởi động lại dev server.'
+        ? 'Chưa cài thư viện. Chạy "npm install exceljs" rồi khởi động lại dev server.'
         : 'Tạo Excel thất bại: ' + msg);
     }
     setDownloadingExcel(false);

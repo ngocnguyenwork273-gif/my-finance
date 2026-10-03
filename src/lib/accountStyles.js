@@ -21,20 +21,3 @@ const ACCOUNT_TYPE_STYLES = {
 };
 
 export function accountCardGradient(type) { return ACCOUNT_TYPE_STYLES[type] || ACCOUNT_TYPE_STYLES.other; }
-
-// ==============================================================================
-// TÌM KIẾM KHÔNG DẤU + VIẾT TẮT — dùng chung cho mọi ô search trong app (giao dịch,
-// quỹ, mục tiêu...). Ví dụ: gõ "suc khoe", "sk", "khoe" đều khớp "Sức khỏe".
-// ==============================================================================
-
-
-
-
-// ==============================================================================
-// XOÁ GIAO DỊCH TRONG CÁC DÒNG LỊCH SỬ (dùng chung cho mọi màn hình có hiển thị
-// lịch sử giao dịch — Trang chủ, Chi tiết quỹ, Chi tiết ví, Báo cáo...).
-// Xoá ở đây LUÔN LÀ soft-delete qua softDelete('transactions', ...): giao dịch
-// chỉ bị ẩn khỏi ứng dụng (deleted_at được set) và được ghi log restorable vào
-// system_logs, để người dùng có thể khôi phục trong 30 ngày ở Cài đặt > Lịch sử
-// hệ thống — KHÔNG xoá cứng khỏi database.
-// ==============================================================================

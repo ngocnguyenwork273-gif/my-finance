@@ -9,6 +9,15 @@ import { compareTxTime, displayTxNote } from '../lib/finance';
 import { formatMoney } from '../lib/format';
 import { txBalanceAfter, txSourceInfo } from '../lib/ledger';
 import { CustomSelect } from './inputs';
+// ==============================================================================
+// XOÁ GIAO DỊCH TRONG CÁC DÒNG LỊCH SỬ (dùng chung cho mọi màn hình có hiển thị
+// lịch sử giao dịch — Trang chủ, Chi tiết quỹ, Chi tiết ví, Báo cáo...).
+// Xoá ở đây LUÔN LÀ soft-delete qua softDelete('transactions', ...): giao dịch
+// chỉ bị ẩn khỏi ứng dụng (deleted_at được set) và được ghi log restorable vào
+// system_logs, để người dùng có thể khôi phục trong 30 ngày ở Cài đặt > Lịch sử
+// hệ thống — KHÔNG xoá cứng khỏi database.
+// ==============================================================================
+
 
 export function TxDeleteButton({ onClick, className = '', size = 14 }) {
   return (

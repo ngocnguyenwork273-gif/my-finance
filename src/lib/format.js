@@ -5,6 +5,10 @@
    Tách ra từ App.jsx để test được bằng Vitest (xem format.test.js).
    ============================================================================== */
 
+// ==============================================================================
+// TÌM KIẾM KHÔNG DẤU + VIẾT TẮT — dùng chung cho mọi ô search trong app (giao dịch,
+// quỹ, mục tiêu...). Ví dụ: gõ "suc khoe", "sk", "khoe" đều khớp "Sức khỏe".
+// ==============================================================================
 export function removeDiacritics(str) {
   return (str || '')
     .normalize('NFD')
