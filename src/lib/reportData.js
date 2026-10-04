@@ -351,10 +351,3 @@ export function buildReportData({ startDate, endDate, transactions, categories, 
     txs, txCount: txs.length, txsByDay,
   };
 }
-
-/* ---------- Xem trước ngay trên giao diện (HTML, không cần tạo PDF) ----------
-   Dùng lại đúng dữ liệu đã tính trong buildReportData(), chỉ khác cách vẽ: đây là
-   div/Tailwind để hiện ngay trong app, không phải PDF. Nút "Tải PDF" bên dưới mới
-   thật sự dựng file bằng react-pdf.
-   Mỗi mục có 1 màu riêng (accent) để dễ phân biệt — header bảng, dòng tổng và viền trái
-   của khối đều tô theo màu đó. */

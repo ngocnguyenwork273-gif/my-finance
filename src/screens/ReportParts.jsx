@@ -176,17 +176,12 @@ export function MonthlyTrendChart({ trendData }) {
   );
 }
 
-/* ==============================================================================
-   XUẤT BÁO CÁO PDF — chọn khoảng ngày tự do + chọn mục muốn đưa vào. PDF được dựng
-   bằng @react-pdf/renderer (chữ thật, ngắt trang chuẩn) trong src/ReportPdf.jsx,
-   import động để không làm nặng bundle chính.
-   YÊU CẦU: npm install @react-pdf/renderer  +  đặt font vào public/fonts/.
-
-   Số liệu tài sản đầu/cuối kỳ dùng ĐÚNG cách chốt sổ của trang Báo cáo:
-   - Cuối kỳ = số dư chốt cuối ngày cuối kỳ (kỳ chưa kết thúc thì tính đến hôm nay).
-   - Đầu kỳ  = số dư chốt cuối ngày liền trước ngày bắt đầu (= cuối kỳ trước).
-   ============================================================================== */
-
+/* ---------- Xem trước ngay trên giao diện (HTML, không cần tạo PDF) ----------
+   Dùng lại đúng dữ liệu đã tính trong buildReportData(), chỉ khác cách vẽ: đây là
+   div/Tailwind để hiện ngay trong app, không phải PDF. Nút "Tải PDF" bên dưới mới
+   thật sự dựng file bằng react-pdf.
+   Mỗi mục có 1 màu riêng (accent) để dễ phân biệt — header bảng, dòng tổng và viền trái
+   của khối đều tô theo màu đó. */
 const R_ACCENT = {
   overview: '#0DBACC',
   income_by_cat: '#12B76A',
