@@ -243,6 +243,44 @@ export function FundDetail({ category, onBack }) {
   // Đảo ngược để hiển thị mới nhất lên đầu
   const displayHistory = [...dateFilteredHistory].reverse();
 
+  // FIX: "Tất cả" trước đây xen lẫn 1 dòng "Lợi nhuận +X" cho MỖI NGÀY với giao dịch thật
+  // (Nạp/Rút quỹ) — có kỳ gần như toàn bộ danh sách là lãi vặt hằng ngày, giao dịch thật bị
+  // chìm nghỉm ở giữa (chi tiết full theo ngày vẫn xem đủ ở tab "Lợi nhuận" riêng, không mất
+  // thông tin). Giờ CHỈ ở filter "all": gộp các dòng lợi nhuận NẰM LIỀN NHAU (không có giao
+  // dịch thật xen giữa) thành 1 dòng tổng duy nhất, kèm số ngày + khoảng ngày. Lợi nhuận đứng
+  // 1 mình (không liền ngày nào khác) thì giữ nguyên, không gộp — đỡ "mất" ngày đó khỏi trực
+  // quan khi nó là lợi nhuận duy nhất quanh 1 giao dịch thật.
+  function groupConsecutiveProfitRows(list) {
+    const out = [];
+    let i = 0;
+    while (i < list.length) {
+      if (!list[i].isProfit) { out.push(list[i]); i++; continue; }
+      let j = i;
+      while (j < list.length && list[j].isProfit) j++;
+      const run = list.slice(i, j); // list đã đảo mới->cũ: run[0] = ngày mới nhất trong nhóm
+      if (run.length >= 2) {
+        out.push({
+          id: `profit-group-${run[run.length - 1].id}-${run[0].id}`,
+          type: 'profit',
+          isProfit: true,
+          isProfitGroup: true,
+          amount: run.reduce((s, x) => s + Number(x.amount), 0),
+          count: run.length,
+          created_at: run[0].created_at,
+          date: run[0].date,
+          dateFromLabel: new Date(run[run.length - 1].date || run[run.length - 1].created_at),
+          dateToLabel: new Date(run[0].date || run[0].created_at),
+          balanceAfter: run[0].balanceAfter,
+        });
+      } else {
+        out.push(run[0]);
+      }
+      i = j;
+    }
+    return out;
+  }
+  const displayHistoryGrouped = filter === 'all' ? groupConsecutiveProfitRows(displayHistory) : displayHistory;
+
   const balance = fundBalanceWithProfit(category, transactions);
   const principalBalance = fundBalance(category.id, transactions);
   const accruedProfit = Math.max(0, balance - principalBalance);
@@ -354,17 +392,20 @@ export function FundDetail({ category, onBack }) {
             )}
           </div>
 
-          {displayHistory.length === 0 ? (
+          {displayHistoryGrouped.length === 0 ? (
             <p className="text-steel dark:text-light-grey text-sm text-center py-8">Chưa có hoạt động nào.</p>
           ) : (
             <div className="flex flex-col scrollbar-hide">
               {(() => {
                 let lastDateKey = null;
-                return displayHistory.map((item) => {
+                return displayHistoryGrouped.map((item) => {
                   const isProfit = item.isProfit;
                   const isAlloc = item.type === 'allocation';
                   const isInitial = isAlloc && firstAllocation && item.id === firstAllocation.id;
-                  const label = isAlloc ? 'Góp quỹ' : isProfit ? 'Nhận lợi nhuận tự động' : 'Rút quỹ';
+                  // Dòng lợi nhuận GỘP NHIỀU NGÀY (xem groupConsecutiveProfitRows ở trên):
+                  // label + dòng ngày tháng hiện khoảng ngày thay vì 1 ngày đơn, các dòng khác
+                  // giữ nguyên logic cũ.
+                  const label = item.isProfitGroup ? `Lãi tích lũy (${item.count} ngày)` : isAlloc ? 'Góp quỹ' : isProfit ? 'Nhận lợi nhuận tự động' : 'Rút quỹ';
                   const iconBg = item.type === 'expense' ? 'bg-cotton-candy/10' : 'bg-turquoise/10';
                   const amountColor = item.type === 'expense' ? 'text-cotton-candy' : 'text-turquoise';
                   const timeDisplay = formatDisplayTime(item);
@@ -376,6 +417,9 @@ export function FundDetail({ category, onBack }) {
                   const showHeader = dateKey !== lastDateKey;
                   lastDateKey = dateKey;
                   const noteText = isProfit ? item.note : displayTxNote(item.note);
+                  const dateLine = item.isProfitGroup
+                    ? `${item.dateFromLabel.toLocaleDateString('vi-VN')} - ${item.dateToLabel.toLocaleDateString('vi-VN')}`
+                    : `${itemDate.toLocaleDateString('vi-VN')} · ${timeDisplay}`;
 
                   return (
                     <Fragment key={item.id}>
@@ -403,7 +447,7 @@ export function FundDetail({ category, onBack }) {
                             </div>
                             <p className={`font-bold text-sm flex-shrink-0 ${amountColor}`}>{item.type === 'expense' ? '-' : '+'}{formatMoney(item.amount)}</p>
                           </div>
-                          <p className="text-steel dark:text-light-grey text-xs mt-0.5">{itemDate.toLocaleDateString('vi-VN')} · {timeDisplay}</p>
+                          <p className="text-steel dark:text-light-grey text-xs mt-0.5">{dateLine}</p>
                           {noteText && <p className="text-steel dark:text-light-grey text-xs mt-0.5 truncate">{noteText}</p>}
                           {item.balanceAfter !== undefined && item.balanceAfter !== null && <p className="text-steel dark:text-light-grey text-xs mt-0.5">Số dư cuối: {formatMoney(item.balanceAfter)}</p>}
                         </div>
@@ -540,14 +584,17 @@ export function FundDetail({ category, onBack }) {
                     )}
                   </div>
                 )
-              ) : displayHistory.length === 0 ? <p className="text-steel dark:text-light-grey text-sm text-center py-8">Chưa có giao dịch nào.</p> : (
+              ) : displayHistoryGrouped.length === 0 ? <p className="text-steel dark:text-light-grey text-sm text-center py-8">Chưa có giao dịch nào.</p> : (
                 <div className="flex flex-col scrollbar-hide">
-                  {displayHistory.map((item, idx) => {
+                  {displayHistoryGrouped.map((item, idx) => {
                     const isInitial = item.type === 'allocation' && firstAllocation && item.id === firstAllocation.id;
                     const isOverLimit = (item.note || '').includes('[Vượt hạn mức]');
                     const showTopBorder = idx > 0 && !isInitial;
                     const itemDateTime = historyItemDate(item);
-                    const dateTimeLabel = `${itemDateTime.toLocaleDateString('vi-VN')} ${itemDateTime.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}`;
+                    // Dòng lợi nhuận GỘP NHIỀU NGÀY: hiện khoảng ngày thay vì 1 mốc ngày+giờ.
+                    const dateTimeLabel = item.isProfitGroup
+                      ? `${item.dateFromLabel.toLocaleDateString('vi-VN')} - ${item.dateToLabel.toLocaleDateString('vi-VN')}`
+                      : `${itemDateTime.toLocaleDateString('vi-VN')} ${itemDateTime.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}`;
                     const noteLine = item.isProfit ? item.note : displayTxNote(item.note);
                     return (
                       <div
@@ -561,7 +608,7 @@ export function FundDetail({ category, onBack }) {
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-1.5">
                             <p className="text-blueberry dark:text-white font-bold text-sm">
-                              {item.type === 'allocation' ? 'Nạp quỹ' : item.isProfit ? 'Lợi nhuận' : 'Rút quỹ (chi tiêu)'}
+                              {item.type === 'allocation' ? 'Nạp quỹ' : item.isProfitGroup ? `Lãi tích lũy (${item.count} ngày)` : item.isProfit ? 'Lợi nhuận' : 'Rút quỹ (chi tiêu)'}
                               {isInitial && <span className="ml-1.5 text-[10px] font-bold text-turquoise bg-turquoise/20 px-1.5 py-0.5 rounded-full align-middle">Nạp ban đầu</span>}
                             </p>
                             {isOverLimit && <span className="text-[10px] font-bold text-white bg-cotton-candy px-2 py-0.5 rounded-full">Vượt hạn mức</span>}

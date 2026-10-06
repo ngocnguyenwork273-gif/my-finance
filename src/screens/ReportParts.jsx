@@ -176,12 +176,17 @@ export function MonthlyTrendChart({ trendData }) {
   );
 }
 
-/* ---------- Xem trước ngay trên giao diện (HTML, không cần tạo PDF) ----------
-   Dùng lại đúng dữ liệu đã tính trong buildReportData(), chỉ khác cách vẽ: đây là
-   div/Tailwind để hiện ngay trong app, không phải PDF. Nút "Tải PDF" bên dưới mới
-   thật sự dựng file bằng react-pdf.
-   Mỗi mục có 1 màu riêng (accent) để dễ phân biệt — header bảng, dòng tổng và viền trái
-   của khối đều tô theo màu đó. */
+/* ==============================================================================
+   XUẤT BÁO CÁO PDF — chọn khoảng ngày tự do + chọn mục muốn đưa vào. PDF được dựng
+   bằng @react-pdf/renderer (chữ thật, ngắt trang chuẩn) trong src/ReportPdf.jsx,
+   import động để không làm nặng bundle chính.
+   YÊU CẦU: npm install @react-pdf/renderer  +  đặt font vào public/fonts/.
+
+   Số liệu tài sản đầu/cuối kỳ dùng ĐÚNG cách chốt sổ của trang Báo cáo:
+   - Cuối kỳ = số dư chốt cuối ngày cuối kỳ (kỳ chưa kết thúc thì tính đến hôm nay).
+   - Đầu kỳ  = số dư chốt cuối ngày liền trước ngày bắt đầu (= cuối kỳ trước).
+   ============================================================================== */
+
 const R_ACCENT = {
   overview: '#0DBACC',
   income_by_cat: '#12B76A',
@@ -200,37 +205,51 @@ function hexToRgba(hex, alpha) {
   return `rgba(${r},${g},${b},${alpha})`;
 }
 
-// Biểu đồ tròn (donut) cơ cấu tài sản — vẽ bằng SVG thuần, cùng kỹ thuật với bản PDF
-// (nhiều <circle> chồng lên nhau, mỗi cung 1 đoạn strokeDasharray) để 2 bản khớp nhau.
+// Biểu đồ tròn (donut) cơ cấu tài sản — vẽ bằng SVG thuần.
+// Lưu ý: KHÔNG dùng kỹ thuật nhiều <circle> chồng nhau + strokeDasharray/strokeDashoffset +
+// transform rotate — cách đó hiển thị đúng khi xem trang bình thường, nhưng khi trình duyệt tự
+// chuyển trang sang chế độ in/PDF (Ctrl+P, hoặc "In" trong app) thì bị vỡ màu, chỉ còn đúng
+// cung cuối cùng — giống hệt lỗi từng gặp ở bản PDF (react-pdf). Thay vào đó vẽ từng cung là 1
+// <path> với lệnh arc (A) — không phụ thuộc dash pattern hay transform nên tương thích rộng,
+// đúng kỹ thuật đã dùng để sửa bản PDF trước đây, giờ áp dụng luôn cho bản web cho đồng nhất.
+function polarPoint(cx, cy, r, angleDeg) {
+  const rad = ((angleDeg - 90) * Math.PI) / 180;
+  return { x: cx + r * Math.cos(rad), y: cy + r * Math.sin(rad) };
+}
 function RDonut({ items, size = 92, thickness = 14 }) {
   const r = (size - thickness) / 2;
   const cx = size / 2, cy = size / 2;
-  const circumference = 2 * Math.PI * r;
+  const total = items.reduce((s, it) => s + it.pctNum, 0);
+  // Chỉ 1 mục chiếm gần như toàn bộ (hoặc chỉ có 1 mục) -> vẽ 1 vòng tròn kín, tránh cung suy biến.
+  if (items.length === 1 || total <= 0) {
+    const color = items[0]?.color || 'rgba(126,127,144,0.18)';
+    return (
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="flex-shrink-0">
+        <circle cx={cx} cy={cy} r={r} stroke={color} strokeWidth={thickness} fill="none" />
+      </svg>
+    );
+  }
   let acc = 0;
+  const GAP = 1.2; // độ — khoảng hở nhỏ giữa các cung cho dễ phân biệt
+  const arcs = items.map((it, i) => {
+    const sweep = (it.pctNum / 100) * 360;
+    const startAngle = acc + (sweep < 360 ? GAP / 2 : 0);
+    const endAngle = acc + sweep - (sweep < 360 ? GAP / 2 : 0);
+    acc += sweep;
+    const p1 = polarPoint(cx, cy, r, startAngle);
+    const p2 = polarPoint(cx, cy, r, endAngle);
+    const largeArc = endAngle - startAngle > 180 ? 1 : 0;
+    return { key: i, color: it.color, d: `M ${p1.x} ${p1.y} A ${r} ${r} 0 ${largeArc} 1 ${p2.x} ${p2.y}` };
+  });
   return (
     <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="flex-shrink-0">
       <circle cx={cx} cy={cy} r={r} stroke="rgba(126,127,144,0.18)" strokeWidth={thickness} fill="none" />
-      {items.map((it, i) => {
-        const len = (it.pctNum / 100) * circumference;
-        const el = (
-          <circle
-            key={i}
-            cx={cx} cy={cy} r={r}
-            stroke={it.color}
-            strokeWidth={thickness}
-            fill="none"
-            strokeDasharray={`${len} ${circumference - len}`}
-            strokeDashoffset={-acc}
-            transform={`rotate(-90 ${cx} ${cy})`}
-          />
-        );
-        acc += len;
-        return el;
-      })}
+      {arcs.map((a) => (
+        <path key={a.key} d={a.d} stroke={a.color} strokeWidth={thickness} fill="none" strokeLinecap="butt" />
+      ))}
     </svg>
   );
 }
-
 function RAssetDonut({ items }) {
   if (!items || items.length === 0) return null;
   return (
