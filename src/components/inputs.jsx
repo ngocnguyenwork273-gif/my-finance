@@ -5,7 +5,7 @@ import { Children, useEffect, useRef, useState } from 'react';
 import { ChevronDown } from '../icons';
 import { countRealCharsBefore, evalMoneyExpression, formatWithThousands, indexAfterRealCharCount, stripLeadingZeros } from '../lib/format';
 
-export function MoneyInput({ value, onChange, placeholder, className }) {
+export function MoneyInput({ value, onChange, placeholder, className, ...inputProps }) {   // inputProps: id, aria-invalid, aria-describedby...
   const [focused, setFocused] = useState(false);
   const [rawText, setRawText] = useState(''); // luôn KHÔNG có dấu phẩy — dùng để tính toán
   const inputRef = useRef(null);
@@ -61,7 +61,8 @@ export function MoneyInput({ value, onChange, placeholder, className }) {
   return (
     <input ref={inputRef} type="text" inputMode="text" value={displayValue}
       onFocus={handleFocus} onChange={handleChange} onBlur={handleBlur} onKeyDown={handleKeyDown}
-      placeholder={placeholder} className={className} />
+      placeholder={placeholder} className={className} {...inputProps}
+    />
   );
 }
 

@@ -15,6 +15,7 @@ import { ACCOUNT_TYPES } from '../lib/accountStyles';
 import { accountBalance, accountBalanceAtDate, compareTxTime, displayTxNote, nowForInput } from '../lib/finance';
 import { formatMoney, txDeleteDescription } from '../lib/format';
 import { supabase } from '../supabaseClient';
+import { FieldError, focusField } from '../forms/formErrors';
 
 function QuickAdjustBalanceForm({ account, currentBalance, onClose, onSaved }) {
   useEscapeKey(onClose); // Esc / nút Back Android đóng modal
@@ -27,9 +28,15 @@ function QuickAdjustBalanceForm({ account, currentBalance, onClose, onSaved }) {
   const [note, setNote] = useState('');
   const [saving, setSaving] = useState(false);
 
+  // Kiểm tra số tiền / ngày giờ: lỗi hiện ngay dưới ô sau lần bấm Lưu đầu tiên, tự biến mất khi nhập đủ
+  const [submitted, setSubmitted] = useState(false);
+  const amountError = amount ? '' : 'Nhập số tiền';
+  const dateError = dateTime ? '' : 'Chọn ngày giờ nhập';
+  const shownAmountError = submitted ? amountError : '';
+  const shownDateError = submitted ? dateError : '';
+
   async function handleSave() {
-    if (!amount) { toast('Nhập số tiền'); return; }
-    if (!dateTime) { toast('Chọn ngày giờ nhập'); return; }
+    if (amountError || dateError) { setSubmitted(true); focusField(amountError ? 'field-amount' : 'err-dateTime'); return; }
     setSaving(true);
     let signedAmount;
     if (mode === 'increase') signedAmount = Number(amount);
@@ -63,9 +70,11 @@ function QuickAdjustBalanceForm({ account, currentBalance, onClose, onSaved }) {
           <button onClick={() => { setMode(mode === 'decrease' ? null : 'decrease'); setAmount(''); }} className={`flex-1 py-2 rounded-full text-sm transition flex items-center justify-center gap-1.5 ${mode === 'decrease' ? 'bg-white dark:bg-[#2a2a44] text-cotton-candy font-extrabold shadow-md shadow-cotton-candy/15 ring-1 ring-cotton-candy/30' : 'text-steel dark:text-light-grey font-semibold'}`}><TrendingDown size={15} className="flex-shrink-0" /> Giảm số dư</button>
         </div>
         <p className="text-xs text-steel dark:text-light-grey mb-3">{mode ? 'Nhập số tiền muốn tăng/giảm.' : 'Không chọn gì cả — nhập thẳng số dư mới, hệ thống tự tính chênh lệch.'}</p>
-        <MoneyInput value={amount} onChange={setAmount} placeholder={mode ? 'Số tiền' : 'Số dư mới'} className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-lg font-bold outline-none mb-3 dark:text-white dark:placeholder:text-light-grey text-blueberry" />
+        <MoneyInput value={amount} onChange={setAmount} id="field-amount" aria-invalid={!!shownAmountError} aria-describedby={shownAmountError ? 'err-amount' : undefined} placeholder={mode ? 'Số tiền' : 'Số dư mới'} className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-lg font-bold outline-none mb-3 dark:text-white dark:placeholder:text-light-grey text-blueberry" />
+        <FieldError id="err-amount" message={shownAmountError} className="-mt-2 mb-3" />
         <p className="text-sm text-blueberry dark:text-white font-semibold mb-2">Ngày giờ nhập</p>
         <DateTimeField value={dateTime} onChange={setDateTime} className="w-full justify-between bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm mb-3 dark:text-white text-blueberry" />
+        <FieldError id="err-dateTime" message={shownDateError} className="-mt-2 mb-3" />
         <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Ghi chú (không bắt buộc)" className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none mb-4 dark:text-white dark:placeholder:text-light-grey text-blueberry" />
         <button onClick={handleSave} disabled={saving} className={`w-full text-white rounded-xl py-3 font-bold flex items-center justify-center gap-2 disabled:opacity-60 shadow-md ${mode === 'decrease' ? 'bg-cotton-candy shadow-cotton-candy/30' : mode === 'increase' ? 'bg-gradient-primary shadow-turquoise/30' : 'bg-blueberry shadow-blueberry/30'}`}>
           {saving ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />} Lưu cập nhật

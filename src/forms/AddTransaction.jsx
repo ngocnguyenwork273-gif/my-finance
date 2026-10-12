@@ -10,6 +10,8 @@ import { Check, Loader2, PiggyBank, TrendingDown, TrendingUp, X } from '../icons
 import { ACCUMULATION_FUND_CATEGORY_NAME, accountBalance, buildPeriods, calculatePeriodFinancials, computeAccumulationBeforeSpendTarget, currentPeriodKey, dailyLimitFor, fundBalanceWithProfit, limitPeriodSuffix, nowForInput, stripOverLimitTag, tagPeriodNote, todaySpentInCategory } from '../lib/finance';
 import { formatMoney } from '../lib/format';
 import { supabase } from '../supabaseClient';
+import { validateTransactionForm, inlineErrors } from '../lib/validation';
+import { FieldError, focusField } from './formErrors';
 
 export function AddTransaction({ onClose, accounts, categories, transactions, onSaved, initialType, spendingPoolByPeriod }) {
   useEscapeKey(onClose); // Esc / nút Back Android đóng modal
@@ -107,9 +109,14 @@ export function AddTransaction({ onClose, accounts, categories, transactions, on
     setSelectedPeriod(currentPeriodKey());
   }
 
+  // Kiểm tra dữ liệu: lỗi hiện ngay dưới từng ô (sau lần bấm Lưu đầu tiên) và tự biến mất khi sửa đúng
+  const [submitted, setSubmitted] = useState(false);
+  const errorList = validateTransactionForm({ type, amount, selectedCategory, isFundCategory, expenseSource, selectedPeriod, periodOverLimit, fundOverBalance, sourceOverBalance });
+  const errors = submitted ? inlineErrors(errorList) : {};
+
   async function handleSave() {
-    if (!amount || Number(amount) === 0) { toast('Vui lòng nhập số tiền'); return; }
-    if (!selectedCategory) { toast('Vui lòng chọn danh mục'); return; }
+    setSubmitted(true);
+    if (errorList.length) { focusField(`field-${errorList[0].field}`); return; }
 
     let accountIdToSave = null;
     let noteToSave = note || null;
@@ -124,33 +131,20 @@ export function AddTransaction({ onClose, accounts, categories, transactions, on
       noteToSave = `[Vượt hạn mức] ${stripOverLimitTag(noteToSave)}`.trim();
     }
 
+    // (Dữ liệu đã được kiểm tra ở trên; ở đây chỉ gắn thẻ kỳ và xác định ví nguồn)
     if (type === 'income') {
-      if (!selectedPeriod) { toast('Vui lòng chọn Kỳ'); return; }
       noteToSave = tagPeriodNote(selectedPeriod, noteToSave);
     } else if (type === 'allocation') {
-      if (!expenseSource) { toast('Vui lòng chọn Nguồn tiền cho khoản nạp quỹ này.'); return; }
       if (expenseSource === 'income') {
-        if (!selectedPeriod) { toast('Vui lòng chọn Kỳ (nguồn thu nhập để nạp quỹ)'); return; }
-        if (periodOverLimit) { toast('Số tiền nạp vượt quá Thu nhập được chi còn lại của kỳ thu nhập.'); return; }
         noteToSave = tagPeriodNote(selectedPeriod, noteToSave);
       } else {
-        if (sourceOverBalance) { toast('Số dư nguồn tiền không đủ.'); return; }
         accountIdToSave = expenseSource;
       }
-    } else if (type === 'expense') {
-      if (isFundCategory) {
-        // Chi tiêu từ quỹ: trừ thẳng vào quỹ, không cần chọn nguồn tiền.
-        if (fundOverBalance) { toast('Số dư quỹ không đủ.'); return; }
+    } else if (type === 'expense' && !isFundCategory) {   // chi từ quỹ: trừ thẳng vào quỹ, không có ví nguồn
+      if (expenseSource === 'income') {
+        noteToSave = tagPeriodNote(selectedPeriod, noteToSave);
       } else {
-        if (!expenseSource) { toast('Vui lòng chọn Nguồn tiền cho khoản chi tiêu này.'); return; }
-        if (expenseSource === 'income') {
-          if (!selectedPeriod) { toast('Vui lòng chọn Kỳ'); return; }
-          if (periodOverLimit) { toast('Số tiền chi vượt quá Thu nhập được chi còn lại của kỳ thu nhập.'); return; }
-          noteToSave = tagPeriodNote(selectedPeriod, noteToSave);
-        } else {
-          if (sourceOverBalance) { toast('Số dư nguồn tiền không đủ.'); return; }
-          accountIdToSave = expenseSource;
-        }
+        accountIdToSave = expenseSource;
       }
     }
 
@@ -190,19 +184,20 @@ export function AddTransaction({ onClose, accounts, categories, transactions, on
           {type === 'allocation' && <p className="text-steel dark:text-light-grey text-xs mt-2 text-center">Nạp quỹ từ Thu nhập của 1 Kỳ, hoặc chuyển thẳng từ 1 ví/tài khoản.</p>}
           {type === 'income' && <p className="text-steel dark:text-light-grey text-xs mt-2 text-center">Thu nhập được gom theo Kỳ — nhiều khoản thu trong cùng 1 Kỳ sẽ được cộng dồn lại.</p>}
         </div>
-        <div className="px-5 mt-8 text-center">
+        <div id="field-amount" className="px-5 mt-8 text-center">
           <p className="text-steel dark:text-light-grey text-sm font-semibold mb-1">Số tiền</p>
           <div className="flex items-center justify-center gap-1">
-            <MoneyInput value={amount} onChange={setAmount} placeholder="0" className={`text-4xl font-bold text-center bg-transparent outline-none w-full ${overLimit || periodOverLimit ? 'text-cotton-candy' : type === 'income' || type === 'allocation' ? 'text-turquoise' : 'text-blueberry dark:text-white'}`} />
+            <MoneyInput value={amount} onChange={setAmount} placeholder="0" id="amount-input" aria-invalid={!!errors.amount} aria-describedby={errors.amount ? 'err-amount' : undefined} className={`text-4xl font-bold text-center bg-transparent outline-none w-full ${overLimit || periodOverLimit ? 'text-cotton-candy' : type === 'income' || type === 'allocation' ? 'text-turquoise' : 'text-blueberry dark:text-white'}`} />
             <span className="text-4xl font-bold text-light-grey">đ</span>
           </div>
+          <FieldError id="err-amount" message={errors.amount} />
           {overLimit && <p className="text-cotton-candy text-xs mt-2 font-semibold">⚠️ Hôm nay đã chi {formatMoney(todaySpent)}, cộng khoản này sẽ vượt mức trung bình {formatMoney(dailyLimit)}/ngày của danh mục này!</p>}
           {periodOverLimit && <p className="text-cotton-candy text-xs mt-2 font-semibold">⚠️ Vượt Thu nhập được chi còn lại ({formatMoney(remainingAfterSpend)}) của kỳ này!</p>}
           {fundOverBalance && <p className="text-cotton-candy text-xs mt-2 font-semibold">⚠️ Vượt số dư hiện có của quỹ ({formatMoney(fundBalanceNow)})!</p>}
           {sourceOverBalance && <p className="text-cotton-candy text-xs mt-2 font-semibold">⚠️ Vượt số dư hiện có của nguồn tiền này ({formatMoney(accountBalance(sourceAccount, transactions || []))})!</p>}
           {suggestedAccumulationAmount != null && <p className="text-turquoise text-xs mt-2 font-semibold">Đã tự điền theo công thức Tích lũy trước chi của kỳ này: {formatMoney(suggestedAccumulationAmount)}. Bạn vẫn có thể sửa lại số tiền.</p>}
         </div>
-        <div className="px-5 mt-8">
+        <div id="field-category" className="px-5 mt-8">
           <p className="text-blueberry dark:text-white font-bold text-sm mb-3">{type === 'income' ? 'Danh mục thu nhập' : 'Quỹ / Danh mục'} <span className="text-cotton-candy">*</span></p>
           {categoryList.length === 0 ? <p className="text-steel dark:text-light-grey text-sm">Chưa có danh mục. Vào Cài đặt để thêm.</p> : (
             <div className="grid grid-cols-4 sm:grid-cols-5 gap-3">
@@ -218,6 +213,7 @@ export function AddTransaction({ onClose, accounts, categories, transactions, on
               })}
             </div>
           )}
+          <FieldError id="err-category" message={errors.category} />
         </div>
 
         {type === 'expense' && isFundCategory && (
@@ -227,7 +223,7 @@ export function AddTransaction({ onClose, accounts, categories, transactions, on
         )}
 
         {type === 'allocation' && (
-          <div className="px-5 mt-8">
+          <div id="field-source" className="px-5 mt-8">
             <p className="text-blueberry dark:text-white font-bold text-sm mb-3">Nguồn tiền <span className="text-cotton-candy">*</span></p>
             <div className="grid grid-cols-4 sm:grid-cols-5 gap-3">
               <button onClick={() => handleExpenseSourceSelect('income')} className="flex flex-col items-center gap-1.5">
@@ -245,11 +241,12 @@ export function AddTransaction({ onClose, accounts, categories, transactions, on
               })}
             </div>
             <p className="text-steel dark:text-light-grey text-xs mt-2">Chọn "Thu nhập" nếu nạp quỹ từ Thu nhập được chi của Kỳ (sẽ trừ vào Thu nhập được chi). Chọn 1 ví/tài khoản khác nếu chuyển thẳng tiền có sẵn vào quỹ (KHÔNG trừ vào Thu nhập được chi).</p>
+          <FieldError id="err-source" message={errors.source} />
           </div>
         )}
 
         {type === 'expense' && !isFundCategory && (
-          <div className="px-5 mt-8">
+          <div id="field-source" className="px-5 mt-8">
             <p className="text-blueberry dark:text-white font-bold text-sm mb-3">Nguồn tiền <span className="text-cotton-candy">*</span></p>
             <div className="grid grid-cols-4 sm:grid-cols-5 gap-3">
               <button onClick={() => handleExpenseSourceSelect('income')} className="flex flex-col items-center gap-1.5">
@@ -267,11 +264,12 @@ export function AddTransaction({ onClose, accounts, categories, transactions, on
               })}
             </div>
             <p className="text-steel dark:text-light-grey text-xs mt-2">Chỉ được chọn 1 nguồn tiền cho khoản chi này.</p>
+          <FieldError id="err-source" message={errors.source} />
           </div>
         )}
 
         {usesPeriod && (
-          <div className="px-5 mt-8">
+          <div id="field-period" className="px-5 mt-8">
             <p className="text-blueberry dark:text-white font-bold text-sm mb-3">Năm <span className="text-cotton-candy">*</span></p>
             <CustomSelect value={selectedYear} onChange={(e) => handleYearChange(Number(e.target.value))} className="mb-3" triggerClassName="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none dark:text-white text-blueberry [color-scheme:light] dark:[color-scheme:dark]">
               {years.map((y) => <option key={y} value={y}>{y}</option>)}
@@ -280,6 +278,7 @@ export function AddTransaction({ onClose, accounts, categories, transactions, on
             <CustomSelect value={selectedPeriod} onChange={(e) => setSelectedPeriod(e.target.value)} className="" triggerClassName="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none dark:text-white text-blueberry [color-scheme:light] dark:[color-scheme:dark]">
               {periods.map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
             </CustomSelect>
+            <FieldError id="err-period" message={errors.period} />
             {financials && (
               <div className="mt-2 text-xs space-y-1 text-steel dark:text-light-grey">
                 <p><span className="font-semibold">Thu nhập tính vào Thu nhập được chi:</span> <span className="text-blueberry dark:text-white font-bold">{formatMoney(financials.incomeForSpendingPool)}</span></p>

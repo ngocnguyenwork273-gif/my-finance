@@ -10,6 +10,8 @@ import { localDateStr, todayDateStr } from '../lib/finance';
 import { sanitizeFileName } from '../lib/format';
 import { supabase } from '../supabaseClient';
 import { ImageUploader } from './ImageUploader';
+import { requiredText } from '../lib/validation';
+import { FieldError, focusField } from './formErrors';
 
 export function EditFundForm({ category, onClose, onSaved, isNew, initialAmount, firstAllocation }) {
   useEscapeKey(onClose); // Esc / nút Back Android đóng modal
@@ -53,8 +55,13 @@ export function EditFundForm({ category, onClose, onSaved, isNew, initialAmount,
     setUploading(false);
   }
 
+  // Kiểm tra tên: lỗi hiện ngay dưới ô sau lần bấm Lưu đầu tiên, tự biến mất khi nhập đủ
+  const [submitted, setSubmitted] = useState(false);
+  const nameError = requiredText(form.name, 'Nhập tên quỹ');
+  const shownNameError = submitted ? nameError : '';
+
   async function handleSave() {
-    if (!form.name) { toast('Nhập tên quỹ'); return; }
+    if (nameError) { setSubmitted(true); focusField('field-name'); return; }
     setSaving(true);
     const payload = {
       name: form.name, icon: form.icon || '💰', type: 'expense', is_fund: true,
@@ -144,7 +151,8 @@ export function EditFundForm({ category, onClose, onSaved, isNew, initialAmount,
           <button aria-label="Đóng" onClick={onClose}><X size={18} className="text-steel dark:text-light-grey" /></button>
         </div>
 
-        <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Tên quỹ" className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none mb-3 dark:text-white dark:placeholder:text-light-grey text-blueberry" />
+        <input value={form.name} id="field-name" aria-invalid={!!shownNameError} aria-describedby={shownNameError ? 'err-name' : undefined} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Tên quỹ" className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none mb-3 dark:text-white dark:placeholder:text-light-grey text-blueberry" />
+        <FieldError id="err-name" message={shownNameError} className="-mt-2 mb-3" />
         <input value={form.icon} onChange={(e) => setForm({ ...form, icon: e.target.value })} placeholder="Emoji icon (vd: 💊)" className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none mb-3 dark:text-white dark:placeholder:text-light-grey text-blueberry" />
         <textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="Mô tả quỹ (không bắt buộc)" rows={2} className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none mb-3 resize-none dark:text-white dark:placeholder:text-light-grey text-blueberry" />
 

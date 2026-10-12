@@ -22,19 +22,19 @@ Các file có sẵn của bạn không nằm trong bảng này: `icons.jsx`, `su
 
 | File | Dòng | Nội dung |
 |---|---:|---|
-| `screens/AccountDetail.jsx` | 274 | Màn chi tiết một Ví (kèm form điều chỉnh số dư). |
+| `screens/AccountDetail.jsx` | 283 | Màn chi tiết một Ví (kèm form điều chỉnh số dư). |
 | `screens/Accounts.jsx` | 150 | Màn danh sách Ví. |
 | `screens/AuthScreen.jsx` | 179 | Màn đăng nhập / đăng ký. |
 | `screens/Dashboard.jsx` | 35 | Màn Dashboard: chỉ ghép hook logic + các component trình bày (xem thư mục screens/dashboard/). |
 | `screens/DashboardParts.jsx` | 501 | Biểu đồ và hook phụ trợ riêng của màn Tổng quan. |
 | `screens/FundDetail.jsx` | 18 | Màn FundDetail: chỉ ghép hook logic + các component trình bày (xem thư mục screens/fundDetail/). |
 | `screens/Funds.jsx` | 417 | Màn danh sách Quỹ. |
-| `screens/Goals.jsx` | 478 | Màn Mục tiêu (kèm form sửa mục tiêu). |
+| `screens/Goals.jsx` | 486 | Màn Mục tiêu (kèm form sửa mục tiêu). |
 | `screens/Report.jsx` | 18 | Màn Report: chỉ ghép hook logic + các component trình bày (xem thư mục screens/report/). |
 | `screens/ReportExport.jsx` | 290 | Modal xuất báo cáo (xem trước, in, tải PDF) và cài đặt các mục báo cáo. |
 | `screens/ReportParts.jsx` | 588 | Biểu đồ/bảng dùng trong màn Báo cáo và bản xem trước báo cáo. |
 | `screens/Settings.jsx` | 272 | Màn Cài đặt / Hồ sơ. |
-| `screens/SettingsParts.jsx` | 522 | Các phần của màn Cài đặt (Giao diện, Hồ sơ, Danh mục). |
+| `screens/SettingsParts.jsx` | 536 | Các phần của màn Cài đặt (Giao diện, Hồ sơ, Danh mục). |
 
 ## Màn Tổng quan `screens/dashboard/`
 
@@ -62,7 +62,7 @@ Các file có sẵn của bạn không nằm trong bảng này: `icons.jsx`, `su
 |---|---:|---|
 | `screens/fundDetail/FundDetailDesktop.jsx` | 172 | Giao diện chi tiết Quỹ trên desktop. |
 | `screens/fundDetail/FundDetailMobile.jsx` | 185 | Giao diện chi tiết Quỹ trên mobile. |
-| `screens/fundDetail/FundDetailModals.jsx` | 139 | Các modal của màn chi tiết Quỹ: sửa quỹ, nạp/rút nhanh, sửa giao dịch nạp/rút (kèm form nạp/rút nhanh). |
+| `screens/fundDetail/FundDetailModals.jsx` | 149 | Các modal của màn chi tiết Quỹ: sửa quỹ, nạp/rút nhanh, sửa giao dịch nạp/rút (kèm form nạp/rút nhanh). |
 | `screens/fundDetail/useFundDetailView.js` | 171 | Toàn bộ state, dữ liệu dẫn xuất và hành động của màn chi tiết Quỹ. Component trình bày (FundDetailMobile/FundDetailDesktop/FundDetailModals) chỉ việc đọc kết quả. |
 
 ## Bố cục `layout/`
@@ -77,18 +77,19 @@ Các file có sẵn của bạn không nằm trong bảng này: `icons.jsx`, `su
 
 | File | Dòng | Nội dung |
 |---|---:|---|
-| `forms/AddTransaction.jsx` | 315 | Modal thêm giao dịch (mở toàn cục từ MainApp). |
-| `forms/EditAccountModal.jsx` | 54 | Modal tạo/sửa ví. |
-| `forms/EditFundForm.jsx` | 197 | Form tạo/sửa quỹ. |
+| `forms/AddTransaction.jsx` | 314 | Modal thêm giao dịch (mở toàn cục từ MainApp). |
+| `forms/EditAccountModal.jsx` | 62 | Modal tạo/sửa ví. |
+| `forms/EditFundForm.jsx` | 205 | Form tạo/sửa quỹ. |
 | `forms/EditTransaction.jsx` | 282 | Form sửa giao dịch. |
 | `forms/ImageUploader.jsx` | 215 | Chọn, cắt và tải ảnh lên (avatar, ảnh quỹ). |
+| `forms/formErrors.jsx` | 22 | Hiện lỗi form ngay dưới ô sai (thay cho toast ở đầu màn hình — trên điện thoại bàn phím che mất và toast tự tắt). - FieldError: dòng đỏ dưới ô, role="alert" nên trình đọc màn hình đọc ngay khi xuất hiện. - focusField: cuộn tới ô sai đầu tiên và đưa con trỏ vào (container cần có id="field-<tên>"). Quy ước dùng: lỗi chỉ hiện SAU lần bấm Lưu đầu tiên (state `submitted`) và được TÍNH LẠI mỗi lần render, nên tự biến mất ngay khi người dùng sửa đúng — không cần mã dọn lỗi riêng. |
 
 ## Thành phần dùng chung `components/`
 
 | File | Dòng | Nội dung |
 |---|---:|---|
 | `components/ErrorBoundary.jsx` | 49 | Error boundary: bắt lỗi JS khi render, hiện màn hình lỗi thân thiện + nút tải lại thay vì màn hình trắng. |
-| `components/inputs.jsx` | 125 | Ô nhập dùng chung: MoneyInput (nhập tiền có biểu thức) và CustomSelect. |
+| `components/inputs.jsx` | 126 | Ô nhập dùng chung: MoneyInput (nhập tiền có biểu thức) và CustomSelect. |
 | `components/ledger.jsx` | 219 | Dòng/Modal sổ giao dịch và các danh sách chi tiết thu-chi-tài sản (dùng ở Dashboard và Báo cáo). |
 | `components/ui.jsx` | 234 | Thành phần giao diện nhỏ dùng chung (emoji tròn, thanh tiến độ, vòng tiến độ, thẻ tóm tắt, tooltip biểu đồ, menu avatar). |
 
@@ -103,6 +104,7 @@ Các file có sẵn của bạn không nằm trong bảng này: `icons.jsx`, `su
 | `lib/image.js` | 103 | Xử lý ảnh phía trình duyệt (thu nhỏ, kiểm tra canvas rỗng, cắt theo tỉ lệ) — dùng cho upload ảnh. |
 | `lib/ledger.js` | 111 | Tính số dư/nguồn tiền sau từng giao dịch cho sổ giao dịch (Dashboard, Báo cáo). |
 | `lib/reportData.js` | 353 | Dựng dữ liệu báo cáo (thuần): tổng hợp thu chi, tài sản, quỹ... theo khoảng thời gian. |
+| `lib/validation.js` | 54 | Kiểm tra dữ liệu form (thuần, không React): trả về DANH SÁCH lỗi theo từng ô để giao diện hiện ngay dưới ô sai. Mỗi lỗi: { field, message, inline } - field  : 'amount' | 'category' | 'source' | 'period' (khớp id="field-<tên>" trong form) - inline : true  -> hiện thông báo dưới ô (lỗi thiếu dữ liệu) false -> chỉ CHẶN lưu + đưa con trỏ về ô; form đã có sẵn dòng cảnh báo đỏ riêng cho các trường hợp "vượt số dư / vượt Thu nhập được chi" nên không hiện trùng thêm một dòng nữa. Dùng chung cho AddTransaction và EditTransaction. |
 
 ## Thêm tính năng: làm ở đâu?
 

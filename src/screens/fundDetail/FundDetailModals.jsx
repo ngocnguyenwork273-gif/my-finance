@@ -10,6 +10,8 @@ import { Check, Loader2, X } from '../../icons';
 import { ACCUMULATION_FUND_CATEGORY_NAME, buildPeriods, computeAccumulationBeforeSpendTarget, currentPeriodKey, nowForInput, parsePeriodTag, stripPeriodTag, tagPeriodNote } from '../../lib/finance';
 import { formatMoney } from '../../lib/format';
 import { supabase } from '../../supabaseClient';
+import { requiredAmount } from '../../lib/validation';
+import { FieldError, focusField } from '../../forms/formErrors';
 
 function QuickAllocateWithdrawForm({ category, mode, transaction, onClose, onSaved, transactions, categories, spendingPoolByPeriod }) {
   useEscapeKey(onClose); // Esc / nút Back Android đóng modal
@@ -57,9 +59,15 @@ function QuickAllocateWithdrawForm({ category, mode, transaction, onClose, onSav
     setSelectedPeriod(`${y}-${month}`);
   }
 
+  // Kiểm tra số tiền / ngày giờ: lỗi hiện ngay dưới ô sau lần bấm Lưu đầu tiên, tự biến mất khi nhập đủ
+  const [submitted, setSubmitted] = useState(false);
+  const amountError = requiredAmount(amount, 'Nhập số tiền');
+  const dateError = dateTime ? '' : 'Chọn ngày giờ nhập';
+  const shownAmountError = submitted ? amountError : '';
+  const shownDateError = submitted ? dateError : '';
+
   async function handleSave() {
-    if (!amount || Number(amount) === 0) { toast('Nhập số tiền'); return; }
-    if (!dateTime) { toast('Chọn ngày giờ nhập'); return; }
+    if (amountError || dateError) { setSubmitted(true); focusField(amountError ? 'field-amount' : 'err-dateTime'); return; }
     setSaving(true);
     let noteToSave = note || null;
     if (mode === 'allocation' && selectedPeriod) {
@@ -90,8 +98,10 @@ function QuickAllocateWithdrawForm({ category, mode, transaction, onClose, onSav
           </h3>
           <button aria-label="Đóng" onClick={onClose}><X size={18} className="text-steel dark:text-light-grey" /></button>
         </div>
-        <MoneyInput value={amount} onChange={setAmount} placeholder="Số tiền" className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-lg font-bold outline-none mb-3 dark:text-white dark:placeholder:text-light-grey text-blueberry" />
+        <MoneyInput value={amount} onChange={setAmount} id="field-amount" aria-invalid={!!shownAmountError} aria-describedby={shownAmountError ? 'err-amount' : undefined} placeholder="Số tiền" className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-lg font-bold outline-none mb-3 dark:text-white dark:placeholder:text-light-grey text-blueberry" />
+        <FieldError id="err-amount" message={shownAmountError} className="-mt-2 mb-3" />
         <DateTimeField value={dateTime} onChange={setDateTime} className="w-full justify-between bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm mb-3 dark:text-white text-blueberry" />
+        <FieldError id="err-dateTime" message={shownDateError} className="-mt-2 mb-3" />
         <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Ghi chú (không bắt buộc)" className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none mb-3 dark:text-white dark:placeholder:text-light-grey text-blueberry" />
 
         {mode === 'allocation' && (

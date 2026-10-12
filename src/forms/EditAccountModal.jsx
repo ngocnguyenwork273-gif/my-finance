@@ -8,14 +8,21 @@ import { toast, useEscapeKey } from '../feedback';
 import { Check, Loader2, X } from '../icons';
 import { ACCOUNT_TYPES } from '../lib/accountStyles';
 import { supabase } from '../supabaseClient';
+import { requiredText } from '../lib/validation';
+import { FieldError, focusField } from './formErrors';
 
 export function EditAccountModal({ account, onClose, onSaved, isNew }) {
   useEscapeKey(onClose); // Esc / nút Back Android đóng modal
   const [form, setForm] = useState({ name: account?.name || '', icon: account?.icon || '', type: account?.type || 'cash', initial_balance: account?.initial_balance || '' });
   const [saving, setSaving] = useState(false);
 
+  // Kiểm tra tên: lỗi hiện ngay dưới ô sau lần bấm Lưu đầu tiên, tự biến mất khi nhập đủ
+  const [submitted, setSubmitted] = useState(false);
+  const nameError = requiredText(form.name, 'Nhập tên tài khoản');
+  const shownNameError = submitted ? nameError : '';
+
   async function handleSave() {
-    if (!form.name) { toast('Nhập tên tài khoản'); return; }
+    if (nameError) { setSubmitted(true); focusField('field-name'); return; }
     setSaving(true);
     const payload = { name: form.name, icon: form.icon || '💰', type: form.type, initial_balance: form.initial_balance ? Number(form.initial_balance) : 0, is_active: true };
     const { error } = isNew ? await supabase.from('accounts').insert(payload) : await supabase.from('accounts').update(payload).eq('id', account.id);
@@ -38,7 +45,8 @@ export function EditAccountModal({ account, onClose, onSaved, isNew }) {
           <h3 className="font-bold text-blueberry dark:text-white">{isNew ? 'Thêm ví mới' : 'Sửa tài khoản'}</h3>
           <button aria-label="Đóng" onClick={onClose}><X size={18} className="text-steel dark:text-light-grey" /></button>
         </div>
-        <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Tên tài khoản" className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none mb-3 dark:text-white dark:placeholder:text-light-grey text-blueberry" />
+        <input value={form.name} id="field-name" aria-invalid={!!shownNameError} aria-describedby={shownNameError ? 'err-name' : undefined} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Tên tài khoản" className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none mb-3 dark:text-white dark:placeholder:text-light-grey text-blueberry" />
+        <FieldError id="err-name" message={shownNameError} className="-mt-2 mb-3" />
         <input value={form.icon} onChange={(e) => setForm({ ...form, icon: e.target.value })} placeholder="Emoji (vd: 🏦)" className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none mb-3 dark:text-white dark:placeholder:text-light-grey text-blueberry" />
         <CustomSelect value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })} className="mb-3" triggerClassName="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none dark:text-white dark:placeholder:text-light-grey text-blueberry [color-scheme:light] dark:[color-scheme:dark]">
           {ACCOUNT_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}

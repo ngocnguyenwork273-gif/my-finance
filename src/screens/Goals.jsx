@@ -12,6 +12,8 @@ import { ArrowLeft, ArrowUpDown, Calendar, Check, Clock, Eye, Filter, LayoutGrid
 import { PRIORITY_TERMS, durationText, fundBalanceWithProfit, nowForInput, priorityRank, priorityStyle, sortGoals } from '../lib/finance';
 import { formatMoney, textMatchesSearch } from '../lib/format';
 import { supabase } from '../supabaseClient';
+import { requiredText } from '../lib/validation';
+import { FieldError, focusField } from '../forms/formErrors';
 
 const GOAL_SORT_FIELDS = [
   { key: 'created', label: 'Ngày tạo', get: (g) => new Date(g.start_date || 0).getTime() },
@@ -41,8 +43,13 @@ function EditGoalForm({ goal, onClose, onSaved, isNew, softDelete, categories = 
   const linkedFund = form.fund_id ? funds.find((f) => f.id === form.fund_id) : null;
   const linkedFundBalance = linkedFund ? fundBalanceWithProfit(linkedFund, transactions) : null;
 
+  // Kiểm tra tên: lỗi hiện ngay dưới ô sau lần bấm Lưu đầu tiên, tự biến mất khi nhập đủ
+  const [submitted, setSubmitted] = useState(false);
+  const nameError = requiredText(form.name, 'Nhập tên mục tiêu');
+  const shownNameError = submitted ? nameError : '';
+
   async function handleSave() {
-    if (!form.name) { toast('Nhập tên mục tiêu'); return; }
+    if (nameError) { setSubmitted(true); focusField('field-name'); return; }
     setSaving(true);
     const payload = {
       name: form.name,
@@ -79,7 +86,8 @@ function EditGoalForm({ goal, onClose, onSaved, isNew, softDelete, categories = 
           <button aria-label="Đóng" onClick={onClose}><X size={18} className="text-steel dark:text-light-grey" /></button>
         </div>
 
-        <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Tên mục tiêu" className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none mb-3 dark:text-white dark:placeholder:text-light-grey text-blueberry" />
+        <input value={form.name} id="field-name" aria-invalid={!!shownNameError} aria-describedby={shownNameError ? 'err-name' : undefined} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Tên mục tiêu" className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none mb-3 dark:text-white dark:placeholder:text-light-grey text-blueberry" />
+        <FieldError id="err-name" message={shownNameError} className="-mt-2 mb-3" />
 
         <p className="text-sm text-blueberry dark:text-white font-semibold mb-2">Mức độ ưu tiên</p>
         <CustomSelect value={form.priority_term} onChange={(e) => setForm({ ...form, priority_term: e.target.value })} className="mb-3" triggerClassName="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none dark:text-white dark:placeholder:text-light-grey text-blueberry [color-scheme:light] dark:[color-scheme:dark]">

@@ -12,6 +12,8 @@ import { Check, KeyRound, Loader2, Moon, Pencil, Plus, Sun, Trash2, TrendingDown
 import { buildPeriods, currentPeriodKey, findInitialAllocation, localDateStr, todayDateStr } from '../lib/finance';
 import { formatMoney, sanitizeFileName } from '../lib/format';
 import { supabase } from '../supabaseClient';
+import { requiredText } from '../lib/validation';
+import { FieldError, focusField } from '../forms/formErrors';
 
 // Chọn giao diện Sáng/Tối — chuyển từ nút nổi (fixed) trên mobile vào hẳn trong Cài đặt
 // theo yêu cầu người dùng (đỡ vướng, đỡ đè lên avatar) — dùng chung style segmented
@@ -191,12 +193,17 @@ export function CategorySection({ categories, reload, softDelete, spendingPoolBy
   const poolPeriods = buildPeriods(poolYear);
   const currentPoolValue = spendingPoolByPeriod ? spendingPoolByPeriod[poolPeriodKey] : undefined;
 
+  // Kiểm tra số tiền Thu nhập được chi: lỗi hiện dưới ô sau lần bấm Lưu đầu tiên
+  const [poolSubmitted, setPoolSubmitted] = useState(false);
+  const poolError = poolAmountInput === '' || Number.isNaN(Number(poolAmountInput)) ? 'Nhập số tiền hợp lệ' : '';
+  const shownPoolError = poolSubmitted ? poolError : '';
+
   async function handleSavePool() {
-    if (poolAmountInput === '' || Number.isNaN(Number(poolAmountInput))) { toast('Nhập số tiền hợp lệ'); return; }
+    if (poolError) { setPoolSubmitted(true); focusField('field-pool'); return; }
     setSavingPool(true);
     const ok = await saveSpendingPoolForPeriod(poolPeriodKey, poolAmountInput);
     setSavingPool(false);
-    if (ok) setPoolAmountInput('');
+    if (ok) { setPoolAmountInput(''); setPoolSubmitted(false); }   // lưu xong ô tự xóa: đặt lại để không hiện lỗi ngay
   }
 
   function startNew() { setFirstAlloc(null); setForm(blankCategoryForm()); setEditing('new'); }
@@ -274,8 +281,13 @@ export function CategorySection({ categories, reload, softDelete, spendingPoolBy
     return { error: null };
   }
 
+  // Kiểm tra tên: lỗi hiện ngay dưới ô sau lần bấm Lưu đầu tiên, tự biến mất khi nhập đủ
+  const [submitted, setSubmitted] = useState(false);
+  const nameError = requiredText(form.name, 'Nhập tên danh mục');
+  const shownNameError = submitted ? nameError : '';
+
   async function handleSave() {
-    if (!form.name) { toast('Nhập tên danh mục'); return; }
+    if (nameError) { setSubmitted(true); focusField('field-name'); return; }
     setSaving(true);
     const isFundMode = tab === 'expense' && form.is_fund;
     const payload = {
@@ -375,11 +387,12 @@ export function CategorySection({ categories, reload, softDelete, spendingPoolBy
             </CustomSelect>
           </div>
           <div className="flex items-center gap-2">
-            <MoneyInput value={poolAmountInput} onChange={setPoolAmountInput} placeholder="Số tiền được phép chi" className="flex-1 bg-white dark:bg-[#2a2a44] rounded-xl px-4 py-2.5 text-sm outline-none dark:text-white text-blueberry" />
+            <MoneyInput value={poolAmountInput} onChange={setPoolAmountInput} id="field-pool" aria-invalid={!!shownPoolError} aria-describedby={shownPoolError ? 'err-pool' : undefined} placeholder="Số tiền được phép chi" className="flex-1 bg-white dark:bg-[#2a2a44] rounded-xl px-4 py-2.5 text-sm outline-none dark:text-white text-blueberry" />
             <button aria-label="Lưu" onClick={handleSavePool} disabled={savingPool} className="w-10 h-10 rounded-full bg-gradient-primary text-white flex items-center justify-center flex-shrink-0 disabled:opacity-60">
               {savingPool ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />}
             </button>
           </div>
+          <FieldError id="err-pool" message={shownPoolError} />
           <p className="text-steel dark:text-light-grey text-xs mt-2">
             Hiện tại: <span className="font-bold text-blueberry dark:text-white">{currentPoolValue != null ? formatMoney(currentPoolValue) : 'Chưa cài đặt (mặc định theo thu nhập)'}</span>
           </p>
@@ -434,7 +447,8 @@ export function CategorySection({ categories, reload, softDelete, spendingPoolBy
         <div className="fixed inset-0 bg-black/40 flex items-end md:items-center justify-center z-[999] p-0 md:p-4" onClick={() => setEditing(null)}>
           <div className="bg-white dark:bg-[#1e1e32] w-full rounded-t-3xl md:rounded-3xl p-5 max-w-sm mx-auto max-h-[85vh] overflow-y-auto scrollbar-hide" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-4"><h3 className="font-bold text-blueberry dark:text-white">{editing === 'new' ? 'Danh mục mới' : 'Sửa danh mục'}</h3><button aria-label="Đóng" onClick={() => setEditing(null)}><X size={18} className="text-steel dark:text-light-grey" /></button></div>
-            <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Tên danh mục" className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none mb-3 dark:text-white dark:placeholder:text-light-grey text-blueberry" />
+            <input value={form.name} id="field-name" aria-invalid={!!shownNameError} aria-describedby={shownNameError ? 'err-name' : undefined} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Tên danh mục" className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none mb-3 dark:text-white dark:placeholder:text-light-grey text-blueberry" />
+            <FieldError id="err-name" message={shownNameError} className="-mt-2 mb-3" />
             <input value={form.icon} onChange={(e) => setForm({ ...form, icon: e.target.value })} placeholder={isFundForm ? 'Emoji icon (vd: 💊)' : 'Emoji (vd: 🍜)'} className="w-full bg-ice-cream dark:bg-night-sky rounded-xl px-4 py-3 text-sm outline-none mb-3 dark:text-white dark:placeholder:text-light-grey text-blueberry" />
             {/* Hạn mức + lãi suất: chỉ dành cho danh mục chi tiêu thường. Khi tích ô "quỹ",
                 phần này được thay bằng form chi tiết quỹ ở dưới (giống form Sửa quỹ). */}
