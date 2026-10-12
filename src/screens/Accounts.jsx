@@ -25,10 +25,10 @@ export function Accounts() {
         <div className="w-full min-h-[100dvh] pb-28 relative">
           <div className="px-5 pt-8 flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <button onClick={() => setScreen('dashboard')} className="w-9 h-9 rounded-full frost-inset flex items-center justify-center"><ArrowLeft size={18} className="text-blueberry dark:text-white" /></button>
+              <button aria-label="Quay lại" onClick={() => setScreen('dashboard')} className="w-9 h-9 rounded-full frost-inset flex items-center justify-center"><ArrowLeft size={18} className="text-blueberry dark:text-white" /></button>
               <h1 className="text-blueberry dark:text-white text-lg font-bold">Quản lý ví</h1>
             </div>
-            <button onClick={() => setShowCreate(true)} className="w-9 h-9 rounded-full frost-inset flex items-center justify-center"><Plus size={18} className="text-turquoise" /></button>
+            <button aria-label="Thêm ví" onClick={() => setShowCreate(true)} className="w-9 h-9 rounded-full frost-inset flex items-center justify-center"><Plus size={18} className="text-turquoise" /></button>
           </div>
           <div className="px-5 mt-4 text-center">
             <p className="text-steel dark:text-light-grey text-sm font-semibold">Tổng tất cả tài khoản</p>

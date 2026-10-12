@@ -193,13 +193,13 @@ export function Goals() {
         <div className={`absolute inset-0 ${theme === 'dark' ? 'bg-[#1a1a2e]' : 'bg-page'}`} />
         <div className="w-full min-h-[100dvh] pb-28 relative">
           <div className="px-5 pt-8 flex items-center gap-3">
-            <button onClick={() => setScreen('dashboard')} className="w-9 h-9 rounded-full frost-inset flex items-center justify-center"><ArrowLeft size={18} className="text-blueberry dark:text-white" /></button>
+            <button aria-label="Quay lại" onClick={() => setScreen('dashboard')} className="w-9 h-9 rounded-full frost-inset flex items-center justify-center"><ArrowLeft size={18} className="text-blueberry dark:text-white" /></button>
             <h1 className="text-blueberry dark:text-white text-lg font-bold">Mục tiêu</h1>
           </div>
           <div className="mt-6 px-5 pt-6 pb-6">
             <div className="flex items-center justify-between mb-3">
               <h2 className="text-blueberry dark:text-white font-extrabold text-lg">Mục tiêu của tôi</h2>
-              <button onClick={() => setEditingGoal('new')} className="w-7 h-7 rounded-full bg-turquoise-light/60 dark:bg-turquoise/15 flex items-center justify-center"><Plus size={16} className="text-turquoise" /></button>
+              <button aria-label="Thêm mục tiêu" onClick={() => setEditingGoal('new')} className="w-7 h-7 rounded-full bg-turquoise-light/60 dark:bg-turquoise/15 flex items-center justify-center"><Plus size={16} className="text-turquoise" /></button>
             </div>
             {loadingGoals ? <div className="flex justify-center py-6"><Loader2 size={22} className="animate-spin text-turquoise" /></div>
               : goals.length === 0 ? <p className="text-steel dark:text-light-grey text-sm text-center py-6">Chưa có mục tiêu nào.</p>
@@ -252,13 +252,13 @@ export function Goals() {
               {filterStatus !== 'all' && (
                 <span className="flex items-center gap-1.5 bg-turquoise/10 text-turquoise text-xs font-bold pl-3 pr-1.5 py-1.5 rounded-full">
                   Trạng thái: {filterStatus === 'done' ? 'Hoàn thành' : 'Đang làm'}
-                  <button onClick={() => { setFilterStatus('all'); setPage(1); }} className="w-4 h-4 rounded-full hover:bg-turquoise/20 flex items-center justify-center"><X size={11} /></button>
+                  <button aria-label="Bỏ bộ lọc" onClick={() => { setFilterStatus('all'); setPage(1); }} className="w-4 h-4 rounded-full hover:bg-turquoise/20 flex items-center justify-center"><X size={11} /></button>
                 </span>
               )}
               {filterPriority !== 'all' && (
                 <span className="flex items-center gap-1.5 bg-turquoise/10 text-turquoise text-xs font-bold pl-3 pr-1.5 py-1.5 rounded-full">
                   Ưu tiên: {filterPriority}
-                  <button onClick={() => { setFilterPriority('all'); setPage(1); }} className="w-4 h-4 rounded-full hover:bg-turquoise/20 flex items-center justify-center"><X size={11} /></button>
+                  <button aria-label="Bỏ bộ lọc" onClick={() => { setFilterPriority('all'); setPage(1); }} className="w-4 h-4 rounded-full hover:bg-turquoise/20 flex items-center justify-center"><X size={11} /></button>
                 </span>
               )}
               {hasActiveFilter && (
@@ -309,8 +309,8 @@ export function Goals() {
                 )}
               </div>
               <div className="flex items-center gap-1 frost-inset rounded-full p-1">
-                <button onClick={() => { setViewMode('card'); setPage(1); }} className={`w-8 h-8 rounded-full flex items-center justify-center ${viewMode === 'card' ? 'bg-gradient-primary text-white shadow-md shadow-turquoise/30' : 'text-steel dark:text-light-grey'}`}><LayoutGrid size={15} /></button>
-                <button onClick={() => { setViewMode('list'); setPage(1); }} className={`w-8 h-8 rounded-full flex items-center justify-center ${viewMode === 'list' ? 'bg-gradient-primary text-white shadow-md shadow-turquoise/30' : 'text-steel dark:text-light-grey'}`}><List size={15} /></button>
+                <button aria-label="Xem dạng thẻ" onClick={() => { setViewMode('card'); setPage(1); }} className={`w-8 h-8 rounded-full flex items-center justify-center ${viewMode === 'card' ? 'bg-gradient-primary text-white shadow-md shadow-turquoise/30' : 'text-steel dark:text-light-grey'}`}><LayoutGrid size={15} /></button>
+                <button aria-label="Xem dạng danh sách" onClick={() => { setViewMode('list'); setPage(1); }} className={`w-8 h-8 rounded-full flex items-center justify-center ${viewMode === 'list' ? 'bg-gradient-primary text-white shadow-md shadow-turquoise/30' : 'text-steel dark:text-light-grey'}`}><List size={15} /></button>
               </div>
             </div>
           </div>
@@ -345,7 +345,7 @@ export function Goals() {
                             {isDone ? <Check size={11} className="text-turquoise" /> : <Clock size={11} className="text-turquoise" />}
                             {isDone ? 'Hoàn thành' : 'Đang làm'}
                           </span>
-                          <button onClick={(e) => { e.stopPropagation(); setOpenMenuId(openMenuId === goal.id ? null : goal.id); }} className="absolute top-2.5 right-2.5 w-7 h-7 rounded-full bg-white/80 dark:bg-[#2a2a44]/80 backdrop-blur flex items-center justify-center text-blueberry dark:text-white">
+                          <button aria-label="Tùy chọn" onClick={(e) => { e.stopPropagation(); setOpenMenuId(openMenuId === goal.id ? null : goal.id); }} className="absolute top-2.5 right-2.5 w-7 h-7 rounded-full bg-white/80 dark:bg-[#2a2a44]/80 backdrop-blur flex items-center justify-center text-blueberry dark:text-white">
                             <MoreHorizontal size={14} />
                           </button>
                           {openMenuId === goal.id && (
@@ -434,7 +434,7 @@ export function Goals() {
                             </td>
                             <td className="p-4 text-steel dark:text-light-grey text-xs max-w-[160px] truncate">{goal.note || '—'}</td>
                             <td className="p-4 text-right relative">
-                              <button
+                              <button aria-label="Tùy chọn"
                                 onClick={(e) => { e.stopPropagation(); setOpenMenuId(openMenuId === goal.id ? null : goal.id); }}
                                 className="w-8 h-8 rounded-full hover:bg-ice-cream dark:hover:bg-night-sky/30 inline-flex items-center justify-center text-steel dark:text-light-grey"
                               >

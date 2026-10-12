@@ -79,15 +79,15 @@ export function SidebarDesktop({ screen, appLogoUrl, settingsSection }) {
 
       <div className={`relative mt-auto flex flex-col gap-3 ${sidebarCollapsed ? 'items-center' : ''}`}>
         {sidebarCollapsed ? (
-          <button onClick={toggleTheme} className="w-8 h-8 rounded-full flex items-center justify-center bg-white/50 dark:bg-white/[0.06] backdrop-blur text-steel dark:text-light-grey border border-white/60 dark:border-white/10">
+          <button aria-label="Đổi giao diện" onClick={toggleTheme} className="w-8 h-8 rounded-full flex items-center justify-center bg-white/50 dark:bg-white/[0.06] backdrop-blur text-steel dark:text-light-grey border border-white/60 dark:border-white/10">
             {theme === 'dark' ? <Sun size={15} /> : <Moon size={15} />}
           </button>
         ) : (
           <div className="flex items-center gap-1 bg-white/50 dark:bg-white/[0.06] backdrop-blur rounded-full p-1 self-start border border-white/60 dark:border-white/10">
-            <button onClick={() => theme !== 'light' && toggleTheme()} className={`w-8 h-8 rounded-full flex items-center justify-center transition ${theme === 'light' ? 'bg-white dark:bg-night-sky shadow text-blueberry dark:text-white' : 'text-steel dark:text-light-grey'}`}>
+            <button aria-label="Giao diện sáng" onClick={() => theme !== 'light' && toggleTheme()} className={`w-8 h-8 rounded-full flex items-center justify-center transition ${theme === 'light' ? 'bg-white dark:bg-night-sky shadow text-blueberry dark:text-white' : 'text-steel dark:text-light-grey'}`}>
               <Sun size={15} />
             </button>
-            <button onClick={() => theme !== 'dark' && toggleTheme()} className={`w-8 h-8 rounded-full flex items-center justify-center transition ${theme === 'dark' ? 'bg-blueberry shadow text-white' : 'text-steel dark:text-light-grey'}`}>
+            <button aria-label="Giao diện tối" onClick={() => theme !== 'dark' && toggleTheme()} className={`w-8 h-8 rounded-full flex items-center justify-center transition ${theme === 'dark' ? 'bg-blueberry shadow text-white' : 'text-steel dark:text-light-grey'}`}>
               <Moon size={15} />
             </button>
           </div>

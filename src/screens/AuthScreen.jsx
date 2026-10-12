@@ -129,7 +129,7 @@ export function AuthScreen() {
                 placeholder="Mật khẩu (tối thiểu 6 ký tự)"
                 className={`${fieldClass} pl-11 pr-11`}
               />
-              <button type="button" onClick={() => setShowPassword((v) => !v)} className="absolute right-4 top-1/2 -translate-y-1/2 text-blueberry/50 hover:text-blueberry transition">
+              <button aria-label={showPassword ? 'Ẩn mật khẩu' : 'Hiện mật khẩu'} type="button" onClick={() => setShowPassword((v) => !v)} className="absolute right-4 top-1/2 -translate-y-1/2 text-blueberry/50 hover:text-blueberry transition">
                 {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
               </button>
             </div>

@@ -35,6 +35,7 @@ export function useReportView() {
   // quỹ). Mảng rỗng = "Tất cả loại" (giữ đúng hành vi mặc định như trước).
   const [activityKindFilters, setActivityKindFilters] = useState([]);
   const [activityCategoryFilter, setActivityCategoryFilter] = useState('all');
+  const [activitySourceFilter, setActivitySourceFilter] = useState('all');
 
   // Neo vị trí card "Hoạt động gần đây" khi đổi filter, tránh giật layout.
   // Có 2 bản DOM (mobile + desktop) cùng tồn tại, chỉ 1 bản đang hiển thị (display khác none)
@@ -64,7 +65,7 @@ export function useReportView() {
       if (delta) findScrollableAncestor(el).scrollBy(0, delta);
     }
     activityScrollAnchorRef.current = null;
-  }, [activityKindFilters, activityCategoryFilter]);
+  }, [activityKindFilters, activityCategoryFilter, activitySourceFilter]);
 
   async function handleDeleteTx(tx) {
     if (!(await confirmDialog('Xóa giao dịch này? Bạn có thể khôi phục trong 30 ngày ở mục Lịch sử.', { title: 'Xác nhận xóa', confirmText: 'Xóa', danger: true }))) return;
@@ -179,16 +180,18 @@ export function useReportView() {
 
   // ===== Danh sách giao dịch chi tiết trong khoảng thời gian đang filter =====
   // "Nguồn trừ/cộng" cho biết tiền được cộng vào đâu (thu nhập, quỹ) hay trừ từ đâu (ví, quỹ, thu nhập kỳ).
+  // "key" ổn định cho mỗi nguồn (trước đây chỉ có "label" để hiển thị, không có gì để lọc
+  // theo đúng 1 nguồn cụ thể — thêm bộ lọc Nguồn cần 1 giá trị không đổi khi đổi ngôn ngữ/format).
   function getTxSource(tx) {
     const cat = categories.find((c) => c.id === tx.category_id);
-    if (tx.type === 'income') return { label: cat?.name ? `Thu nhập · ${cat.name}` : 'Thu nhập' };
-    if (tx.type === 'allocation') return { label: `Góp quỹ · ${cat?.name || 'Quỹ'}` };
-    if (cat?.is_fund) return { label: `Rút từ quỹ · ${cat?.name || 'Quỹ'}` };
+    if (tx.type === 'income') return cat?.name ? { key: `income:${cat.id}`, label: `Thu nhập · ${cat.name}` } : { key: 'income', label: 'Thu nhập' };
+    if (tx.type === 'allocation') return { key: `fund:${cat?.id || 'unknown'}`, label: `Góp quỹ · ${cat?.name || 'Quỹ'}` };
+    if (cat?.is_fund) return { key: `fund:${cat.id}`, label: `Rút từ quỹ · ${cat?.name || 'Quỹ'}` };
     if (tx.account_id) {
       const acc = accounts.find((a) => a.id === tx.account_id);
-      return { label: `Ví · ${acc?.name || 'Không rõ'}` };
+      return { key: `account:${tx.account_id}`, label: `Ví · ${acc?.name || 'Không rõ'}` };
     }
-    return { label: 'Thu nhập kỳ' };
+    return { key: 'pool', label: 'Thu nhập kỳ' };
   }
   const allPeriodTxsSorted = [...periodTxs].sort((a, b) => compareTxTime(b, a));
   function groupTxsByDate(txs) {
@@ -263,14 +266,34 @@ export function useReportView() {
     captureActivityScrollAnchor();
     setActivityKindFilters(nextKinds);
     setActivityCategoryFilter('all');
+    setActivitySourceFilter('all'); // danh sách nguồn phụ thuộc Loại đang chọn, đổi Loại thì reset
   }
   function handleActivityCategoryChange(nextCat) {
     captureActivityScrollAnchor();
     setActivityCategoryFilter(nextCat);
+    setActivitySourceFilter('all'); // danh sách nguồn phụ thuộc Danh mục đang chọn, đổi thì reset
+  }
+  // Danh sách Nguồn để đổ vào dropdown filter — chỉ lấy từ các giao dịch khớp Loại + Danh
+  // mục đang chọn (giống cách activityCategoryOptions làm), để không hiện nguồn nào không
+  // có giao dịch thật trong tập đang xem.
+  const activitySourceOptions = (() => {
+    const seen = new Map();
+    allPeriodTxsSorted
+      .filter((tx) => (activityKindFilters.length === 0 || activityKindFilters.includes(getTxKind(tx))) && (activityCategoryFilter === 'all' || tx.category_id === activityCategoryFilter))
+      .forEach((tx) => {
+        const src = getTxSource(tx);
+        if (!seen.has(src.key)) seen.set(src.key, src.label);
+      });
+    return Array.from(seen, ([key, label]) => ({ key, label }));
+  })();
+  function handleActivitySourceChange(nextSource) {
+    captureActivityScrollAnchor();
+    setActivitySourceFilter(nextSource);
   }
   const filteredActivityTxs = allPeriodTxsSorted.filter((tx) => {
     if (activityKindFilters.length > 0 && !activityKindFilters.includes(getTxKind(tx))) return false;
     if (activityCategoryFilter !== 'all' && tx.category_id !== activityCategoryFilter) return false;
+    if (activitySourceFilter !== 'all' && getTxSource(tx).key !== activitySourceFilter) return false;
     return true;
   });
   const groupedFilteredTxs = groupTxsByDate(filteredActivityTxs);
@@ -291,6 +314,11 @@ export function useReportView() {
   const income = financials.totalIncome;
   const allocation = financials.allocationFromSpendingPool;
   const expenseFromIncome = financials.expenseFromSpendingPool;
+  // Tổng ĐÃ CHI ra từ Thu nhập được chi trong kỳ = nạp quỹ (lấy nguồn Thu nhập) + chi
+  // tiêu khác cũng lấy từ nguồn này (không tính quỹ). Trước đây màn hình chỉ hiện 2 số này
+  // tách rời (dòng "Nạp quỹ", dòng "Chi tiêu"), không có chỗ nào cộng gộp sẵn thành 1 con
+  // số "đã chi bao nhiêu trong khoản được chi" — người xem phải tự cộng tay.
+  const spendingPoolTotalSpent = allocation + expenseFromIncome;
   const expenseFromFund = financials.expenseFromFund;
   const totalActualExpense = financials.totalActualExpense;
   const remaining = financials.remainingAfterSpend;
@@ -567,19 +595,20 @@ export function useReportView() {
   // Mọi thứ các component trình bày bên dưới cần dùng
   return {
     accounts, accumulationBeforeSpend, ACTIVITY_KIND_LABELS, activityAnchorDesktopRef, activityAnchorMobileRef, activityCategoryFilter,
+    activitySourceFilter, activitySourceOptions,
     activityCategoryOptions, activityKindFilters, activityKindsPresent, agg, allocation, allPeriodTxsSorted,
     assetChange, assetFundItems, assetGoldItems, assetWalletItems, captureIncomeCardScrollAnchor, categories,
     customEnd, customStart, drilldownCategory, drilldownTransactions, editingTx, expenseBreakdown,
     expenseDetailItems, expenseFromFund, expenseFromIncome, expenseLedgerTxs, filteredActivityTxs, formatTxDateLabel,
     formatTxMonthLabel, fundData, getTxSource, goals, groupedFilteredTxs, handleActivityCategoryChange,
-    handleActivityKindChange, handleDeleteTx, income, incomeBreakdown, incomeCardDesktopRef, incomeCardMobileRef,
+    handleActivityKindChange, handleActivitySourceChange, handleDeleteTx, income, incomeBreakdown, incomeCardDesktopRef, incomeCardMobileRef,
     incomeDetailItems, incomeForSpendingPool, incomeLedgerTxs, insights, isOverSpendingPool, isPeriodOngoing,
     isSameTxMonth, ledgerModal, openDrilldown, openFund, periodLabel, poolIncomeDetailItems,
     poolIncomeLedgerTxs, prevAgg, reload, remaining, selectedDay, selectedHalf,
     selectedMonth, selectedQuarter, selectedWeek, selectedYear, setCustomEnd, setCustomStart,
     setEditingTx, setLedgerModal, setScreen, setSelectedDay, setSelectedHalf, setSelectedMonth,
     setSelectedQuarter, setSelectedWeek, setSelectedYear, setShowDrilldown, setShowExportModal, setTimeType,
-    showDrilldown, showExportModal, sortedFilteredTxKeys, specialIncome, spendingPool, spendingPoolByPeriod,
+    showDrilldown, showExportModal, sortedFilteredTxKeys, specialIncome, spendingPool, spendingPoolByPeriod, spendingPoolTotalSpent,
     theme, timeType, totalActualExpense, totalAssetsEnd, totalAssetsStart, totalContributedAllFunds,
     totalRemainingAll, transactions, trendData, yearSummary,
   };

@@ -376,7 +376,7 @@ export function CategorySection({ categories, reload, softDelete, spendingPoolBy
           </div>
           <div className="flex items-center gap-2">
             <MoneyInput value={poolAmountInput} onChange={setPoolAmountInput} placeholder="Số tiền được phép chi" className="flex-1 bg-white dark:bg-[#2a2a44] rounded-xl px-4 py-2.5 text-sm outline-none dark:text-white text-blueberry" />
-            <button onClick={handleSavePool} disabled={savingPool} className="w-10 h-10 rounded-full bg-gradient-primary text-white flex items-center justify-center flex-shrink-0 disabled:opacity-60">
+            <button aria-label="Lưu" onClick={handleSavePool} disabled={savingPool} className="w-10 h-10 rounded-full bg-gradient-primary text-white flex items-center justify-center flex-shrink-0 disabled:opacity-60">
               {savingPool ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />}
             </button>
           </div>
@@ -424,8 +424,8 @@ export function CategorySection({ categories, reload, softDelete, spendingPoolBy
                 {cat.interest_rate > 0 ? `Lãi ${cat.interest_rate}%/năm` : ''}
               </p>
             </div>
-            <button onClick={() => startEdit(cat)} className="w-8 h-8 rounded-full bg-baby-blue-light/60 dark:bg-baby-blue/15 flex items-center justify-center"><Pencil size={14} className="text-baby-blue" /></button>
-            <button onClick={() => handleDelete(cat.id)} className="w-8 h-8 rounded-full bg-cotton-candy-light/60 dark:bg-cotton-candy/15 flex items-center justify-center"><Trash2 size={14} className="text-cotton-candy" /></button>
+            <button aria-label="Sửa danh mục" onClick={() => startEdit(cat)} className="w-8 h-8 rounded-full bg-baby-blue-light/60 dark:bg-baby-blue/15 flex items-center justify-center"><Pencil size={14} className="text-baby-blue" /></button>
+            <button aria-label="Xóa danh mục" onClick={() => handleDelete(cat.id)} className="w-8 h-8 rounded-full bg-cotton-candy-light/60 dark:bg-cotton-candy/15 flex items-center justify-center"><Trash2 size={14} className="text-cotton-candy" /></button>
           </div>
         ))}
       </div>

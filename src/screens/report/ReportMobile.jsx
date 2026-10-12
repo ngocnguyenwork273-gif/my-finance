@@ -12,7 +12,7 @@ import { RemainingBreakdownDetail } from '../ReportParts';
 import { ActivityFilterBar, TxDetailRow } from './ReportWidgets';
 
 export function ReportMobile({ v }) {
-  const { accumulationBeforeSpend, activityAnchorMobileRef, allocation, allPeriodTxsSorted, assetFundItems, assetGoldItems, assetWalletItems, captureIncomeCardScrollAnchor, customEnd, customStart, expenseBreakdown, expenseDetailItems, expenseFromFund, expenseFromIncome, expenseLedgerTxs, filteredActivityTxs, formatTxDateLabel, formatTxMonthLabel, groupedFilteredTxs, income, incomeCardMobileRef, incomeDetailItems, incomeForSpendingPool, incomeLedgerTxs, isOverSpendingPool, isSameTxMonth, periodLabel, poolIncomeDetailItems, poolIncomeLedgerTxs, remaining, selectedDay, selectedHalf, selectedMonth, selectedQuarter, selectedWeek, selectedYear, setCustomEnd, setCustomStart, setLedgerModal, setScreen, setSelectedDay, setSelectedHalf, setSelectedMonth, setSelectedQuarter, setSelectedWeek, setSelectedYear, setShowExportModal, setTimeType, sortedFilteredTxKeys, specialIncome, spendingPool, theme, timeType, totalActualExpense, totalAssetsEnd, totalRemainingAll } = v;
+  const { accumulationBeforeSpend, activityAnchorMobileRef, allocation, allPeriodTxsSorted, assetFundItems, assetGoldItems, assetWalletItems, captureIncomeCardScrollAnchor, customEnd, customStart, expenseBreakdown, expenseDetailItems, expenseFromFund, expenseFromIncome, expenseLedgerTxs, filteredActivityTxs, formatTxDateLabel, formatTxMonthLabel, groupedFilteredTxs, income, incomeCardMobileRef, incomeDetailItems, incomeForSpendingPool, incomeLedgerTxs, isOverSpendingPool, isSameTxMonth, periodLabel, poolIncomeDetailItems, poolIncomeLedgerTxs, remaining, selectedDay, selectedHalf, selectedMonth, selectedQuarter, selectedWeek, selectedYear, setCustomEnd, setCustomStart, setLedgerModal, setScreen, setSelectedDay, setSelectedHalf, setSelectedMonth, setSelectedQuarter, setSelectedWeek, setSelectedYear, setShowExportModal, setTimeType, sortedFilteredTxKeys, specialIncome, spendingPool, spendingPoolTotalSpent, theme, timeType, totalActualExpense, totalAssetsEnd, totalRemainingAll } = v;
   return (
     <div className="md:hidden relative">
         <div className={`absolute inset-0 ${theme === 'dark' ? 'bg-[#1a1a2e]' : 'bg-page'}`} />
@@ -104,7 +104,9 @@ export function ReportMobile({ v }) {
             <div className="space-y-1">
               <div className="flex justify-between"><span>Nạp quỹ</span><span className="font-bold text-baby-blue">{formatMoney(allocation)}</span></div>
               <div className="flex justify-between"><span>Chi tiêu</span><span className="font-bold text-cotton-candy">{formatMoney(expenseFromIncome)}</span></div>
-              <div className="flex justify-between border-t pt-2"><span className="font-bold">Dư sau chi</span><span className={`font-bold ${remaining >= 0 ? 'text-turquoise' : 'text-cotton-candy'}`}>{formatMoneySigned(remaining)}</span></div>
+              {/* Tổng chi = Nạp quỹ + Chi tiêu cộng gộp sẵn — trước đây phải tự cộng 2 dòng trên mới ra. */}
+              <div className="flex justify-between border-t pt-2"><span className="font-bold">Tổng chi</span><span className="font-bold text-blueberry dark:text-white">{formatMoney(spendingPoolTotalSpent)}</span></div>
+              <div className="flex justify-between"><span className="font-bold">Dư sau chi</span><span className={`font-bold ${remaining >= 0 ? 'text-turquoise' : 'text-cotton-candy'}`}>{formatMoneySigned(remaining)}</span></div>
             </div>
             {accumulationBeforeSpend > 0 && (
               <p className="text-xs text-lavender mt-2 font-semibold">Tích lũy trước chi: {formatMoney(accumulationBeforeSpend)}</p>

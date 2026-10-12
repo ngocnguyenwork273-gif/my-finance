@@ -107,7 +107,7 @@ export function AccountDetail({ account, onBack }) {
       <div className="md:hidden min-h-[100dvh] pb-28 relative" style={{ background: 'linear-gradient(180deg,#0DBACC,#9F7FE0)' }}>
         <div className="px-5 pt-8 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <button onClick={onBack} className="w-9 h-9 rounded-full bg-white/30 backdrop-blur flex items-center justify-center"><ArrowLeft size={18} className="text-white" /></button>
+            <button aria-label="Quay lại" onClick={onBack} className="w-9 h-9 rounded-full bg-white/30 backdrop-blur flex items-center justify-center"><ArrowLeft size={18} className="text-white" /></button>
             <div className="flex items-center gap-2">
               <EmojiCircle emoji={account.icon} size={28} active activeColor="rgba(255,255,255,0.3)" bg="rgba(255,255,255,0.3)" />
               <div>
@@ -117,8 +117,8 @@ export function AccountDetail({ account, onBack }) {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <button onClick={() => setShowEdit(true)} className="w-9 h-9 rounded-full bg-white/30 backdrop-blur flex items-center justify-center"><Pencil size={15} className="text-white" /></button>
-            <button onClick={handleDelete} className="w-9 h-9 rounded-full bg-white/30 backdrop-blur flex items-center justify-center"><Trash2 size={15} className="text-white" /></button>
+            <button aria-label="Sửa ví" onClick={() => setShowEdit(true)} className="w-9 h-9 rounded-full bg-white/30 backdrop-blur flex items-center justify-center"><Pencil size={15} className="text-white" /></button>
+            <button aria-label="Xóa ví" onClick={handleDelete} className="w-9 h-9 rounded-full bg-white/30 backdrop-blur flex items-center justify-center"><Trash2 size={15} className="text-white" /></button>
           </div>
         </div>
 
@@ -164,7 +164,7 @@ export function AccountDetail({ account, onBack }) {
                       {balanceAfter !== null && <p className="text-steel dark:text-light-grey text-[11px] mt-0.5 whitespace-nowrap">Số dư cuối: {formatMoney(balanceAfter)}</p>}
                     </div>
                     {!isDirectSet && (
-                      <button onClick={() => setEditingTx(tx)} className="w-7 h-7 rounded-full hover:bg-ice-cream dark:hover:bg-night-sky/30 flex items-center justify-center text-steel dark:text-light-grey flex-shrink-0">
+                      <button aria-label="Sửa giao dịch" onClick={() => setEditingTx(tx)} className="w-7 h-7 rounded-full hover:bg-ice-cream dark:hover:bg-night-sky/30 flex items-center justify-center text-steel dark:text-light-grey flex-shrink-0">
                         <Pencil size={14} />
                       </button>
                     )}
@@ -180,7 +180,7 @@ export function AccountDetail({ account, onBack }) {
       <div className="hidden md:block">
         <div className="flex items-center justify-between mb-6">
           <div className="flex items-center gap-3">
-            <button onClick={onBack} className="w-9 h-9 rounded-full bg-white dark:bg-[#2a2a44] flex items-center justify-center shadow-soft"><ArrowLeft size={18} className="text-blueberry dark:text-white" /></button>
+            <button aria-label="Quay lại" onClick={onBack} className="w-9 h-9 rounded-full bg-white dark:bg-[#2a2a44] flex items-center justify-center shadow-soft"><ArrowLeft size={18} className="text-blueberry dark:text-white" /></button>
             <div className="flex items-center gap-3">
               <EmojiCircle emoji={account.icon} size={40} active activeColor="#0DBACC" />
               <div>
@@ -191,8 +191,8 @@ export function AccountDetail({ account, onBack }) {
           </div>
           <div className="flex items-center gap-2">
             <button onClick={() => setShowAdjust(true)} className="bg-gradient-primary text-white rounded-full px-4 py-2 text-sm font-bold flex items-center gap-1.5 shadow-md shadow-turquoise/30"><Pencil size={14} /> Cập nhật số dư</button>
-            <button onClick={() => setShowEdit(true)} className="w-9 h-9 rounded-full bg-baby-blue-light/60 dark:bg-baby-blue/15 flex items-center justify-center shadow-soft"><Pencil size={15} className="text-baby-blue" /></button>
-            <button onClick={handleDelete} className="w-9 h-9 rounded-full bg-white dark:bg-[#2a2a44] flex items-center justify-center shadow-soft"><Trash2 size={15} className="text-cotton-candy" /></button>
+            <button aria-label="Sửa ví" onClick={() => setShowEdit(true)} className="w-9 h-9 rounded-full bg-baby-blue-light/60 dark:bg-baby-blue/15 flex items-center justify-center shadow-soft"><Pencil size={15} className="text-baby-blue" /></button>
+            <button aria-label="Xóa ví" onClick={handleDelete} className="w-9 h-9 rounded-full bg-white dark:bg-[#2a2a44] flex items-center justify-center shadow-soft"><Trash2 size={15} className="text-cotton-candy" /></button>
           </div>
         </div>
 
@@ -234,7 +234,7 @@ export function AccountDetail({ account, onBack }) {
                           {balanceAfter !== null && <p className="text-steel dark:text-light-grey text-[11px] mt-0.5 whitespace-nowrap">Số dư cuối: {formatMoney(balanceAfter)}</p>}
                         </div>
                         {!isDirectSet && (
-                          <button onClick={() => setEditingTx(tx)} className="w-7 h-7 rounded-full hover:bg-ice-cream dark:hover:bg-night-sky/30 flex items-center justify-center text-steel dark:text-light-grey flex-shrink-0">
+                          <button aria-label="Sửa giao dịch" onClick={() => setEditingTx(tx)} className="w-7 h-7 rounded-full hover:bg-ice-cream dark:hover:bg-night-sky/30 flex items-center justify-center text-steel dark:text-light-grey flex-shrink-0">
                             <Pencil size={14} />
                           </button>
                         )}

@@ -139,7 +139,7 @@ export function HeaderDesktop() {
             className="bg-transparent outline-none text-sm flex-1 min-w-0 text-blueberry dark:text-white placeholder:text-steel dark:placeholder:text-light-grey"
           />
           {search && (
-            <button onClick={() => setSearch('')} className="flex-shrink-0 text-steel dark:text-light-grey hover:text-blueberry dark:hover:text-white transition">
+            <button aria-label="Xóa tìm kiếm" onClick={() => setSearch('')} className="flex-shrink-0 text-steel dark:text-light-grey hover:text-blueberry dark:hover:text-white transition">
               <X size={14} />
             </button>
           )}
@@ -181,7 +181,7 @@ export function HeaderDesktop() {
         <button onClick={onAddClick} className="bg-gradient-primary text-white rounded-full px-4 py-2.5 text-sm font-bold flex items-center gap-2 shadow-md shadow-turquoise/30">
           <Plus size={16} /> Thêm giao dịch
         </button>
-        <button className="w-9 h-9 rounded-full bg-white/50 dark:bg-white/[0.06] backdrop-blur border border-white/60 dark:border-white/10 flex items-center justify-center text-steel dark:text-light-grey">
+        <button aria-label="Thông báo" className="w-9 h-9 rounded-full bg-white/50 dark:bg-white/[0.06] backdrop-blur border border-white/60 dark:border-white/10 flex items-center justify-center text-steel dark:text-light-grey">
           <Bell size={16} />
         </button>
         <AvatarMenu avatarUrl={avatarUrl} displayName={displayName} openSettings={openSettings} variant="desktop" />

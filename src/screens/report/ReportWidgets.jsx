@@ -14,7 +14,7 @@ import { MultiSelectFilter } from '../ReportParts';
 
 // Component filter dùng chung cho cả bản mobile lẫn desktop của "Hoạt động gần đây".
 export function ActivityFilterBar({ v, compact = false }) {
-  const { ACTIVITY_KIND_LABELS, activityCategoryFilter, activityCategoryOptions, activityKindFilters, activityKindsPresent, handleActivityCategoryChange, handleActivityKindChange } = v;
+  const { ACTIVITY_KIND_LABELS, activityCategoryFilter, activityCategoryOptions, activityKindFilters, activityKindsPresent, activitySourceFilter, activitySourceOptions, handleActivityCategoryChange, handleActivityKindChange, handleActivitySourceChange } = v;
   return (
     <div className={`flex items-center gap-2 flex-wrap ${compact ? '' : 'mb-4'}`}>
       <MultiSelectFilter
@@ -33,6 +33,21 @@ export function ActivityFilterBar({ v, compact = false }) {
           <option value="all">Tất cả danh mục</option>
           {activityCategoryOptions.map((c) => (
             <option key={c.id} value={c.id}>{c.icon ? `${c.icon} ${c.name}` : c.name}</option>
+          ))}
+        </CustomSelect>
+      )}
+      {/* Bộ lọc Nguồn: Thu nhập được chi / từng Quỹ / từng Ví — giá trị lấy từ chính các
+          giao dịch đang hiện (đã áp Loại + Danh mục), không hiện nguồn nào không có giao
+          dịch thật trong tập đang xem. */}
+      {activitySourceOptions.length > 1 && (
+        <CustomSelect
+          value={activitySourceFilter}
+          onChange={(e) => handleActivitySourceChange(e.target.value)}
+          triggerClassName={`frost-inset rounded-full font-bold outline-none text-blueberry dark:text-white ${compact ? 'text-xs px-3 py-1.5' : 'text-sm px-4 py-2'}`}
+        >
+          <option value="all">Tất cả nguồn</option>
+          {activitySourceOptions.map((s) => (
+            <option key={s.key} value={s.key}>{s.label}</option>
           ))}
         </CustomSelect>
       )}

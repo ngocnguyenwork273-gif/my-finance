@@ -2,13 +2,10 @@
    Toàn bộ state, dữ liệu dẫn xuất và hành động của màn Tổng quan. Component trình bày (DashboardMobile/DashboardDesktop/DashboardModals) chỉ việc đọc kết quả.
    ============================================================================== */
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { EmojiCircle } from '../../components/ui';
 import { useAppData, useShell } from '../../context';
 import { confirmDialog, toast, useEscapeKey } from '../../feedback';
-import { Wifi } from '../../icons';
-import { ACCOUNT_TYPES, accountCardGradient } from '../../lib/accountStyles';
 import { accountBalance, bucketTotalsFor, buildCategorySeriesFor, compareTxTime, computePeriodBuckets, currentPeriodKey, filteredTxsForCard, fundBalanceAsOf, fundBalanceWithProfit, inclusiveDays, isInitialAllocationTx, isRangeInFuture, localDateStr, periodKeyToRange, todayDateStr, transactionPeriodKey, walletBalanceAsOf } from '../../lib/finance';
-import { formatMoney, txDeleteDescription } from '../../lib/format';
+import { txDeleteDescription } from '../../lib/format';
 import { circumference } from '../DashboardParts';
 
 // Cắt bỏ các cột (bucket) nằm HOÀN TOÀN trong tương lai ở CUỐI dãy — các cột này chưa có dữ
@@ -365,63 +362,7 @@ export function useDashboardView() {
   const groupedRecentTx = groupTransactionsByDate(recentTxList);
   const sortedGroupKeys = Object.keys(groupedRecentTx).sort((a, b) => new Date(b) - new Date(a));
 
-  // Trong dashboard mobile, thêm carousel ví
-  const mobileWalletCarousel = (
-    <div className="mt-4 px-5">
-      <div className="flex items-center justify-between mb-2">
-        <p className="text-steel dark:text-light-grey text-xs font-semibold">Ví của bạn</p>
-        <button onClick={() => setScreen('accounts')} className="text-steel dark:text-light-grey text-xs font-bold">Xem tất cả</button>
-      </div>
-      <div className="overflow-x-auto snap-x snap-mandatory scrollbar-hide -mx-1 px-1">
-        <div className="flex gap-3 py-1">
-          {accounts.length === 0 ? (
-            <div className="snap-start shrink-0 w-full frost-inset rounded-2xl p-4 text-center text-steel dark:text-light-grey text-sm">
-              Chưa có ví nào. Bấm + để thêm.
-            </div>
-          ) : (
-            accounts.map((acc) => {
-              // Dãy số trang trí kiểu thẻ ngân hàng, lấy từ id ví — chỉ để hiển thị,
-              // không phải số tài khoản/thẻ thật.
-              const maskedDigits = String(acc.id || '').replace(/[^0-9a-zA-Z]/g, '').slice(-4).toUpperCase().padStart(4, '0');
-              return (
-                <div key={acc.id} className="snap-start shrink-0 w-full max-w-[420px]">
-                  <button
-                    onClick={() => onOpenAccount(acc.id, 'dashboard')}
-                    style={{ background: accountCardGradient(acc.type) }}
-                    className="w-full text-left rounded-[1.75rem] p-5 relative overflow-hidden shadow-lg shadow-black/10"
-                  >
-                    <div className="pointer-events-none absolute -top-10 -right-10 w-32 h-32 rounded-full bg-white/15" />
-                    <div className="pointer-events-none absolute -bottom-14 -left-8 w-32 h-32 rounded-full bg-black/10" />
-
-                    <div className="relative flex items-start justify-between">
-                      <div className="flex items-center gap-2">
-                        <div className="w-9 h-6 rounded-md bg-white/35 border border-white/40" />
-                        <EmojiCircle emoji={acc.icon} size={30} bg="rgba(255,255,255,0.16)" />
-                      </div>
-                      <Wifi size={20} className="text-white/85 rotate-90" />
-                    </div>
-
-                    <p className="relative text-white/90 font-bold text-base sm:text-lg tracking-[0.2em] mt-5">•••• •••• •••• {maskedDigits}</p>
-
-                    <div className="relative flex items-end justify-between mt-4 gap-2">
-                      <div className="min-w-0">
-                        <p className="text-white/70 text-[10px] font-semibold uppercase truncate">{acc.name}</p>
-                        <p className="text-white font-extrabold text-xl mt-0.5 truncate">{formatMoney(accountBalance(acc, transactions))}</p>
-                      </div>
-                      <div className="text-right flex-shrink-0">
-                        <p className="text-white/60 text-[9px] font-semibold uppercase">Loại ví</p>
-                        <p className="text-white/90 text-xs font-bold whitespace-nowrap">{ACCOUNT_TYPES.find((t) => t.value === acc.type)?.label || acc.type}</p>
-                      </div>
-                    </div>
-                  </button>
-                </div>
-              );
-            })
-          )}
-        </div>
-      </div>
-    </div>
-  );
+  
 
   // Mọi thứ các component trình bày bên dưới cần dùng
   return {
@@ -432,7 +373,7 @@ export function useDashboardView() {
     goToWalletIndex, groupedRecentTx, handleDeleteTx, handleWalletTouchEnd, handleWalletTouchStart, incomeCardBuckets,
     incomeCardMax, incomeCardSeries, incomeYearSegments, initialLoadDone, ledgerModal, loading,
     maxTrend, mobileIncomeByCat, mobileIncomeTotal, mobileMaxTrend, mobileSpendingByCat, mobileSpendingTotal,
-    mobileTrendBuckets, mobileWalletCarousel, onOpenAccount, onOpenFund, openSettings, overviewFundItems,
+    mobileTrendBuckets, onOpenAccount, onOpenFund, openSettings, overviewFundItems,
     overviewGoldItems, overviewWalletItems, recentTxList, reload, setAssetOverviewHovered, setEditingTx,
     setGlobalPeriodKey, setGlobalWeekEnd, setGlobalWeekStart, setGlobalYear, setLedgerModal, setScreen,
     setShowAddWallet, setShowAddWidget, setShowAllExpenseYearLegend, setShowAllIncomeYearLegend, setShowWalletPopover, showAddWallet,

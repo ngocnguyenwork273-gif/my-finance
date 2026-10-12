@@ -91,7 +91,7 @@ export function Settings({ user, onProfileUpdated, initialSection, onResetData, 
                 autoFocus
                 className="w-full bg-ice-cream dark:bg-[#2a2a44] border border-[rgba(189,189,203,0.3)] dark:border-[rgba(189,189,203,0.1)] rounded-full pl-11 pr-11 py-3 text-sm text-blueberry dark:text-white placeholder:text-steel dark:placeholder:text-light-grey outline-none focus:border-[rgba(241,138,181,0.5)] transition font-semibold"
               />
-              <button type="button" onClick={() => setShowResetPwd((v) => !v)} className="absolute right-4 top-1/2 -translate-y-1/2 text-steel dark:text-light-grey">
+              <button aria-label={showResetPwd ? 'Ẩn mật khẩu' : 'Hiện mật khẩu'} type="button" onClick={() => setShowResetPwd((v) => !v)} className="absolute right-4 top-1/2 -translate-y-1/2 text-steel dark:text-light-grey">
                 {showResetPwd ? <EyeOff size={16} /> : <Eye size={16} />}
               </button>
             </div>
@@ -207,7 +207,7 @@ export function Settings({ user, onProfileUpdated, initialSection, onResetData, 
         <div className={`absolute inset-0 ${theme === 'dark' ? 'bg-[#1a1a2e]' : 'bg-page'}`} />
         <div className="w-full min-h-[100dvh] pb-28 relative">
           <div className="px-5 pt-8 flex items-center gap-3">
-            <button onClick={() => setScreen('dashboard')} className="w-9 h-9 rounded-full frost-inset flex items-center justify-center"><ArrowLeft size={18} className="text-blueberry dark:text-white" /></button>
+            <button aria-label="Quay lại" onClick={() => setScreen('dashboard')} className="w-9 h-9 rounded-full frost-inset flex items-center justify-center"><ArrowLeft size={18} className="text-blueberry dark:text-white" /></button>
             {/* Vào từ avatar (mục "Hồ sơ") -> tiêu đề "Hồ sơ tài khoản", KHÔNG hiện thanh tab
                 Danh mục/Hệ thống/Lịch sử/Giao diện. Vào từ icon Cài đặt ở nav bar -> tiêu đề
                 "Cài đặt", hiện đủ thanh tab như bình thường. */}

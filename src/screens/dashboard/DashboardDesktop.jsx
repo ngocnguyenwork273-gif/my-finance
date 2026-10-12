@@ -11,6 +11,7 @@ import { formatMoney } from '../../lib/format';
 import { txBalanceAfter, txIconEmoji } from '../../lib/ledger';
 import { CategoryBarChart, palette, SegmentDonut, TrendBarChart } from '../DashboardParts';
 import { GlobalPeriodWidget, IncomeExpenseComboChart } from './DashboardWidgets';
+import { clickable } from '../../a11y';
 
 export function DashboardDesktop({ v }) {
   const { accounts, assetOverviewHovered, categories, costBuckets, costExpenseSeries, costIncomeTotals, costMaxVal, expenseCardBuckets, expenseCardMax, expenseCardSeries, expenseYearSegments, formatDateLabel, globalFilter, goals, goToWalletIndex, groupedRecentTx, handleWalletTouchEnd, handleWalletTouchStart, incomeCardBuckets, incomeCardMax, incomeCardSeries, incomeYearSegments, loading, maxTrend, onOpenAccount, overviewFundItems, overviewGoldItems, overviewWalletItems, recentTxList, reload, setAssetOverviewHovered, setEditingTx, setLedgerModal, setScreen, setShowAddWallet, setShowAddWidget, setShowAllExpenseYearLegend, setShowAllIncomeYearLegend, setShowWalletPopover, showAddWallet, showAllExpenseYearLegend, showAllIncomeYearLegend, showWalletPopover, sortedGroupKeys, spendingPoolByPeriod, totalAccounts, totalAssets, totalExpenseYear, totalFunds, totalIncomeYear, transactions, trendBucketsTrimmed, trendTitle, walletActiveIndex, walletStackRef, walletStackStyle } = v;
@@ -79,7 +80,7 @@ export function DashboardDesktop({ v }) {
                     <Plus size={13} /> Thêm ví
                   </button>
                   <div className="relative">
-                    <button onClick={() => setShowWalletPopover((v) => !v)} className="frost-inset w-7 h-7 rounded-full flex items-center justify-center text-steel dark:text-light-grey">
+                    <button aria-label="Chọn ví" onClick={() => setShowWalletPopover((v) => !v)} className="frost-inset w-7 h-7 rounded-full flex items-center justify-center text-steel dark:text-light-grey">
                       <ChevronDown size={14} className={`transition-transform ${showWalletPopover ? 'rotate-180' : ''}`} />
                     </button>
                     {showWalletPopover && (
@@ -214,7 +215,7 @@ export function DashboardDesktop({ v }) {
                             const balanceAfter = txBalanceAfter(tx, categories, accounts, transactions, spendingPoolByPeriod);
                             const timeOrNote = isDirectSet && balanceAfter !== null ? `Số dư mới: ${formatMoney(balanceAfter)}` : new Date(tx.created_at || tx.date).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
                             return (
-                              <div key={tx.id} onClick={() => setEditingTx(tx)} className="flex items-center gap-3 py-2.5 first:pt-0 last:pb-0 cursor-pointer hover:bg-ice-cream dark:hover:bg-night-sky/30 rounded-xl -mx-2 px-2 transition">
+                              <div key={tx.id} {...clickable(() => setEditingTx(tx))} className="flex items-center gap-3 py-2.5 first:pt-0 last:pb-0 cursor-pointer hover:bg-ice-cream dark:hover:bg-night-sky/30 rounded-xl -mx-2 px-2 transition">
                                 <EmojiCircle emoji={txIconEmoji(tx, categories, accounts)} size={36} bg={tx.type === 'income' ? '#B4F1F1' : '#E3D6FF'} />
                                 <div className="flex-1 min-w-0">
                                   <div className="flex items-center gap-1.5">

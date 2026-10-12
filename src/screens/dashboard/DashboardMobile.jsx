@@ -3,15 +3,76 @@
    ============================================================================== */
 import { AssetBreakdownDetail } from '../../components/ledger';
 import { AvatarMenu, EmojiCircle, HoverDetailCard, ProgressBar } from '../../components/ui';
-import { Loader2 } from '../../icons';
-import { displayTxNote, fundBalanceWithProfit } from '../../lib/finance';
+import { Loader2, Wifi } from '../../icons';
+import { ACCOUNT_TYPES, accountCardGradient } from '../../lib/accountStyles';
+import { accountBalance, displayTxNote, fundBalanceWithProfit } from '../../lib/finance';
 import { formatMoney } from '../../lib/format';
 import { txBalanceAfter, txIconEmoji } from '../../lib/ledger';
 import { SpendingDonut, TrendBarChart } from '../DashboardParts';
 import { GlobalPeriodWidget } from './DashboardWidgets';
+import { clickable } from '../../a11y';
 
 export function DashboardMobile({ v }) {
-  const { accounts, avatarUrl, categories, displayName, formatDateLabel, fundCategories, goals, groupedRecentTx, loading, mobileIncomeByCat, mobileIncomeTotal, mobileMaxTrend, mobileSpendingByCat, mobileSpendingTotal, mobileTrendBuckets, mobileWalletCarousel, onOpenFund, openSettings, overviewFundItems, overviewGoldItems, overviewWalletItems, recentTxList, setEditingTx, setScreen, sortedGroupKeys, spendingPoolByPeriod, theme, totalAssets, transactions } = v;
+  const { accounts, avatarUrl, categories, displayName, formatDateLabel, fundCategories, goals, groupedRecentTx, loading, mobileIncomeByCat, mobileIncomeTotal, mobileMaxTrend, mobileSpendingByCat, mobileSpendingTotal, mobileTrendBuckets, onOpenAccount, onOpenFund, openSettings, overviewFundItems, overviewGoldItems, overviewWalletItems, recentTxList, setEditingTx, setScreen, sortedGroupKeys, spendingPoolByPeriod, theme, totalAssets, transactions } = v;
+
+  // Trong dashboard mobile, thêm carousel ví
+  const mobileWalletCarousel = (
+    <div className="mt-4 px-5">
+      <div className="flex items-center justify-between mb-2">
+        <p className="text-steel dark:text-light-grey text-xs font-semibold">Ví của bạn</p>
+        <button onClick={() => setScreen('accounts')} className="text-steel dark:text-light-grey text-xs font-bold">Xem tất cả</button>
+      </div>
+      <div className="overflow-x-auto snap-x snap-mandatory scrollbar-hide -mx-1 px-1">
+        <div className="flex gap-3 py-1">
+          {accounts.length === 0 ? (
+            <div className="snap-start shrink-0 w-full frost-inset rounded-2xl p-4 text-center text-steel dark:text-light-grey text-sm">
+              Chưa có ví nào. Bấm + để thêm.
+            </div>
+          ) : (
+            accounts.map((acc) => {
+              // Dãy số trang trí kiểu thẻ ngân hàng, lấy từ id ví — chỉ để hiển thị,
+              // không phải số tài khoản/thẻ thật.
+              const maskedDigits = String(acc.id || '').replace(/[^0-9a-zA-Z]/g, '').slice(-4).toUpperCase().padStart(4, '0');
+              return (
+                <div key={acc.id} className="snap-start shrink-0 w-full max-w-[420px]">
+                  <button
+                    onClick={() => onOpenAccount(acc.id, 'dashboard')}
+                    style={{ background: accountCardGradient(acc.type) }}
+                    className="w-full text-left rounded-[1.75rem] p-5 relative overflow-hidden shadow-lg shadow-black/10"
+                  >
+                    <div className="pointer-events-none absolute -top-10 -right-10 w-32 h-32 rounded-full bg-white/15" />
+                    <div className="pointer-events-none absolute -bottom-14 -left-8 w-32 h-32 rounded-full bg-black/10" />
+
+                    <div className="relative flex items-start justify-between">
+                      <div className="flex items-center gap-2">
+                        <div className="w-9 h-6 rounded-md bg-white/35 border border-white/40" />
+                        <EmojiCircle emoji={acc.icon} size={30} bg="rgba(255,255,255,0.16)" />
+                      </div>
+                      <Wifi size={20} className="text-white/85 rotate-90" />
+                    </div>
+
+                    <p className="relative text-white/90 font-bold text-base sm:text-lg tracking-[0.2em] mt-5">•••• •••• •••• {maskedDigits}</p>
+
+                    <div className="relative flex items-end justify-between mt-4 gap-2">
+                      <div className="min-w-0">
+                        <p className="text-white/70 text-[10px] font-semibold uppercase truncate">{acc.name}</p>
+                        <p className="text-white font-extrabold text-xl mt-0.5 truncate">{formatMoney(accountBalance(acc, transactions))}</p>
+                      </div>
+                      <div className="text-right flex-shrink-0">
+                        <p className="text-white/60 text-[9px] font-semibold uppercase">Loại ví</p>
+                        <p className="text-white/90 text-xs font-bold whitespace-nowrap">{ACCOUNT_TYPES.find((t) => t.value === acc.type)?.label || acc.type}</p>
+                      </div>
+                    </div>
+                  </button>
+                </div>
+              );
+            })
+          )}
+        </div>
+      </div>
+    </div>
+  );
+
   return (
     <div className="md:hidden relative">
         <div className={`absolute inset-0 ${theme === 'dark' ? 'bg-[#1a1a2e]' : 'bg-page'}`} />
@@ -179,7 +240,7 @@ export function DashboardMobile({ v }) {
                           const balanceAfter = txBalanceAfter(tx, categories, accounts, transactions, spendingPoolByPeriod);
                           const noteText = isDirectSet && balanceAfter !== null ? `Số dư mới: ${formatMoney(balanceAfter)}` : (displayTxNote(tx.note) || new Date(tx.created_at || tx.date).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }));
                           return (
-                            <div key={tx.id} onClick={() => setEditingTx(tx)} className="flex items-center gap-3 py-3 first:pt-0 last:pb-0 cursor-pointer hover:bg-ice-cream dark:hover:bg-night-sky/30 rounded-xl -mx-2 px-2 transition">
+                            <div key={tx.id} {...clickable(() => setEditingTx(tx))} className="flex items-center gap-3 py-3 first:pt-0 last:pb-0 cursor-pointer hover:bg-ice-cream dark:hover:bg-night-sky/30 rounded-xl -mx-2 px-2 transition">
                               <EmojiCircle emoji={txIconEmoji(tx, categories, accounts)} size={40} bg={tx.type === 'income' ? '#B4F1F1' : '#E3D6FF'} />
                               <div className="flex-1 min-w-0">
                                 <div className="flex items-center gap-1.5">

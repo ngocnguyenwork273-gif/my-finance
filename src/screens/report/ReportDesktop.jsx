@@ -13,7 +13,7 @@ import { MonthlyTrendChart, RemainingBreakdownDetail } from '../ReportParts';
 import { ActivityFilterBar, DonutChart, TxDetailRow } from './ReportWidgets';
 
 export function ReportDesktop({ v }) {
-  const { accumulationBeforeSpend, activityAnchorDesktopRef, agg, allocation, allPeriodTxsSorted, assetChange, assetFundItems, assetGoldItems, assetWalletItems, captureIncomeCardScrollAnchor, customEnd, customStart, drilldownCategory, drilldownTransactions, expenseBreakdown, expenseDetailItems, expenseFromFund, expenseFromIncome, expenseLedgerTxs, filteredActivityTxs, formatTxDateLabel, formatTxMonthLabel, fundData, goals, groupedFilteredTxs, income, incomeBreakdown, incomeCardDesktopRef, incomeDetailItems, incomeForSpendingPool, incomeLedgerTxs, insights, isOverSpendingPool, isPeriodOngoing, isSameTxMonth, openDrilldown, openFund, periodLabel, poolIncomeDetailItems, poolIncomeLedgerTxs, prevAgg, remaining, selectedDay, selectedHalf, selectedMonth, selectedQuarter, selectedWeek, selectedYear, setCustomEnd, setCustomStart, setLedgerModal, setScreen, setSelectedDay, setSelectedHalf, setSelectedMonth, setSelectedQuarter, setSelectedWeek, setSelectedYear, setShowDrilldown, setShowExportModal, setTimeType, showDrilldown, sortedFilteredTxKeys, specialIncome, spendingPool, timeType, totalActualExpense, totalAssetsEnd, totalAssetsStart, totalContributedAllFunds, totalRemainingAll, trendData, yearSummary } = v;
+  const { accumulationBeforeSpend, activityAnchorDesktopRef, agg, allocation, allPeriodTxsSorted, assetChange, assetFundItems, assetGoldItems, assetWalletItems, captureIncomeCardScrollAnchor, customEnd, customStart, drilldownCategory, drilldownTransactions, expenseBreakdown, expenseDetailItems, expenseFromFund, expenseFromIncome, expenseLedgerTxs, filteredActivityTxs, formatTxDateLabel, formatTxMonthLabel, fundData, goals, groupedFilteredTxs, income, incomeBreakdown, incomeCardDesktopRef, incomeDetailItems, incomeForSpendingPool, incomeLedgerTxs, insights, isOverSpendingPool, isPeriodOngoing, isSameTxMonth, openDrilldown, openFund, periodLabel, poolIncomeDetailItems, poolIncomeLedgerTxs, prevAgg, remaining, selectedDay, selectedHalf, selectedMonth, selectedQuarter, selectedWeek, selectedYear, setCustomEnd, setCustomStart, setLedgerModal, setScreen, setSelectedDay, setSelectedHalf, setSelectedMonth, setSelectedQuarter, setSelectedWeek, setSelectedYear, setShowDrilldown, setShowExportModal, setTimeType, showDrilldown, sortedFilteredTxKeys, specialIncome, spendingPool, spendingPoolTotalSpent, timeType, totalActualExpense, totalAssetsEnd, totalAssetsStart, totalContributedAllFunds, totalRemainingAll, trendData, yearSummary } = v;
   return (
     <div className="hidden md:block relative">
         <div className="frost-blob z-0 w-96 h-96 bg-baby-blue-light/70 dark:bg-baby-blue/22 -top-10 right-10" />
@@ -168,7 +168,12 @@ export function ReportDesktop({ v }) {
                   <span className="text-steel dark:text-light-grey">Chi tiêu</span>
                   <span className="font-bold text-cotton-candy">{formatMoney(expenseFromIncome)} {spendingPool > 0 && <span className="text-xs font-semibold">({Math.round((expenseFromIncome/spendingPool)*100)}%)</span>}</span>
                 </div>
+                {/* Tổng chi = Nạp quỹ + Chi tiêu cộng gộp sẵn — trước đây phải tự cộng 2 dòng trên mới ra. */}
                 <div className="flex justify-between border-t pt-2">
+                  <span className="font-bold text-blueberry dark:text-white">Tổng chi</span>
+                  <span className="font-bold text-blueberry dark:text-white">{formatMoney(spendingPoolTotalSpent)} {spendingPool > 0 && <span className="text-xs font-semibold">({Math.round((spendingPoolTotalSpent/spendingPool)*100)}%)</span>}</span>
+                </div>
+                <div className="flex justify-between">
                   <span className="font-bold">Dư sau chi</span>
                   <span className={`font-bold ${remaining >= 0 ? 'text-turquoise' : 'text-cotton-candy'}`}>{formatMoneySigned(remaining)} {spendingPool > 0 && <span className="text-xs font-semibold">({Math.round((remaining/spendingPool)*100)}%)</span>}</span>
                 </div>
